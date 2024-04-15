@@ -1,0 +1,6 @@
+name: coffea_torch
+channels:
+  - conda-forge
+dependencies:
+  - coffea==0.7.21
+prefix: /home/soheuny/miniconda3/envs/coffea_torch

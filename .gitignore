@@ -1,0 +1,5 @@
+__pycache__
+figures
+*.pdf
+*.h5
+*.npy

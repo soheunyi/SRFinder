@@ -1,0 +1,83 @@
+>> Epoch <<   Data Set |  Loss  | Norm | % AUC | AUC Bar Graph ^ Overtraining Metric * Output Model
+              Training | 19.2097 | 0.00 | 50.00 ||
+>>  0/10 << Validation | 19.2530 | 0.00 | 50.00 || NaN 
+              Training | 0.6731 | 0.89 | 58.22 |------------|
+>>  1/10 << Validation | 0.6737 | 0.88 | 57.85 |########| ^ 4.2% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs10_stdscale_epoch1_loss0.6737.pkl
+Increase training batch size: 512 -> 2048 (107 batches)
+              Training | 0.6707 | 1.06 | 58.33 |-------------|
+>>  2/10 << Validation | 0.6717 | 1.05 | 57.92 |#########| ^ 4.7% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs10_stdscale_epoch2_loss0.6717.pkl
+              Training | 0.6698 | 1.01 | 58.44 |--------------|
+>>  3/10 << Validation | 0.6709 | 1.00 | 57.99 |#########| ^ 5.1% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs10_stdscale_epoch3_loss0.6709.pkl
+Increase training batch size: 2048 -> 4096 (53 batches)
+              Training | 0.6695 | 1.01 | 58.47 |--------------|
+>>  4/10 << Validation | 0.6707 | 1.01 | 57.98 |#########| ^ 5.5% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs10_stdscale_epoch4_loss0.6707.pkl
+              Training | 0.6696 | 0.97 | 58.50 |--------------|
+>>  5/10 << Validation | 0.6707 | 0.97 | 58.00 |##########| ^ 5.5% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs10_stdscale_epoch5_loss0.6707.pkl
+>> Epoch <<   Data Set |  Loss  | Norm | % AUC | AUC Bar Graph ^ Overtraining Metric * Output Model
+              Training | 19.2097 | 0.00 | 50.00 ||
+>>  0/30 << Validation | 19.2530 | 0.00 | 50.00 || NaN 
+              Training | 0.6728 | 0.89 | 58.18 |-----------|
+>>  1/30 << Validation | 0.6734 | 0.89 | 57.83 |########| ^ 4.1% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch1_loss0.6734.pkl
+Increase training batch size: 512 -> 2048 (107 batches)
+              Training | 0.6709 | 1.07 | 58.29 |------------|
+>>  2/30 << Validation | 0.6719 | 1.07 | 57.88 |########| ^ 4.6% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch2_loss0.6719.pkl
+              Training | 0.6698 | 1.00 | 58.40 |-------------|
+>>  3/30 << Validation | 0.6709 | 1.00 | 57.96 |#########| ^ 5.0% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch3_loss0.6709.pkl
+Increase training batch size: 2048 -> 4096 (53 batches)
+              Training | 0.6696 | 1.01 | 58.46 |--------------|
+>>  4/30 << Validation | 0.6707 | 1.01 | 57.97 |#########| ^ 5.5% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch4_loss0.6707.pkl
+              Training | 0.6698 | 0.96 | 58.48 |--------------|
+>>  5/30 << Validation | 0.6709 | 0.96 | 57.98 |#########| ^ 5.6% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch5_loss0.6709.pkl
+              Training | 0.6696 | 1.02 | 58.49 |--------------|
+>>  6/30 << Validation | 0.6708 | 1.01 | 57.99 |#########| ^ 5.6% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch6_loss0.6708.pkl
+Increase training batch size: 4096 -> 8192 (26 batches)
+              Training | 0.6694 | 0.99 | 58.50 |---------------|
+>>  7/30 << Validation | 0.6707 | 0.99 | 57.97 |#########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch7_loss0.6707.pkl
+              Training | 0.6694 | 0.99 | 58.53 |---------------|
+>>  8/30 << Validation | 0.6706 | 0.98 | 58.00 |#########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch8_loss0.6706.pkl
+Decay learning rate
+              Training | 0.6693 | 0.99 | 58.53 |---------------|
+>>  9/30 << Validation | 0.6706 | 0.99 | 58.00 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch9_loss0.6706.pkl
+Decay learning rate
+              Training | 0.6693 | 0.99 | 58.53 |---------------|
+>> 10/30 << Validation | 0.6706 | 0.99 | 58.00 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch10_loss0.6706.pkl
+              Training | 0.6693 | 0.99 | 58.54 |---------------|
+>> 11/30 << Validation | 0.6706 | 0.99 | 58.00 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch11_loss0.6706.pkl
+              Training | 0.6693 | 0.99 | 58.54 |---------------|
+>> 12/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch12_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 13/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch13_loss0.6706.pkl
+              Training | 0.6693 | 0.99 | 58.54 |---------------|
+>> 14/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch14_loss0.6706.pkl
+              Training | 0.6693 | 0.99 | 58.54 |---------------|
+>> 15/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch15_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 16/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.8% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch16_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 17/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch17_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 18/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch18_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 19/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch19_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 20/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch20_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 21/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch21_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 22/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch22_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 23/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch23_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 24/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch24_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 25/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch25_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 26/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch26_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 27/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch27_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 28/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch28_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.55 |---------------|
+>> 29/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch29_loss0.6706.pkl
+              Training | 0.6693 | 1.00 | 58.54 |---------------|
+>> 30/30 << Validation | 0.6706 | 0.99 | 58.01 |##########| ^ 5.9% * fvt_fit/FvT_ResNet_6_6_6_np799_lr0.01_epochs30_stdscale_epoch30_loss0.6706.pkl

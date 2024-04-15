@@ -1,0 +1,11 @@
+activation: SiLU
+hidden_dims:
+- 256
+- 256
+- 256
+- 256
+input_dim: 16
+latent_dim: 2
+loss_weights: null
+lr: 0.001
+run_name_base: naive_mlp_ae
