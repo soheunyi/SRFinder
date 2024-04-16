@@ -7,27 +7,8 @@ import torch.nn.functional as F
 from pytorch_lightning.callbacks import ModelCheckpoint
 from typing import Literal
 
-
-class Activation(nn.Module):
-    def __init__(
-        self, activation: Literal["ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"]
-    ):
-        super().__init__()
-        self.activation = activation
-
-    def forward(self, x):
-        if self.activation == "ReLU":
-            return F.relu(x)
-        elif self.activation == "RReLU":
-            return F.rrelu(x)
-        elif self.activation == "LeakyReLU":
-            return F.leaky_relu(x)
-        elif self.activation == "SiLU":
-            return F.silu(x)
-        elif self.activation == "ELU":
-            return F.elu(x)
-        else:
-            raise NotImplementedError
+from black_box_network import BlackBoxNetwork
+from network_blocks import Activation
 
 
 class ResNetBlock(nn.Module):
@@ -51,7 +32,7 @@ class ResNetBlock(nn.Module):
         return x + self.mlp(x)
 
 
-class Encoder(nn.Module):
+class MLPEncoder(nn.Module, BlackBoxNetwork):
     def __init__(
         self,
         input_dim: int,
@@ -61,7 +42,10 @@ class Encoder(nn.Module):
         last_bias: bool = False,
     ):
         super().__init__()
+        # For BlackBoxNetwork initialization
         self.input_dim = input_dim
+        self.output_dim = latent_dim
+
         self.latent_dim = latent_dim
         self.hidden_dims = hidden_dims
 
@@ -86,7 +70,7 @@ class Encoder(nn.Module):
         return self.encoder(x)
 
 
-class Decoder(nn.Module):
+class MLPDecoder(nn.Module, BlackBoxNetwork):
     def __init__(
         self,
         latent_dim: int,
@@ -96,8 +80,11 @@ class Decoder(nn.Module):
         last_bias: bool = False,
     ):
         super().__init__()
-        self.latent_dim = latent_dim
+        # For BlackBoxNetwork initialization
+        self.input_dim = latent_dim
         self.output_dim = output_dim
+
+        self.latent_dim = latent_dim
         self.hidden_dims = hidden_dims
 
         layer_dims = [latent_dim] + hidden_dims + [output_dim]
@@ -137,8 +124,8 @@ class Autoencoder(pl.LightningModule):
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.hidden_dims = hidden_dims
-        self.encoder = Encoder(input_dim, latent_dim, hidden_dims, activation)
-        self.decoder = Decoder(latent_dim, input_dim, hidden_dims[::-1], activation)
+        self.encoder = MLPEncoder(input_dim, latent_dim, hidden_dims, activation)
+        self.decoder = MLPDecoder(latent_dim, input_dim, hidden_dims[::-1], activation)
 
         self.__loss_weights = None
 

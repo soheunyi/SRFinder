@@ -7,10 +7,12 @@ import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
-from autoencoder import Encoder, Decoder, Activation
+from autoencoder import Activation
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from matplotlib import pyplot as plt
+
+from parse_networks import parse_decoder, parse_encoder
 
 
 class VariationalAutoencoder(pl.LightningModule):
@@ -18,31 +20,34 @@ class VariationalAutoencoder(pl.LightningModule):
         self,
         input_dim: int,
         latent_dim: int,
-        hidden_dims: list[int],
+        encoder_config: dict,
+        decoder_config: dict,
         run_name: str,
-        activation: Literal["ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"] = "SiLU",
+        encoder_activation: Literal[
+            "ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"
+        ] = "SiLU",
         lr: float = 1e-3,
-        loss_weights: torch.Tensor | None = None,
         beta: float = 1.0,
     ):
         super().__init__()
         assert 0 <= beta <= 1
         self.save_hyperparameters()
 
+        self.encoder = parse_encoder(encoder_config)
+        self.decoder = parse_decoder(decoder_config)
+
+        assert self.encoder.input_dim == input_dim, "Encoder input dim does not match"
+        assert (
+            self.decoder.input_dim == latent_dim
+        ), "Decoder input dim does not match latent dim"
+        assert self.decoder.output_dim == input_dim, "Decoder output dim does not match"
+
         self.input_dim = input_dim
         self.latent_dim = latent_dim
-        self.hidden_dims = hidden_dims
         self.run_name = run_name
-        self.activation = activation
+        self.encoder_activation = encoder_activation
         self.lr = lr
-        self.__loss_weights = loss_weights
         self.beta = beta
-
-        if loss_weights is not None:
-            assert loss_weights.shape[0] == input_dim
-            self.__loss_weights = loss_weights
-        else:
-            self.__loss_weights = torch.ones(input_dim)
 
         self.lr = lr
         self.train_losses = torch.tensor([])
@@ -61,19 +66,10 @@ class VariationalAutoencoder(pl.LightningModule):
             mode="min",
         )
 
-        self.encoder = Encoder(
-            input_dim,
-            hidden_dims[-1],
-            hidden_dims[:-1],
-            activation=activation,
-            last_bias=True,
-        )
-        self.encoder_activation = Activation(activation)
-        self.mu_encoder = nn.Linear(hidden_dims[-1], latent_dim, bias=False)
-        self.logvar_encoder = nn.Linear(hidden_dims[-1], latent_dim, bias=False)
-        self.decoder = Decoder(
-            latent_dim, input_dim, hidden_dims[::-1], last_bias=False
-        )
+        self.encoder_activation = Activation(encoder_activation)
+        self.mu_encoder = nn.Linear(self.encoder.output_dim, latent_dim, bias=False)
+        self.logvar_encoder = nn.Linear(self.encoder.output_dim, latent_dim, bias=False)
+
         # define scale parameter
         self.log_input_var = nn.Parameter(torch.zeros(input_dim))
         self.latent_mu = nn.Parameter(torch.zeros(latent_dim))
@@ -228,11 +224,14 @@ class VariationalAutoencoder(pl.LightningModule):
             logger=logger,
         )
 
-        self.__loss_weights = self.__loss_weights.to(self.device)
         trainer.fit(
             self,
-            DataLoader(train_dataset, batch_size=batch_size, shuffle=True),
-            DataLoader(val_dataset, batch_size=batch_size, shuffle=False),
+            DataLoader(
+                train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+            ),
+            DataLoader(
+                val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
+            ),
         )
 
         # collect first tensor iterating over val_dataset
@@ -251,6 +250,8 @@ class VariationalAutoencoder(pl.LightningModule):
         self.load_state_dict(torch.load(path))
 
     def plot_result(self, val_x: torch.Tensor):
+        self.training = False
+
         features = [
             "sym_canJet0_pt",
             "sym_canJet1_pt",
