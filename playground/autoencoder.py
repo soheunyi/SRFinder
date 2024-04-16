@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.callbacks import ModelCheckpoint
 from typing import Literal
-import torchmetrics
 
 
 class Activation(nn.Module):
@@ -59,6 +58,7 @@ class Encoder(nn.Module):
         latent_dim: int,
         hidden_dims: list[int],
         activation: Literal["ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"] = "SiLU",
+        last_bias: bool = False,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -77,7 +77,7 @@ class Encoder(nn.Module):
                     for i in range(len(layer_dims) - 2)
                 ]
                 + [
-                    nn.Linear(layer_dims[-2], layer_dims[-1], bias=False),
+                    nn.Linear(layer_dims[-2], layer_dims[-1], bias=last_bias),
                 ]
             )
         )
@@ -93,6 +93,7 @@ class Decoder(nn.Module):
         output_dim: int,
         hidden_dims: list[int],
         activation: Literal["ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"] = "SiLU",
+        last_bias: bool = False,
     ):
         super().__init__()
         self.latent_dim = latent_dim
@@ -111,7 +112,7 @@ class Decoder(nn.Module):
                     for i in range(len(layer_dims) - 2)
                 ]
                 + [
-                    nn.Linear(layer_dims[-2], layer_dims[-1], bias=False),
+                    nn.Linear(layer_dims[-2], layer_dims[-1], bias=last_bias),
                 ]
             )
         )
