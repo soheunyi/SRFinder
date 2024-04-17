@@ -1,6 +1,42 @@
+import torch
 from autoencoder import MLPEncoder, MLPDecoder
 from fvt_encoder import FvTEncoder
 from black_box_network import BlackBoxNetwork
+from likelihoods import TruncatedGaussianLikelihood, Likelihood
+from network_blocks import Activation, ScaleAndShift, MixedActivation, Clip
+import torch.nn as nn
+from constants import VIRT_ZERO, VIRT_INF, LOG_VIRT_INF, LOG_VIRT_ZERO
+
+
+def parse_likelihood_and_postprocess(config: dict) -> tuple[Likelihood, nn.Module]:
+    assert "type" in config
+    if config["type"] == "TruncatedGaussian":
+        lb = config.get("lb", -torch.inf)
+        ub = config.get("ub", torch.inf)
+
+        if lb != -torch.inf and ub != torch.inf:
+            mu_activation = nn.Sequential(
+                Activation("sine"),
+                ScaleAndShift((ub - lb) / 2, (ub + lb) / 2),
+                # Activation("sigmoid"),ScaleAndShift((ub - lb), lb),
+            )  # constrain mu to [lb, ub]
+            # mu_activation = Activation("identity")
+        else:
+            mu_activation = Activation("identity")
+        logvar_activation = nn.Sequential(
+            Activation("identity"), Clip(LOG_VIRT_ZERO, LOG_VIRT_INF)
+        )  # constrain logvar to [LOG_VIRT_ZERO, LOG_VIRT_INF]
+        activation = MixedActivation([mu_activation, logvar_activation])
+        return TruncatedGaussianLikelihood(lb, ub), activation
+    elif config["type"] == "Gaussian":
+        mu_activation = Activation("identity")
+        logvar_activation = nn.Sequential(
+            Activation("identity"), Clip(LOG_VIRT_ZERO, LOG_VIRT_INF)
+        )
+        activation = MixedActivation([mu_activation, logvar_activation])
+        return TruncatedGaussianLikelihood(-torch.inf, torch.inf), activation
+    else:
+        raise NotImplementedError(f"Likelihood type {config['type']} not implemented")
 
 
 def parse_encoder(config: dict) -> BlackBoxNetwork:

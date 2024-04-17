@@ -46,7 +46,10 @@ def ncr(n, r):
 
 class Activation(nn.Module):
     def __init__(
-        self, activation: Literal["ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"]
+        self,
+        activation: Literal[
+            "ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU", "identity", "sigmoid", "sine"
+        ],
     ):
         super().__init__()
         self.activation = activation
@@ -62,8 +65,46 @@ class Activation(nn.Module):
             return F.silu(x)
         elif self.activation == "ELU":
             return F.elu(x)
+        elif self.activation == "identity":
+            return x
+        elif self.activation == "sigmoid":
+            return torch.sigmoid(x)
+        elif self.activation == "sine":
+            return torch.sin(x)
         else:
             raise NotImplementedError
+
+
+class ScaleAndShift(nn.Module):
+    def __init__(self, scale: float, shift: float):
+        super().__init__()
+        self.scale = scale
+        self.shift = shift
+
+    def forward(self, x):
+        return self.scale * x + self.shift
+
+
+class Clip(nn.Module):
+    def __init__(self, min: float, max: float):
+        super().__init__()
+        self.min = min
+        self.max = max
+
+    def forward(self, x):
+        return torch.clip(x, min=self.min, max=self.max)
+
+
+class MixedActivation(nn.Module):
+    def __init__(self, activation_nets: list[nn.Module]):
+        super().__init__()
+        self.activations = nn.ModuleList(activation_nets)
+
+    def forward(self, x):
+        x_new = torch.zeros_like(x)
+        for i in range(len(self.activations)):
+            x_new[..., i] = self.activations[i](x[..., i])
+        return x_new
 
 
 class stats:

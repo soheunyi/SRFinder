@@ -1,6 +1,7 @@
 # Variational autoencoder
 
 from typing import Literal
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,7 +13,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from matplotlib import pyplot as plt
 
-from parse_networks import parse_decoder, parse_encoder
+from parsers import parse_decoder, parse_encoder, parse_likelihood_and_postprocess
+from constants import VIRT_INF, VIRT_ZERO, LOG_VIRT_INF, LOG_VIRT_ZERO
 
 
 class VariationalAutoencoder(pl.LightningModule):
@@ -22,6 +24,7 @@ class VariationalAutoencoder(pl.LightningModule):
         latent_dim: int,
         encoder_config: dict,
         decoder_config: dict,
+        likelihood_configs: list[dict],
         run_name: str,
         encoder_activation: Literal[
             "ReLU", "RReLU", "LeakyReLU", "SiLU", "ELU"
@@ -40,7 +43,16 @@ class VariationalAutoencoder(pl.LightningModule):
         assert (
             self.decoder.input_dim == latent_dim
         ), "Decoder input dim does not match latent dim"
-        assert self.decoder.output_dim == input_dim, "Decoder output dim does not match"
+
+        assert (
+            len(likelihood_configs) == input_dim
+        ), "Number of likelihoods does not match input dim"
+        self.likelihoods = [
+            parse_likelihood_and_postprocess(config)[0] for config in likelihood_configs
+        ]  # likelihoods
+        self.ll_postprocess = [
+            parse_likelihood_and_postprocess(config)[1] for config in likelihood_configs
+        ]  # activations
 
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -49,11 +61,10 @@ class VariationalAutoencoder(pl.LightningModule):
         self.lr = lr
         self.beta = beta
 
-        self.lr = lr
         self.train_losses = torch.tensor([])
         self.validation_losses = torch.tensor([])
         self.validation_kls = torch.tensor([])
-        self.validation_reconstruction_losses = torch.tensor([])
+        self.validation_lls = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
         self.validation_batchsizes = torch.tensor([])
 
@@ -75,46 +86,108 @@ class VariationalAutoencoder(pl.LightningModule):
         self.latent_mu = nn.Parameter(torch.zeros(latent_dim))
         self.latent_logvar = nn.Parameter(torch.zeros(latent_dim))
 
+        # decoders to output parameters of likelihoods
+        self.ll_params_decoders = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(self.decoder.output_dim, likelihood.n_params), postprocess
+                )
+                for likelihood, postprocess in zip(
+                    self.likelihoods, self.ll_postprocess
+                )
+            ]
+        )
+
     def encode(self, x):
         x = self.encoder(x)
+
+        if torch.isnan(x).any():
+            print(x)
+            raise ValueError("NaN encoder output")
+
         x = self.encoder_activation(x)
+
+        if torch.isnan(x).any():
+            print(x)
+            raise ValueError("NaN encoder output")
+
         mu = self.mu_encoder(x)
         logvar = self.logvar_encoder(x)
+        logvar = torch.clip(logvar, LOG_VIRT_ZERO, LOG_VIRT_INF)
+
         return mu, logvar
 
     def decode(self, z):
-        return self.decoder(z)
+        z = self.decoder(z)
+        ll_params = [decoder(z) for decoder in self.ll_params_decoders]
+
+        return ll_params
+
+    def reconstruct(self, x: torch.Tensor):
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        ll_params = self.decode(z)
+        # sample from likelihoods using ll_params
+        x_reconstructed = torch.zeros_like(x)
+        for i, (likelihood, params) in enumerate(zip(self.likelihoods, ll_params)):
+            x_reconstructed[..., i] = likelihood.sample(torch.Size(), params)
+
+        return x_reconstructed
 
     def forward(self, x):
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        mu_x_reconstructed = self.decoder(z)
 
-        return mu_x_reconstructed, mu, logvar
+        if torch.isnan(z).any():
+            print("x", x)
+            print("mu", mu)
+            print("logvar", logvar)
+            print("z", z)
+            raise ValueError("NaN latent space")
+
+        ll_params = self.decode(z)
+
+        for p in ll_params:
+            if torch.isnan(p).any():
+                # print all parameters in the model
+                for name, param in self.named_parameters():
+                    print(name, param)
+                print(p)
+                raise ValueError("NaN parameters")
+
+        return ll_params, mu, logvar
 
     def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+        std = torch.exp(logvar / 2)
+        # clip std to avoid inf
+        noise = torch.randn_like(std)
+        return mu + noise * std
 
-    def recons_and_kl(self, x: torch.Tensor, w: torch.Tensor):
+    def ll_and_kl(self, x: torch.Tensor, w: torch.Tensor):
         # x: inputs, w: MCMC weights
-        mu_x_reconstructed, mu, logvar = self(x)
-
-        # Reconstruction loss
-        reconstruction_loss = 0.5 * (
-            torch.sum(
-                self.log_input_var
-                + torch.exp(-self.log_input_var) * (mu_x_reconstructed - x) ** 2,
+        ll_params, mu, logvar = self(x)
+        ll_values = torch.sum(
+            torch.stack(
+                [
+                    likelihood.log_likelihood(x[..., i], params)
+                    for i, (likelihood, params) in enumerate(
+                        zip(self.likelihoods, ll_params)
+                    )
+                ],
                 dim=-1,
-            )
+            ),
+            dim=-1,
         )
-        reconstruction_loss = torch.mean(w * reconstruction_loss)
+
+        ll_avg = torch.mean(w * ll_values)
 
         # KL divergence
         # KL(N(mu, exp(logvar)) || N(self.latent_mu, exp(self.latent_logvar)))
         latent_var_inv = torch.exp(-self.latent_logvar)
+        latent_var_inv = torch.clip(latent_var_inv, VIRT_ZERO, VIRT_INF)  # avoid inf
+
         var = torch.exp(logvar)
+        var = torch.clip(var, VIRT_ZERO, VIRT_INF)  # avoid inf
 
         # https://mr-easy.github.io/2020-04-16-kl-divergence-between-2-gaussian-distributions/
         kl_divergence = 0.5 * (
@@ -126,23 +199,13 @@ class VariationalAutoencoder(pl.LightningModule):
 
         kl_divergence = torch.mean(w * kl_divergence)
 
-        # if torch.isnan(reconstruction_loss) or torch.isnan(kl_divergence):
-        #     print(mu_x_reconstructed)
-        #     print(mu)
-        #     print(logvar)
-        #     print(reconstruction_loss)
-        #     print(kl_divergence)
-        #     print(self.__loss_weights)
-
-        #     raise ValueError("NaN loss")
-
-        return reconstruction_loss, kl_divergence
+        return ll_avg, kl_divergence
 
     def training_step(self, batch: torch.Tensor, batch_idx):
         x, w = batch
         x, w = x.to(self.device), w.to(self.device)
-        reconstruction_loss, kl_divergence = self.recons_and_kl(x, w)
-        loss = (1 - self.beta) * reconstruction_loss + self.beta * kl_divergence
+        ll_avg, kl_divergence = self.ll_and_kl(x, w)
+        loss = (1 - self.beta) * (-ll_avg) + self.beta * kl_divergence
 
         self.train_losses = torch.cat(
             (self.train_losses, loss.detach().to("cpu").view(1))
@@ -151,13 +214,24 @@ class VariationalAutoencoder(pl.LightningModule):
             (self.train_batchsizes, torch.tensor(x.shape[0]).view(1))
         )
 
+        # check if gradients are NaN
+        if self.check_grad_nan():
+            # print all relevant information
+            print("x", x)
+            print("w", w)
+            print("ll_avg", ll_avg)
+            print("kl_divergence", kl_divergence)
+            print("loss", loss)
+
+            raise ValueError("NaN gradients")
+
         return loss
 
     def validation_step(self, batch: torch.Tensor, batch_idx):
         x, w = batch
         x, w = x.to(self.device), w.to(self.device)
-        reconstruction_loss, kl_divergence = self.recons_and_kl(x, w)
-        loss = (1 - self.beta) * reconstruction_loss + self.beta * kl_divergence
+        ll_avg, kl_divergence = self.ll_and_kl(x, w)
+        loss = (1 - self.beta) * (-ll_avg) + self.beta * kl_divergence
 
         self.validation_losses = torch.cat(
             (self.validation_losses, loss.detach().to("cpu").view(1))
@@ -165,15 +239,26 @@ class VariationalAutoencoder(pl.LightningModule):
         self.validation_kls = torch.cat(
             (self.validation_kls, kl_divergence.detach().to("cpu").view(1))
         )
-        self.validation_reconstruction_losses = torch.cat(
+        self.validation_lls = torch.cat(
             (
-                self.validation_reconstruction_losses,
-                reconstruction_loss.detach().to("cpu").view(1),
+                self.validation_lls,
+                ll_avg.detach().to("cpu").view(1),
             )
         )
         self.validation_batchsizes = torch.cat(
             (self.validation_batchsizes, torch.tensor(x.shape[0]).view(1))
         )
+
+        if self.check_grad_nan():
+            # print all relevant information
+            print("x", x)
+            print("w", w)
+            print("ll_avg", ll_avg)
+            print("kl_divergence", kl_divergence)
+            print("loss", loss)
+
+            raise ValueError("NaN gradients")
+
         return loss
 
     def on_train_epoch_end(self):
@@ -191,14 +276,14 @@ class VariationalAutoencoder(pl.LightningModule):
         avg_kl = torch.sum(
             self.validation_kls * self.validation_batchsizes
         ) / torch.sum(self.validation_batchsizes)
-        avg_reconstruction_loss = torch.sum(
-            self.validation_reconstruction_losses * self.validation_batchsizes
+        avg_ll = torch.sum(
+            self.validation_lls * self.validation_batchsizes
         ) / torch.sum(self.validation_batchsizes)
         self.log("val_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val_kl", avg_kl, on_step=False, on_epoch=True, prog_bar=True)
         self.log(
-            "val_reconstruction_loss",
-            avg_reconstruction_loss,
+            "val_ll",
+            avg_ll,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -207,7 +292,7 @@ class VariationalAutoencoder(pl.LightningModule):
             self.best_val_loss = avg_loss
         self.validation_losses = torch.tensor([])
         self.validation_kls = torch.tensor([])
-        self.validation_reconstruction_losses = torch.tensor([])
+        self.validation_lls = torch.tensor([])
         self.validation_batchsizes = torch.tensor([])
 
         # save the model if the validation loss is the lowest so far
@@ -223,6 +308,8 @@ class VariationalAutoencoder(pl.LightningModule):
             callbacks=[self.checkpoint_callback],
             logger=logger,
         )
+
+        torch.autograd.set_detect_anomaly(True)
 
         trainer.fit(
             self,
@@ -273,12 +360,31 @@ class VariationalAutoencoder(pl.LightningModule):
         f1 = 0
         f2 = 1
 
-        val_data_encoded = self.encode(val_x)
-        val_data_mu, val_data_logvar = val_data_encoded
-        val_data_decoded = self.decode(val_data_mu)
+        # memory issue: make DataLoader again
 
-        val_data_encoded_np = val_data_mu.detach().cpu().numpy()
-        val_data_decoded_np = val_data_decoded.detach().cpu().numpy()
+        self.eval()
+        val_dataloader = DataLoader(val_x, batch_size=1024, shuffle=False)
+
+        val_data_encoded_np = np.array([])
+        val_data_recontstructed_np = np.array([])
+
+        for x in val_dataloader:
+            x_encoded_mu = self.encode(x)[0].detach().cpu().numpy()
+            val_data_encoded_np = (
+                x_encoded_mu
+                if len(val_data_encoded_np) == 0
+                else np.concatenate((val_data_encoded_np, x_encoded_mu), axis=0)
+            )
+
+            x_recontstructed = self.reconstruct(x).detach().cpu().numpy()
+            val_data_recontstructed_np = (
+                x_recontstructed
+                if len(val_data_recontstructed_np) == 0
+                else np.concatenate(
+                    (val_data_recontstructed_np, x_recontstructed), axis=0
+                )
+            )
+
         val_data_np = val_x.detach().cpu().numpy()
 
         fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(10, 5))
@@ -286,11 +392,17 @@ class VariationalAutoencoder(pl.LightningModule):
         ax[0].scatter(val_data_encoded_np[:, 0], val_data_encoded_np[:, 1], s=1)
         ax[0].set_title("Encoded latent space")
 
-        xmin, xmax = val_data_decoded_np[:, f1].min(), val_data_decoded_np[:, f1].max()
+        xmin, xmax = (
+            val_data_recontstructed_np[:, f1].min(),
+            val_data_recontstructed_np[:, f1].max(),
+        )
         xmin, xmax = min(xmin, val_data_np[:, f1].min()), max(
             xmax, val_data_np[:, f1].max()
         )
-        ymin, ymax = val_data_decoded_np[:, f2].min(), val_data_decoded_np[:, f2].max()
+        ymin, ymax = (
+            val_data_recontstructed_np[:, f2].min(),
+            val_data_recontstructed_np[:, f2].max(),
+        )
         ymin, ymax = min(ymin, val_data_np[:, f2].min()), max(
             ymax, val_data_np[:, f2].max()
         )
@@ -299,7 +411,9 @@ class VariationalAutoencoder(pl.LightningModule):
         ymin, ymax = ymin - 0.1 * x_diff, ymax + 0.1 * x_diff
         xmin, xmax = xmin - 0.1 * y_diff, xmax + 0.1 * y_diff
 
-        ax[1].scatter(val_data_decoded_np[:, f1], val_data_decoded_np[:, f2], s=1)
+        ax[1].scatter(
+            val_data_recontstructed_np[:, f1], val_data_recontstructed_np[:, f2], s=1
+        )
         ax[1].set_xlim(xmin, xmax)
         ax[1].set_ylim(ymin, ymax)
         ax[1].set_title("Decoded latent space")
@@ -320,3 +434,10 @@ class VariationalAutoencoder(pl.LightningModule):
 
     def log_config(self, config: dict):
         self.logger.experiment.add_text("config", str(config), self.current_epoch)
+
+    def check_grad_nan(self):
+        for name, param in self.named_parameters():
+            if param.grad != None and torch.isnan(param.grad).any():
+                print(name, "grad is NaN")
+                return True
+        return False
