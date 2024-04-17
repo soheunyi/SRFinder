@@ -183,11 +183,11 @@ class VariationalAutoencoder(pl.LightningModule):
 
         # KL divergence
         # KL(N(mu, exp(logvar)) || N(self.latent_mu, exp(self.latent_logvar)))
-        latent_var_inv = torch.exp(-self.latent_logvar)
-        latent_var_inv = torch.clip(latent_var_inv, VIRT_ZERO, VIRT_INF)  # avoid inf
+        latent_logvar = torch.clip(self.latent_logvar, LOG_VIRT_ZERO, LOG_VIRT_INF)
+        latent_var_inv = torch.exp(-latent_logvar)
 
+        logvar = torch.clip(logvar, LOG_VIRT_ZERO, LOG_VIRT_INF)  # avoid inf
         var = torch.exp(logvar)
-        var = torch.clip(var, VIRT_ZERO, VIRT_INF)  # avoid inf
 
         # https://mr-easy.github.io/2020-04-16-kl-divergence-between-2-gaussian-distributions/
         kl_divergence = 0.5 * (
@@ -357,8 +357,8 @@ class VariationalAutoencoder(pl.LightningModule):
             "sym_canJet3_m",
         ]
 
-        f1 = 0
-        f2 = 1
+        f1 = 10
+        f2 = 11
 
         # memory issue: make DataLoader again
 
@@ -367,13 +367,37 @@ class VariationalAutoencoder(pl.LightningModule):
 
         val_data_encoded_np = np.array([])
         val_data_recontstructed_np = np.array([])
+        val_data_decoded_mu_np = np.array([])
+        val_data_decoded_logvar_np = np.array([])
 
         for x in val_dataloader:
-            x_encoded_mu = self.encode(x)[0].detach().cpu().numpy()
+            encoded = self.encode(x)
+            x_encoded_mu = encoded[0].detach().cpu().numpy()
             val_data_encoded_np = (
                 x_encoded_mu
                 if len(val_data_encoded_np) == 0
                 else np.concatenate((val_data_encoded_np, x_encoded_mu), axis=0)
+            )
+
+            z = self.reparameterize(*encoded)
+            decoded = self.decode(z)
+            x_decoded_mu = torch.cat([param[:, [0]] for param in decoded], dim=1)
+            X_decoded_logvar = torch.cat([param[:, [1]] for param in decoded], dim=1)
+            x_decoded_mu = x_decoded_mu.detach().cpu().numpy()
+            X_decoded_logvar = X_decoded_logvar.detach().cpu().numpy()
+
+            val_data_decoded_mu_np = (
+                x_decoded_mu
+                if len(val_data_decoded_mu_np) == 0
+                else np.concatenate((val_data_decoded_mu_np, x_decoded_mu), axis=0)
+            )
+
+            val_data_decoded_logvar_np = (
+                X_decoded_logvar
+                if len(val_data_decoded_logvar_np) == 0
+                else np.concatenate(
+                    (val_data_decoded_logvar_np, X_decoded_logvar), axis=0
+                )
             )
 
             x_recontstructed = self.reconstruct(x).detach().cpu().numpy()
@@ -387,7 +411,7 @@ class VariationalAutoencoder(pl.LightningModule):
 
         val_data_np = val_x.detach().cpu().numpy()
 
-        fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(10, 5))
+        fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(10, 5))
 
         ax[0].scatter(val_data_encoded_np[:, 0], val_data_encoded_np[:, 1], s=1)
         ax[0].set_title("Encoded latent space")
@@ -420,12 +444,28 @@ class VariationalAutoencoder(pl.LightningModule):
         ax[1].set_xlabel(features[f1])
         ax[1].set_ylabel(features[f2])
 
-        ax[2].scatter(val_data_np[:, f1], val_data_np[:, f2], s=1)
+        ax[2].scatter(val_data_decoded_mu_np[:, f1], val_data_decoded_mu_np[:, f2], s=1)
         ax[2].set_xlim(xmin, xmax)
         ax[2].set_ylim(ymin, ymax)
-        ax[2].set_title("Original space")
+        ax[2].set_title("Decoded mu space")
         ax[2].set_xlabel(features[f1])
         ax[2].set_ylabel(features[f2])
+
+        ax[3].scatter(
+            np.exp(val_data_decoded_logvar_np / 2)[:, f1],
+            np.exp(val_data_decoded_logvar_np / 2)[:, f2],
+            s=1,
+        )
+        ax[3].set_title("Decoded std space")
+        ax[3].set_xlabel(features[f1])
+        ax[3].set_ylabel(features[f2])
+
+        ax[4].scatter(val_data_np[:, f1], val_data_np[:, f2], s=1)
+        ax[4].set_xlim(xmin, xmax)
+        ax[4].set_ylim(ymin, ymax)
+        ax[4].set_title("Original space")
+        ax[4].set_xlabel(features[f1])
+        ax[4].set_ylabel(features[f2])
 
         plt.tight_layout()
         plt.close()

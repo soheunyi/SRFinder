@@ -187,7 +187,7 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         d = NonLU(d, self.training)
         q = NonLU(q, self.training)
 
-        q, q0 = self.QuadjetResNetBlock(d, q, d0=d0, q0=q0)
+        q, q0 = self.QuadjetResNetBlock(d, q, d0, q0)
 
         return q, q0
 

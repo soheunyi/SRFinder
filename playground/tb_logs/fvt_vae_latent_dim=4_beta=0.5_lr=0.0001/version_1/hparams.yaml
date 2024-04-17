@@ -11,8 +11,8 @@ decoder_config:
 encoder_activation: SiLU
 encoder_config:
   dim_input_jet_features: 4
-  dim_intermed_dijet_features: 256
-  dim_intermed_quadjet_features: 256
+  dim_intermed_dijet_features: 128
+  dim_intermed_quadjet_features: 128
   dim_output: 64
   name: fvt
   type: FvTEncoder

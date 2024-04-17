@@ -5,7 +5,7 @@ from black_box_network import BlackBoxNetwork
 from likelihoods import TruncatedGaussianLikelihood, Likelihood
 from network_blocks import Activation, ScaleAndShift, MixedActivation, Clip
 import torch.nn as nn
-from constants import VIRT_ZERO, VIRT_INF, LOG_VIRT_INF, LOG_VIRT_ZERO
+from constants import LOG_VIRT_INF, LOG_VIRT_ZERO
 
 
 def parse_likelihood_and_postprocess(config: dict) -> tuple[Likelihood, nn.Module]:
