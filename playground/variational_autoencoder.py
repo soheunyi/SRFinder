@@ -82,15 +82,18 @@ class VariationalAutoencoder(pl.LightningModule):
         self.logvar_encoder = nn.Linear(self.encoder.output_dim, latent_dim, bias=False)
 
         # define scale parameter
-        self.log_input_var = nn.Parameter(torch.zeros(input_dim))
-        self.latent_mu = nn.Parameter(torch.zeros(latent_dim))
-        self.latent_logvar = nn.Parameter(torch.zeros(latent_dim))
+        # self.latent_mu = nn.Parameter(torch.zeros(latent_dim))
+        # self.latent_logvar = nn.Parameter(torch.zeros(latent_dim))
+
+        self.latent_mu = torch.zeros(latent_dim)
+        self.latent_logvar = torch.zeros(latent_dim)
 
         # decoders to output parameters of likelihoods
         self.ll_params_decoders = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Linear(self.decoder.output_dim, likelihood.n_params), postprocess
+                    nn.Linear(self.decoder.output_dim, likelihood.n_params, bias=False),
+                    postprocess,
                 )
                 for likelihood, postprocess in zip(
                     self.likelihoods, self.ll_postprocess
@@ -128,9 +131,17 @@ class VariationalAutoencoder(pl.LightningModule):
         z = self.reparameterize(mu, logvar)
         ll_params = self.decode(z)
         # sample from likelihoods using ll_params
-        x_reconstructed = torch.zeros_like(x)
+        x_pre = torch.zeros_like(x)
         for i, (likelihood, params) in enumerate(zip(self.likelihoods, ll_params)):
-            x_reconstructed[..., i] = likelihood.sample(torch.Size(), params)
+            x_pre[..., i] = likelihood.sample(torch.Size(), params)
+
+        x_reconstructed = torch.zeros_like(x)
+        for i in range(4, self.input_dim):
+            x_reconstructed[..., i] = x_pre[..., i]
+
+        x_reconstructed[..., :4] = torch.cumsum(x_pre[..., :4].flip(-1), dim=-1).flip(
+            -1
+        )
 
         return x_reconstructed
 
@@ -166,10 +177,16 @@ class VariationalAutoencoder(pl.LightningModule):
     def ll_and_kl(self, x: torch.Tensor, w: torch.Tensor):
         # x: inputs, w: MCMC weights
         ll_params, mu, logvar = self(x)
+        x_pre = torch.zeros_like(x)
+        for i in range(4, self.input_dim):
+            x_pre[..., i] = x[..., i]
+        x_pre[..., 3] = x[..., 3]
+        x_pre[..., :3] = x[..., :3] - x[..., 1:4]
+
         ll_values = torch.sum(
             torch.stack(
                 [
-                    likelihood.log_likelihood(x[..., i], params)
+                    likelihood.log_likelihood(x_pre[..., i], params)
                     for i, (likelihood, params) in enumerate(
                         zip(self.likelihoods, ll_params)
                     )
@@ -183,6 +200,9 @@ class VariationalAutoencoder(pl.LightningModule):
 
         # KL divergence
         # KL(N(mu, exp(logvar)) || N(self.latent_mu, exp(self.latent_logvar)))
+        self.latent_mu = self.latent_mu.to(x.device)
+        self.latent_logvar = self.latent_logvar.to(x.device)
+
         latent_logvar = torch.clip(self.latent_logvar, LOG_VIRT_ZERO, LOG_VIRT_INF)
         latent_var_inv = torch.exp(-latent_logvar)
 
@@ -321,14 +341,14 @@ class VariationalAutoencoder(pl.LightningModule):
             ),
         )
 
-        # collect first tensor iterating over val_dataset
-        val_x = torch.tensor([])
-        for x, _ in val_dataset:
-            val_x = torch.cat((val_x, x.view(1, -1)), dim=0)
+        # # collect first tensor iterating over val_dataset
+        # val_x = torch.tensor([])
+        # for x, _ in val_dataset:
+        #     val_x = torch.cat((val_x, x.view(1, -1)), dim=0)
 
-        logger.experiment.add_figure(
-            "latent_space", self.plot_result(val_x), self.current_epoch
-        )
+        # logger.experiment.add_figure(
+        #     "latent_space", self.plot_result(val_x), self.current_epoch
+        # )
 
     def save(self, path):
         torch.save(self.state_dict(), path)

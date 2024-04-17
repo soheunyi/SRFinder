@@ -450,7 +450,7 @@ class conv1d(nn.Module):
         if self.bias:
             nn.init.uniform_(self.module.bias, -(self.k**0.5), self.k**0.5)
 
-    def forward(self, x, mask=None, debug=False):
+    def forward(self, x: torch.Tensor, mask=None, debug=False):
         if self.hiddenIn:
             x = NonLU(self.moduleHiddenIn(x), self.moduleHiddenIn.training)
         if self.hiddenOut:
@@ -941,20 +941,20 @@ class DijetReinforceLayer(nn.Module):
             nAveraging=nAveraging,
         )
 
-    def forward(self, x, d):
+    def forward(self, j, d):
         d = torch.cat(
             (
-                x[:, :, 0:2],
+                j[:, :, 0:2],
                 d[:, :, 0:1],
-                x[:, :, 2:4],
+                j[:, :, 2:4],
                 d[:, :, 1:2],
-                x[:, :, 4:6],
+                j[:, :, 4:6],
                 d[:, :, 2:3],
-                x[:, :, 6:8],
+                j[:, :, 6:8],
                 d[:, :, 3:4],
-                x[:, :, 8:10],
+                j[:, :, 8:10],
                 d[:, :, 4:5],
-                x[:, :, 10:12],
+                j[:, :, 10:12],
                 d[:, :, 5:6],
             ),
             dim=2,
@@ -1001,33 +1001,24 @@ class DijetResNetBlock(nn.Module):
 
         self.MultijetAttention = None
 
-    def forward(
-        self,
-        j: torch.Tensor,
-        d: torch.Tensor,
-        j0: torch.Tensor,
-        d0: torch.Tensor,
-        o=None,
-        mask=None,
-        debug=False,
-    ):
+    def forward(self, j: torch.Tensor, d: torch.Tensor):
 
-        d = self.reinforce1(j, d)
-        j = self.convJ(j)
-        d = d + d0  ##TODO
-        j = j + j0
-        d = NonLU(d, self.training)
-        j = NonLU(j, self.training)
-
-        d = self.reinforce2(j, d)
-        d = d + d0  ##TODO
         d0 = d.clone()
+        d = self.reinforce1(j, d)
         d = NonLU(d, self.training)
+        d = d + d0
 
-        if self.MultijetAttention:  ##TODO
-            d, d0 = self.MultijetAttention(d, o, mask, q0=d0, debug=debug)  ##TODO
+        j0 = j.clone()
+        j = self.convJ(j)
+        j = NonLU(j, self.training)
+        j = j + j0
 
-        return d, d0
+        d0 = d.clone()
+        d = self.reinforce2(j, d)
+        d = NonLU(d, self.training)
+        d = d + d0
+
+        return d
 
 
 class QuadjetReinforceLayer(nn.Module):
@@ -1117,20 +1108,21 @@ class QuadjetResNetBlock(nn.Module):
             self.reinforce2.conv, [self.convD.index, self.reinforce1.conv.index]
         )
 
-    def forward(
-        self, d: torch.Tensor, q: torch.Tensor, d0: torch.Tensor, q0: torch.Tensor
-    ):
+    def forward(self, d: torch.Tensor, q: torch.Tensor):
 
-        q = self.reinforce1(d, q)
-        d = self.convD(d)
-        q = q + q0
-        d = d + d0
-        q = NonLU(q, self.training)
-        d = NonLU(d, self.training)
-
-        q = self.reinforce2(d, q)
-        q = q + q0
         q0 = q.clone()
+        q = self.reinforce1(d, q)
         q = NonLU(q, self.training)
+        q = q + q0
 
-        return q, q0
+        d0 = d.clone()
+        d = self.convD(d)
+        d = NonLU(d, self.training)
+        d = d + d0
+
+        q0 = q.clone()
+        q = self.reinforce2(d, q)
+        q = NonLU(q, self.training)
+        q = q + q0
+
+        return q

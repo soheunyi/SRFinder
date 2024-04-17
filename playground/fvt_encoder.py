@@ -18,9 +18,8 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
     def __init__(
         self,
         dim_input_jet_features: int,
-        dim_intermed_dijet_features: int,
-        dim_intermed_quadjet_features: int,
-        dim_output: int,
+        dim_dijet_features: int,
+        dim_quadjet_features: int,
         device: str = torch.device("cpu"),
     ):
         """
@@ -30,7 +29,7 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
 
         # For BlackBoxNetwork initialization
         self.input_dim = dim_input_jet_features * 4  # 4 features per jet
-        self.output_dim = dim_output
+        self.output_dim = dim_quadjet_features
 
         self.device = device
         self.debug = False
@@ -39,18 +38,17 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         # engineered dijet features
         self.dim_engineered_d = 2  # m and deltaR
         # total dijet features
-        self.dim_d = dim_intermed_dijet_features
+        self.dim_d = dim_dijet_features
         # engineered quadjet features
         self.dim_engineered_q = 2  # m and deltaR
         # total quadjet features
-        self.dim_q = dim_intermed_quadjet_features
+        self.dim_q = dim_quadjet_features
 
-        self.dim_out = dim_output
+        self.dim_out = dim_quadjet_features
 
-        self.name = "ResNet" + "_%d_%d_%d" % (
-            dim_intermed_dijet_features,
-            dim_intermed_quadjet_features,
-            dim_output,
+        self.name = "ResNet_{}_{}".format(
+            dim_dijet_features,
+            dim_quadjet_features,
         )
 
         self.nR = 1
@@ -131,30 +129,38 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         )
 
         self.event_conv_1 = conv1d(
-            self.dim_out,
-            self.dim_out,
+            self.dim_q,
+            self.dim_q,
             1,
             name="event convolution 1",
             batchNorm=True,
         )
         self.event_conv_2 = conv1d(
-            self.dim_out,
-            self.dim_out,
+            self.dim_q,
+            self.dim_q,
             1,
             name="event convolution 2",
-            batchNorm=False,
+            batchNorm=True,
         )
-
-        # Calculalte score for each quadjet, add them together with corresponding weight, and go to final output layer
-        self.select_q = conv1d(
-            self.dim_out, 1, 1, name="quadjet selector", batchNorm=True
+        self.event_conv_3 = conv1d(
+            self.dim_q,
+            self.dim_q,
+            1,
+            name="event convolution 3",
+            batchNorm=True,
+        )
+        self.event_conv_4 = conv1d(
+            self.dim_q,
+            self.dim_q,
+            1,
+            name="event convolution 4",
+            batchNorm=False,
         )
 
         self.layers.addLayer(
             self.event_conv_1, [self.QuadjetResNetBlock.reinforce2.conv.index]
         )
         self.layers.addLayer(self.event_conv_2, [self.event_conv_1.index])
-        self.layers.addLayer(self.select_q, [self.event_conv_2.index])
 
     def get_quadjet_pixels(
         self, j: torch.Tensor, mask, d: torch.Tensor, q: torch.Tensor
@@ -165,14 +171,7 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
 
         # Embed the jet 4-vectors and dijet ancillary features into the target feature space
         j = self.jetEmbed(j)
-        j0 = j.clone()
-        d0 = d.clone()
-        j = NonLU(j, self.training)
-        d = NonLU(d, self.training)
-
-        d, d0 = self.DijetResNetBlock(
-            j, d, j0=j0, d0=d0, o=None, mask=mask, debug=self.debug
-        )
+        d = self.DijetResNetBlock(j, d)
 
         #
         # Build up quadjet pixels with dijet pixels and dijet ancillary features
@@ -181,15 +180,15 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         # Embed the dijet pixels and quadjet ancillary features into the target feature space
         # d0 from DijetResNetBlock since the number of dijet and quadjet features are the same
         d = self.dijetEmbed2(d)
-        d = d + d0
+        # d = d + d0
 
-        q0 = q.clone()
-        d = NonLU(d, self.training)
-        q = NonLU(q, self.training)
+        # q0 = q.clone()
+        # d = NonLU(d, self.training)
+        # q = NonLU(q, self.training)
 
-        q, q0 = self.QuadjetResNetBlock(d, q, d0, q0)
+        q = self.QuadjetResNetBlock(d, q)
 
-        return q, q0
+        return q
 
     def forward(self, j):
         n = j.shape[0]
@@ -227,24 +226,25 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         mask = None
 
         # compute the quadjet pixels and average them over the symmetry transformations
-        q, q0 = self.get_quadjet_pixels(j, mask, d, q)
+        q = self.get_quadjet_pixels(j, mask, d, q)
 
         # Everything from here on out has no dependence on eta/phi flips and minimal dependence on phi rotations
 
+        q0 = q.clone()
         q = self.event_conv_1(q)
-        q = q + q0
         q = NonLU(q, self.training)
+        q = q + q0
 
+        q0 = q.clone()
         q = self.event_conv_2(q)
-        q = q + q0
         q = NonLU(q, self.training)
+        q = q + q0
 
-        # compute a score for each event view (quadjet)
-        q_score = self.select_q(q)
-        # convert the score to a 'probability' with softmax.
-        # This way the classifier is learning which view is most relevant to the classification task at hand.
-        q_score = F.softmax(q_score, dim=-1)
-        # add together the quadjets with their corresponding probability weight
-        event_repr = torch.matmul(q, q_score.transpose(1, 2)).view(-1, self.dim_out)
+        q0 = q.clone()
+        q = self.event_conv_3(q)
+        q = NonLU(q, self.training)
+        q = self.event_conv_4(q)
+        q = NonLU(q, self.training)
+        q = q + q0
 
-        return event_repr
+        return q

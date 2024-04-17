@@ -16,11 +16,21 @@ def parse_likelihood_and_postprocess(config: dict) -> tuple[Likelihood, nn.Modul
 
         if lb != -torch.inf and ub != torch.inf:
             mu_activation = nn.Sequential(
-                Activation("sine"),
-                ScaleAndShift((ub - lb) / 2, (ub + lb) / 2),
-                # Activation("sigmoid"),ScaleAndShift((ub - lb), lb),
+                # Activation("sine"),
+                # ScaleAndShift((ub - lb) / 2, (ub + lb) / 2),
+                Activation("sigmoid"),
+                ScaleAndShift((ub - lb), lb),
             )  # constrain mu to [lb, ub]
-            # mu_activation = Activation("identity")
+        elif lb != -torch.inf and ub == torch.inf:
+            mu_activation = nn.Sequential(
+                Activation("SiLU"),
+                ScaleAndShift(1, lb),
+            )
+        elif lb == -torch.inf and ub != torch.inf:
+            mu_activation = nn.Sequential(
+                Activation("SiLU"),
+                ScaleAndShift(-1, ub),
+            )
         else:
             mu_activation = Activation("identity")
         logvar_activation = nn.Sequential(
@@ -45,18 +55,15 @@ def parse_encoder(config: dict) -> BlackBoxNetwork:
         assert "dim_input_jet_features" in config
         assert "dim_intermed_dijet_features" in config
         assert "dim_intermed_quadjet_features" in config
-        assert "dim_output" in config
 
         dim_input_jet_features = config["dim_input_jet_features"]
         dim_intermed_dijet_features = config["dim_intermed_dijet_features"]
         dim_intermed_quadjet_features = config["dim_intermed_quadjet_features"]
-        dim_output = config["dim_output"]
 
         return FvTEncoder(
             dim_input_jet_features,
             dim_intermed_dijet_features,
             dim_intermed_quadjet_features,
-            dim_output,
         )
 
     elif config["type"] == "MLPEncoder":
