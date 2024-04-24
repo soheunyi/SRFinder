@@ -31,6 +31,13 @@ def get_M01(
     ) ** 0.5
 
 
+def PtEtaPhi_to_PxPyPz(Pt, Eta, Phi):
+    Px = Pt * torch.cos(Phi)
+    Py = Pt * torch.sin(Phi)
+    Pz = Pt * torch.sinh(Eta)
+    return Px, Py, Pz
+
+
 def LorentzSum(jet0: torch.Tensor, jet1: torch.Tensor):
     Pt0, Eta0, Phi0, m0 = get_jet_features(jet0)
     Pt1, Eta1, Phi1, m1 = get_jet_features(jet1)

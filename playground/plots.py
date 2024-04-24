@@ -83,6 +83,10 @@ def plot_prob_weighted_histogram1d(
         f"Approx. {100 * (1 - alpha)}% interval \nRegions that do not include 1: {x_edge_centers[~includes_one]}"
     )
 
+    ax2 = ax.twinx()
+    ax2.set_ylabel("Number of samples")
+    ax2.hist(plot_feature_arr, bins=x_edges, alpha=0.25, color="gray")
+
     if ylim != None:
         ax.set_ylim(ylim)
 

@@ -1,25 +1,20 @@
 import torch
-from fvt_encoder import FvTEncoder
 import pytorch_lightning as pl
 from torch.nn import functional as F
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import optim
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 
 
-from network_blocks import conv1d
-from lorentz_net import LorentzNet
+from parsers import parse_network
 
 
-class FvTClassifier(pl.LightningModule):
+class ClassifierTrainer(pl.LightningModule):
     def __init__(
         self,
         num_classes,
-        dim_input_jet_features,
-        dim_dijet_features,
-        dim_quadjet_features,
+        network_config,
         run_name: str,
         device: str = (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -29,9 +24,7 @@ class FvTClassifier(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        self.dim_j = dim_input_jet_features
-        self.dim_d = dim_dijet_features
-        self.dim_q = dim_quadjet_features
+        self.network = parse_network(network_config)
 
         self.train_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
@@ -51,44 +44,8 @@ class FvTClassifier(pl.LightningModule):
             mode="min",
         )
 
-        self.encoder = FvTEncoder(
-            dim_input_jet_features=dim_input_jet_features,
-            dim_dijet_features=dim_dijet_features,
-            dim_quadjet_features=dim_quadjet_features,
-            device=device,
-        )
-
-        self.select_q = conv1d(
-            dim_quadjet_features, 1, 1, name="quadjet selector", batchNorm=True
-        )
-
-        self.out = conv1d(
-            dim_quadjet_features, num_classes, 1, name="out", batchNorm=True
-        )
-
     def forward(self, x: torch.Tensor):
-        n = x.shape[0]
-        q = self.encoder(x)
-        q_score = self.select_q(q)
-        q_score = F.softmax(q_score, dim=-1)
-        event = torch.matmul(q, q_score.transpose(1, 2))
-        event = event.view(n, self.dim_q, 1)
-
-        # project the final event-level pixel into the class score space
-        class_score = self.out(event)
-        class_score = class_score.view(n, self.num_classes)
-
-        if torch.isnan(class_score).any():
-            print("NaN found in forward")
-            print("x", x)
-            print("q", q)
-            print("q_score", q_score)
-            print("event", event)
-            print("class_score", class_score)
-
-            raise ValueError("NaN found in forward")
-
-        return class_score
+        return self.network(x)
 
     def loss(self, y_logits: torch.Tensor, y_true: torch.Tensor, reduction="none"):
         # y_pred: logits, y_true: labels

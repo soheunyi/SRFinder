@@ -98,3 +98,17 @@ def parse_decoder(config: dict) -> BlackBoxNetwork:
         return MLPDecoder(latent_dim, output_dim, hidden_dims, activation, last_bias)
     else:
         raise NotImplementedError(f"Decoder type {config['type']} not implemented")
+
+
+def parse_network(config: dict) -> nn.Module:
+    assert "type" in config
+    if config["type"] == "FvT":
+        assert "num_classes" in config
+        assert "dim_input_jet_features" in config
+        assert "dim_dijet_features" in config
+        assert "dim_quadjet_features" in config
+
+        return FvTClassifierNet(config["num_classes"], config["dim_input_jet_features"],
+                    config["dim_dijet_features"], config["dim_quadjet_features"])
+
+    elif config["type"] == ""

@@ -180,12 +180,6 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         # Embed the dijet pixels and quadjet ancillary features into the target feature space
         # d0 from DijetResNetBlock since the number of dijet and quadjet features are the same
         d = self.dijetEmbed2(d)
-        # d = d + d0
-
-        # q0 = q.clone()
-        # d = NonLU(d, self.training)
-        # q = NonLU(q, self.training)
-
         q = self.QuadjetResNetBlock(d, q)
 
         return q
@@ -233,9 +227,9 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         q0 = q.clone()
         q = self.event_conv_1(q)
         q = NonLU(q, self.training)
-        q = q + q0
+        # q = q + q0
 
-        q0 = q.clone()
+        # q0 = q.clone()
         q = self.event_conv_2(q)
         q = NonLU(q, self.training)
         q = q + q0
@@ -248,3 +242,61 @@ class FvTEncoder(nn.Module, BlackBoxNetwork):
         q = q + q0
 
         return q
+
+
+class FvTClassifierNet(nn.Module):
+    def __init__(
+        self,
+        num_classes,
+        dim_input_jet_features,
+        dim_dijet_features,
+        dim_quadjet_features,
+        device: str = (
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        ),
+    ):
+        super().__init__()
+
+        self.dim_j = dim_input_jet_features
+        self.dim_d = dim_dijet_features
+        self.dim_q = dim_quadjet_features
+        self.num_classes = num_classes
+
+        self.encoder = FvTEncoder(
+            dim_input_jet_features=dim_input_jet_features,
+            dim_dijet_features=dim_dijet_features,
+            dim_quadjet_features=dim_quadjet_features,
+            device=device,
+        )
+
+        self.select_q = conv1d(
+            dim_quadjet_features, 1, 1, name="quadjet selector", batchNorm=True
+        )
+
+        self.out = conv1d(
+            dim_quadjet_features, num_classes, 1, name="out", batchNorm=True
+        )
+
+    def forward(self, x: torch.Tensor):
+        n = x.shape[0]
+        q = self.encoder(x)
+        q_score = self.select_q(q)
+        q_score = F.softmax(q_score, dim=-1)
+        event = torch.matmul(q, q_score.transpose(1, 2))
+        event = event.view(n, self.dim_q, 1)
+
+        # project the final event-level pixel into the class score space
+        class_score = self.out(event)
+        class_score = class_score.view(n, self.num_classes)
+
+        if torch.isnan(class_score).any():
+            print("NaN found in forward")
+            print("x", x)
+            print("q", q)
+            print("q_score", q_score)
+            print("event", event)
+            print("class_score", class_score)
+
+            raise ValueError("NaN found in forward")
+
+        return class_score
