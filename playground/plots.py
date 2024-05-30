@@ -5,9 +5,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import matplotlib.pyplot as plt
-
-from matplotlib import pyplot as plt
-from scipy import stats
+import plotly.graph_objects as go
 
 
 def plot_prob_weighted_histogram1d(
@@ -267,3 +265,152 @@ def calibration_plot(
     # ax2.set_yscale("log")
     plt.show()
     plt.close()
+
+
+def plot_cluster(
+    q_repr,
+    is_3b,
+    is_bg4b,
+    is_hh4b,
+    weights,
+    n_components=2,
+    title="",
+):
+
+    assert q_repr.shape[1] == n_components
+
+    if n_components == 1:
+        # histogram
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12, 6))
+        fig.suptitle(
+            "\n".join(
+                [
+                    title,
+                    "3b: {}, bg 4b: {}, HH 4b: {}".format(
+                        np.sum(is_3b), np.sum(is_bg4b), np.sum(is_hh4b)
+                    ),
+                ]
+            )
+        )
+        q_repr = q_repr.reshape(-1)
+        bins_range = np.linspace(np.min(q_repr), np.max(q_repr), 50)
+        hist_3b, _, _ = ax[0].hist(
+            q_repr[is_3b],
+            weights=weights[is_3b],
+            bins=bins_range,
+            label="bg 3b",
+            linewidth=1,
+            histtype="step",
+            density=False,
+        )
+        hist_bg4b, _, _ = ax[0].hist(
+            q_repr[is_bg4b],
+            weights=weights[is_bg4b],
+            bins=bins_range,
+            label="bg 4b",
+            linewidth=1,
+            histtype="step",
+            density=False,
+        )
+        hist_hh4b, _, _ = ax[0].hist(
+            q_repr[is_hh4b],
+            weights=weights[is_hh4b],
+            bins=bins_range,
+            label="HH 4b",
+            linewidth=1,
+            histtype="step",
+            density=False,
+        )
+        ax[0].legend()
+        ax[0].set_xlabel("cluster")
+        # 4b / 3b ratio
+
+        hist_4b = hist_bg4b + hist_hh4b
+        ratio_mean = hist_4b / hist_3b
+        ratio_std = np.sqrt(hist_4b * (1 / hist_3b) ** 2 + (hist_4b / hist_3b**2) ** 2)
+        alpha = 0.05
+        z = stats.norm.ppf(1 - alpha / 2)
+        ratio_lb = ratio_mean.reshape(-1) - z * ratio_std.reshape(-1)
+        ratio_ub = ratio_mean.reshape(-1) + z * ratio_std.reshape(-1)
+        ax[1].plot(bins_range[:-1], ratio_mean, label="4b / 3b")
+        ax[1].fill_between(bins_range[:-1], ratio_lb, ratio_ub, alpha=0.3)
+        ax[1].legend()
+        ax[1].set_xlabel("cluster")
+
+        plt.show()
+        plt.close()
+    else:
+        fig = go.Figure()
+        fig.update_layout(width=600, height=600)
+        fig.update_layout(hovermode=False)
+        fig.update_layout(
+            title="<br>".join(
+                [
+                    title,
+                    "3b: {}, bg 4b: {}, HH 4b: {}".format(
+                        np.sum(is_3b), np.sum(is_bg4b), np.sum(is_hh4b)
+                    ),
+                ]
+            )
+        )
+        if n_components == 2:
+            fig.add_trace(
+                go.Scatter(
+                    x=q_repr[is_3b, 0],
+                    y=q_repr[is_3b, 1],
+                    mode="markers",
+                    name="bg 3b",
+                    marker=dict(size=2, color="blue"),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=q_repr[is_bg4b, 0],
+                    y=q_repr[is_bg4b, 1],
+                    mode="markers",
+                    name="bg 4b",
+                    marker=dict(size=2, color="orange"),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=q_repr[is_hh4b, 0],
+                    y=q_repr[is_hh4b, 1],
+                    mode="markers",
+                    name="HH 4b",
+                    marker=dict(size=3, color="green"),
+                )
+            )
+        elif n_components == 3:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=q_repr[is_3b, 0],
+                    y=q_repr[is_3b, 1],
+                    z=q_repr[is_3b, 2],
+                    mode="markers",
+                    name="bg 3b",
+                    marker=dict(size=2, color="blue"),
+                )
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=q_repr[is_bg4b, 0],
+                    y=q_repr[is_bg4b, 1],
+                    z=q_repr[is_bg4b, 2],
+                    mode="markers",
+                    name="bg 4b",
+                    marker=dict(size=2, color="orange"),
+                )
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=q_repr[is_hh4b, 0],
+                    y=q_repr[is_hh4b, 1],
+                    z=q_repr[is_hh4b, 2],
+                    mode="markers",
+                    name="HH 4b",
+                    marker=dict(size=3, color="green"),
+                )
+            )
+
+        fig.show()
