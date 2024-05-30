@@ -326,12 +326,19 @@ def plot_cluster(
         # 4b / 3b ratio
 
         hist_4b = hist_bg4b + hist_hh4b
-        ratio_mean = hist_4b / hist_3b
-        ratio_std = np.sqrt(hist_4b * (1 / hist_3b) ** 2 + (hist_4b / hist_3b**2) ** 2)
+
+        # ignore warnings
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio_mean = hist_4b / hist_3b
+            ratio_std = np.sqrt(
+                hist_4b * (1 / hist_3b) ** 2 + (hist_4b / hist_3b**2) ** 2
+            )
         alpha = 0.05
         z = stats.norm.ppf(1 - alpha / 2)
-        ratio_lb = ratio_mean.reshape(-1) - z * ratio_std.reshape(-1)
-        ratio_ub = ratio_mean.reshape(-1) + z * ratio_std.reshape(-1)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio_lb = ratio_mean.reshape(-1) - z * ratio_std.reshape(-1)
+            ratio_ub = ratio_mean.reshape(-1) + z * ratio_std.reshape(-1)
         ax[1].plot(bins_range[:-1], ratio_mean, label="4b / 3b")
         ax[1].fill_between(bins_range[:-1], ratio_lb, ratio_ub, alpha=0.3)
         ax[1].legend()
@@ -414,3 +421,55 @@ def plot_cluster(
             )
 
         fig.show()
+
+
+def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_hh4b, weights):
+    q_repr = q_repr.reshape(-1)
+    bins_range = np.linspace(np.min(q_repr), np.max(q_repr), 50)
+    hist_3b, _, _ = ax0.hist(
+        q_repr[is_3b],
+        weights=weights[is_3b],
+        bins=bins_range,
+        label="bg 3b",
+        linewidth=1,
+        histtype="step",
+        density=False,
+    )
+    hist_bg4b, _, _ = ax0.hist(
+        q_repr[is_bg4b],
+        weights=weights[is_bg4b],
+        bins=bins_range,
+        label="bg 4b",
+        linewidth=1,
+        histtype="step",
+        density=False,
+    )
+    hist_hh4b, _, _ = ax0.hist(
+        q_repr[is_hh4b],
+        weights=weights[is_hh4b],
+        bins=bins_range,
+        label="HH 4b",
+        linewidth=1,
+        histtype="step",
+        density=False,
+    )
+    ax0.legend()
+    ax0.set_xlabel("cluster")
+    # 4b / 3b ratio
+
+    hist_4b = hist_bg4b + hist_hh4b
+
+    # ignore warnings
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio_mean = hist_4b / hist_3b
+        ratio_std = np.sqrt(hist_4b * (1 / hist_3b) ** 2 + (hist_4b / hist_3b**2) ** 2)
+    alpha = 0.05
+    z = stats.norm.ppf(1 - alpha / 2)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio_lb = ratio_mean.reshape(-1) - z * ratio_std.reshape(-1)
+        ratio_ub = ratio_mean.reshape(-1) + z * ratio_std.reshape(-1)
+    ax1.plot(bins_range[:-1], ratio_mean, label="4b / 3b")
+    ax1.fill_between(bins_range[:-1], ratio_lb, ratio_ub, alpha=0.3)
+    ax1.legend()
+    ax1.set_xlabel("cluster")
