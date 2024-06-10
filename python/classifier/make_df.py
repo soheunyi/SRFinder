@@ -10,47 +10,18 @@ from copy import copy
 mZ, mH = 91.0, 125.0
 
 
-def make_df(tree, fourTag=True, verbose=False, fromnp=True):
+def make_df(tree, fourTag=True, verbose=False):
     #    tree = ROOT.TChain("Tree")
     #    tree.Add(temptree)
 
     # Initialize TTree
     tree.SetBranchStatus("*", 0)
-    tree.SetBranchStatus("nJets", 1)
-
-    if fromnp:
-        tree.SetBranchStatus("jetPt0", 1)
-        tree.SetBranchStatus("jetPt1", 1)
-        tree.SetBranchStatus("jetPt2", 1)
-        tree.SetBranchStatus("jetPt3", 1)
-        tree.SetBranchStatus("jetEta0", 1)
-        tree.SetBranchStatus("jetEta1", 1)
-        tree.SetBranchStatus("jetEta2", 1)
-        tree.SetBranchStatus("jetEta3", 1)
-        tree.SetBranchStatus("jetPhi0", 1)
-        tree.SetBranchStatus("jetPhi1", 1)
-        tree.SetBranchStatus("jetPhi2", 1)
-        tree.SetBranchStatus("jetPhi3", 1)
-        tree.SetBranchStatus("jetEnergy0", 1)
-        tree.SetBranchStatus("jetEnergy1", 1)
-        tree.SetBranchStatus("jetEnergy2", 1)
-        tree.SetBranchStatus("jetEnergy3", 1)
-
-    else:
-        tree.SetBranchStatus("jetPt", 1)
-        tree.SetBranchStatus("jetEta", 1)
-        tree.SetBranchStatus("jetPhi", 1)
-        tree.SetBranchStatus("jetEnergy", 1)
-
-    tree.SetBranchStatus("dRjjClose", 1)
-    tree.SetBranchStatus("dRjjOther", 1)
-    tree.SetBranchStatus("aveAbsEta", 1)
-    tree.SetBranchStatus("m4j", 1)
-    tree.SetBranchStatus("mHH", 1)
-    tree.SetBranchStatus("SB", 1)
-    tree.SetBranchStatus("CR", 1), tree.SetBranchStatus("SR", 1)
+    # tree.SetBranchStatus("nJet", 1)
+    tree.SetBranchStatus("Jet_pt", 1)
+    tree.SetBranchStatus("Jet_eta", 1)
+    tree.SetBranchStatus("Jet_phi", 1)
+    tree.SetBranchStatus("Jet_mass", 1)
     tree.SetBranchStatus("weight", 1)
-
     tree.Show(0)
 
     nEvts = tree.GetEntries()
@@ -69,33 +40,22 @@ def make_df(tree, fourTag=True, verbose=False, fromnp=True):
 
     nWritten = 0
     data = {
-        "canJet0_pt": [],
-        "canJet1_pt": [],
-        "canJet2_pt": [],
-        "canJet3_pt": [],
-        "canJet0_eta": [],
-        "canJet1_eta": [],
-        "canJet2_eta": [],
-        "canJet3_eta": [],
-        "canJet0_phi": [],
-        "canJet1_phi": [],
-        "canJet2_phi": [],
-        "canJet3_phi": [],
-        "canJet0_e": [],
-        "canJet1_e": [],
-        "canJet2_e": [],
-        "canJet3_e": [],
-        "canJet0_m": [],
-        "canJet1_m": [],
-        "canJet2_m": [],
-        "canJet3_m": [],
-        "dRjjClose": [],
-        "dRjjOther": [],
-        "aveAbsEta": [],
-        "m4j": [],
-        "SB": [],
-        "CR": [],
-        "SR": [],
+        "Jet0_pt": [],
+        "Jet1_pt": [],
+        "Jet2_pt": [],
+        "Jet3_pt": [],
+        "Jet0_eta": [],
+        "Jet1_eta": [],
+        "Jet2_eta": [],
+        "Jet3_eta": [],
+        "Jet0_phi": [],
+        "Jet1_phi": [],
+        "Jet2_phi": [],
+        "Jet3_phi": [],
+        "Jet0_m": [],
+        "Jet1_m": [],
+        "Jet2_m": [],
+        "Jet3_m": [],
         "weight": [],
         "fourTag": [],
         "m01": [],
@@ -116,13 +76,14 @@ def make_df(tree, fourTag=True, verbose=False, fromnp=True):
         "dR13": [],
         "dR03": [],
         "dR12": [],
-        "s4j": [],
         "dR0123": [],
         "dR0213": [],
         "dR0312": [],
         "mZZ0123": [],
         "mZZ0213": [],
         "mZZ0312": [],
+        "s4j": [],
+        "m4j": [],
     }
 
     sw = ROOT.TStopwatch()
@@ -143,84 +104,33 @@ def make_df(tree, fourTag=True, verbose=False, fromnp=True):
             )
             sys.stdout.flush()
 
-        if fromnp:
-            data["canJet0_pt"].append(copy(tree.jetPt0))
-            data["canJet1_pt"].append(copy(tree.jetPt1))
-            data["canJet2_pt"].append(copy(tree.jetPt2))
-            data["canJet3_pt"].append(copy(tree.jetPt3))
-            data["canJet0_eta"].append(copy(tree.jetEta0))
-            data["canJet1_eta"].append(copy(tree.jetEta1))
-            data["canJet2_eta"].append(copy(tree.jetEta2))
-            data["canJet3_eta"].append(copy(tree.jetEta3))
-            data["canJet0_phi"].append(copy(tree.jetPhi0))
-            data["canJet1_phi"].append(copy(tree.jetPhi1))
-            data["canJet2_phi"].append(copy(tree.jetPhi2))
-            data["canJet3_phi"].append(copy(tree.jetPhi3))
-            data["canJet0_e"].append(copy(tree.jetEnergy0))
-            data["canJet1_e"].append(copy(tree.jetEnergy1))
-            data["canJet2_e"].append(copy(tree.jetEnergy2))
-            data["canJet3_e"].append(copy(tree.jetEnergy3))
+        data["Jet0_pt"].append(copy(tree.Jet_pt[0]))
+        data["Jet1_pt"].append(copy(tree.Jet_pt[1]))
+        data["Jet2_pt"].append(copy(tree.Jet_pt[2]))
+        data["Jet3_pt"].append(copy(tree.Jet_pt[3]))
+        data["Jet0_eta"].append(copy(tree.Jet_eta[0]))
+        data["Jet1_eta"].append(copy(tree.Jet_eta[1]))
+        data["Jet2_eta"].append(copy(tree.Jet_eta[2]))
+        data["Jet3_eta"].append(copy(tree.Jet_eta[3]))
+        data["Jet0_phi"].append(copy(tree.Jet_phi[0]))
+        data["Jet1_phi"].append(copy(tree.Jet_phi[1]))
+        data["Jet2_phi"].append(copy(tree.Jet_phi[2]))
+        data["Jet3_phi"].append(copy(tree.Jet_phi[3]))
+        data["Jet0_m"].append(copy(tree.Jet_mass[0]))
+        data["Jet1_m"].append(copy(tree.Jet_mass[1]))
+        data["Jet2_m"].append(copy(tree.Jet_mass[2]))
+        data["Jet3_m"].append(copy(tree.Jet_mass[3]))
 
-            jets = [
-                ROOT.TLorentzVector(),
-                ROOT.TLorentzVector(),
-                ROOT.TLorentzVector(),
-                ROOT.TLorentzVector(),
-            ]
-            jets[0].SetPtEtaPhiE(
-                tree.jetPt0, tree.jetEta0, tree.jetPhi0, tree.jetEnergy0
+        jets = [
+            ROOT.TLorentzVector(),
+            ROOT.TLorentzVector(),
+            ROOT.TLorentzVector(),
+            ROOT.TLorentzVector(),
+        ]
+        for i in range(4):
+            jets[i].SetPtEtaPhiM(
+                tree.Jet_pt[i], tree.Jet_eta[i], tree.Jet_phi[i], tree.Jet_mass[i]
             )
-            jets[1].SetPtEtaPhiE(
-                tree.jetPt1, tree.jetEta1, tree.jetPhi1, tree.jetEnergy1
-            )
-            jets[2].SetPtEtaPhiE(
-                tree.jetPt2, tree.jetEta2, tree.jetPhi2, tree.jetEnergy2
-            )
-            jets[3].SetPtEtaPhiE(
-                tree.jetPt3, tree.jetEta3, tree.jetPhi3, tree.jetEnergy3
-            )
-
-        else:
-            data["canJet0_pt"].append(copy(tree.jetPt[0]))
-            data["canJet1_pt"].append(copy(tree.jetPt[1]))
-            data["canJet2_pt"].append(copy(tree.jetPt[2]))
-            data["canJet3_pt"].append(copy(tree.jetPt[3]))
-            data["canJet0_eta"].append(copy(tree.jetEta[0]))
-            data["canJet1_eta"].append(copy(tree.jetEta[1]))
-            data["canJet2_eta"].append(copy(tree.jetEta[2]))
-            data["canJet3_eta"].append(copy(tree.jetEta[3]))
-            data["canJet0_phi"].append(copy(tree.jetPhi[0]))
-            data["canJet1_phi"].append(copy(tree.jetPhi[1]))
-            data["canJet2_phi"].append(copy(tree.jetPhi[2]))
-            data["canJet3_phi"].append(copy(tree.jetPhi[3]))
-            data["canJet0_e"].append(copy(tree.jetEnergy[0]))
-            data["canJet1_e"].append(copy(tree.jetEnergy[1]))
-            data["canJet2_e"].append(copy(tree.jetEnergy[2]))
-            data["canJet3_e"].append(copy(tree.jetEnergy[3]))
-
-            jets = [
-                ROOT.TLorentzVector(),
-                ROOT.TLorentzVector(),
-                ROOT.TLorentzVector(),
-                ROOT.TLorentzVector(),
-            ]
-            jets[0].SetPtEtaPhiE(
-                tree.jetPt[0], tree.jetEta[0], tree.jetPhi[0], tree.jetEnergy[0]
-            )
-            jets[1].SetPtEtaPhiE(
-                tree.jetPt[1], tree.jetEta[1], tree.jetPhi[1], tree.jetEnergy[1]
-            )
-            jets[2].SetPtEtaPhiE(
-                tree.jetPt[2], tree.jetEta[2], tree.jetPhi[2], tree.jetEnergy[2]
-            )
-            jets[3].SetPtEtaPhiE(
-                tree.jetPt[3], tree.jetEta[3], tree.jetPhi[3], tree.jetEnergy[3]
-            )
-
-        data["canJet0_m"].append(copy(jets[0].M()))
-        data["canJet1_m"].append(copy(jets[1].M()))
-        data["canJet2_m"].append(copy(jets[2].M()))
-        data["canJet3_m"].append(copy(jets[3].M()))
 
         d01, d23 = jets[0] + jets[1], jets[2] + jets[3]
         d02, d13 = jets[0] + jets[2], jets[1] + jets[3]
@@ -293,74 +203,35 @@ def make_df(tree, fourTag=True, verbose=False, fromnp=True):
         # data['st'].append(copy(tree.st))
         # data['stNotCan'].append(copy(tree.stNotCan))
 
-        if fromnp:
-            data["s4j"].append(tree.jetPt0 + tree.jetPt1 + tree.jetPt2 + tree.jetPt3)
+        data["s4j"].append(
+            tree.Jet_pt[0] + tree.Jet_pt[1] + tree.Jet_pt[2] + tree.Jet_pt[3]
+        )
 
-        else:
-            data["s4j"].append(
-                tree.jetPt[0] + tree.jetPt[1] + tree.jetPt[2] + tree.jetPt[3]
-            )
+        data["m4j"].append((jets[0] + jets[1] + jets[2] + jets[3]).M())
 
-        data["m4j"].append(copy(tree.m4j))
-        # data['xWt0'].append(copy(tree.xWt0))
-        # data['xWt1'].append(copy(tree.xWt1))
         data["weight"].append(copy(tree.weight))
-        # data['nPVsGood']    .append(copy(tree.nPVsGood))
-        # data['pseudoTagWeight']    .append(copy(tree.pseudoTagWeight))
-        # data['passHLT'].append(copy(tree.passHLT))
-        # data['ZHSB'].append(copy(tree.ZHSB)); data['ZHCR'].append(copy(tree.ZHCR)); data['ZHSR'].append(copy(tree.ZHSR))
-        # data['ZZSB'].append(copy(tree.ZZSB)); data['ZZCR'].append(copy(tree.ZZCR)); data['ZZSR'].append(copy(tree.ZZSR))
-        data["SB"].append(copy(tree.SB))
-        data["CR"].append(copy(tree.CR))
-        data["SR"].append(copy(tree.SR))
-        # data['passDEtaBB'].append(copy(tree.passDEtaBB))
         data["fourTag"].append(fourTag)
-        # data['nSelJets'].append(copy(tree.nSelJets))
-        # data['nPSTJets'].append(copy(tree.nPSTJets))
-        data["dRjjClose"].append(copy(tree.dRjjClose))
-        data["dRjjOther"].append(copy(tree.dRjjOther))
-        data["aveAbsEta"].append(copy(tree.aveAbsEta))
-        # data['aveAbsEtaOth'] .append(copy(tree.aveAbsEtaOth))
 
     # print
 
-    # data['st'] = np.array(data['st'], np.float32)
-    # data['stNotCan'] = np.array(data['stNotCan'], np.float32)
-    data["s4j"] = np.array(data["s4j"], np.float32)
-    data["m4j"] = np.array(data["m4j"], np.float32)
-    # data['xWt0'] = np.array(data['xWt0'], np.float32)
-    # data['xWt1'] = np.array(data['xWt1'], np.float32)
     data["weight"] = np.array(data["weight"], np.float32)
-    # data['nPVsGood']     = np.array(data['nPVsGood'],     np.float32)
-    # data['pseudoTagWeight']     = np.array(data['pseudoTagWeight'],     np.float32)
-    # data['ZHSB'] = np.array(data['ZHSB'], np.bool_); data['ZHCR'] = np.array(data['ZHCR'], np.bool_); data['ZHSR'] = np.array(data['ZHSR'], np.bool_)
-    # data['ZZSB'] = np.array(data['ZZSB'], np.bool_); data['ZZCR'] = np.array(data['ZZCR'], np.bool_); data['ZZSR'] = np.array(data['ZZSR'], np.bool_)
-    data["SB"] = np.array(data["SB"], np.bool_)
-    data["CR"] = np.array(data["CR"], np.bool_)
-    data["SR"] = np.array(data["SR"], np.bool_)
-    # data['passHLT'] = np.array(data['passHLT'], np.bool_)
-    # data['passDEtaBB'] = np.array(data['passDEtaBB'], np.bool_)
     data["fourTag"] = np.array(data["fourTag"], np.bool_)
-    data["canJet0_pt"] = np.array(data["canJet0_pt"], np.float32)
-    data["canJet1_pt"] = np.array(data["canJet1_pt"], np.float32)
-    data["canJet2_pt"] = np.array(data["canJet2_pt"], np.float32)
-    data["canJet3_pt"] = np.array(data["canJet3_pt"], np.float32)
-    data["canJet0_eta"] = np.array(data["canJet0_eta"], np.float32)
-    data["canJet1_eta"] = np.array(data["canJet1_eta"], np.float32)
-    data["canJet2_eta"] = np.array(data["canJet2_eta"], np.float32)
-    data["canJet3_eta"] = np.array(data["canJet3_eta"], np.float32)
-    data["canJet0_phi"] = np.array(data["canJet0_phi"], np.float32)
-    data["canJet1_phi"] = np.array(data["canJet1_phi"], np.float32)
-    data["canJet2_phi"] = np.array(data["canJet2_phi"], np.float32)
-    data["canJet3_phi"] = np.array(data["canJet3_phi"], np.float32)
-    data["canJet0_e"] = np.array(data["canJet0_e"], np.float32)
-    data["canJet1_e"] = np.array(data["canJet1_e"], np.float32)
-    data["canJet2_e"] = np.array(data["canJet2_e"], np.float32)
-    data["canJet3_e"] = np.array(data["canJet3_e"], np.float32)
-    data["canJet0_m"] = np.array(data["canJet0_m"], np.float32)
-    data["canJet1_m"] = np.array(data["canJet1_m"], np.float32)
-    data["canJet2_m"] = np.array(data["canJet2_m"], np.float32)
-    data["canJet3_m"] = np.array(data["canJet3_m"], np.float32)
+    data["Jet0_pt"] = np.array(data["Jet0_pt"], np.float32)
+    data["Jet1_pt"] = np.array(data["Jet1_pt"], np.float32)
+    data["Jet2_pt"] = np.array(data["Jet2_pt"], np.float32)
+    data["Jet3_pt"] = np.array(data["Jet3_pt"], np.float32)
+    data["Jet0_eta"] = np.array(data["Jet0_eta"], np.float32)
+    data["Jet1_eta"] = np.array(data["Jet1_eta"], np.float32)
+    data["Jet2_eta"] = np.array(data["Jet2_eta"], np.float32)
+    data["Jet3_eta"] = np.array(data["Jet3_eta"], np.float32)
+    data["Jet0_phi"] = np.array(data["Jet0_phi"], np.float32)
+    data["Jet1_phi"] = np.array(data["Jet1_phi"], np.float32)
+    data["Jet2_phi"] = np.array(data["Jet2_phi"], np.float32)
+    data["Jet3_phi"] = np.array(data["Jet3_phi"], np.float32)
+    data["Jet0_m"] = np.array(data["Jet0_m"], np.float32)
+    data["Jet1_m"] = np.array(data["Jet1_m"], np.float32)
+    data["Jet2_m"] = np.array(data["Jet2_m"], np.float32)
+    data["Jet3_m"] = np.array(data["Jet3_m"], np.float32)
     data["m01"] = np.array(data["m01"], np.float32)
     data["m23"] = np.array(data["m23"], np.float32)
     data["m02"] = np.array(data["m02"], np.float32)
@@ -382,22 +253,11 @@ def make_df(tree, fourTag=True, verbose=False, fromnp=True):
     data["dR0123"] = np.array(data["dR0123"], np.float32)
     data["dR0213"] = np.array(data["dR0213"], np.float32)
     data["dR0312"] = np.array(data["dR0312"], np.float32)
-    # data['mZH0123'] = np.array(data['mZH0123'], np.float32)
-    # data['mZH0213'] = np.array(data['mZH0213'], np.float32)
-    # data['mZH0312'] = np.array(data['mZH0312'], np.float32)
     data["mZZ0123"] = np.array(data["mZZ0123"], np.float32)
     data["mZZ0213"] = np.array(data["mZZ0213"], np.float32)
     data["mZZ0312"] = np.array(data["mZZ0312"], np.float32)
-    # data['nSelJets']   = np.array(data['nSelJets'],   np.uint32)
-    # data['nPSTJets']   = np.array(data['nPSTJets'],   np.uint32)
-    data["dRjjClose"] = np.array(data["dRjjClose"], np.float32)
-    data["dRjjOther"] = np.array(data["dRjjOther"], np.float32)
-    data["aveAbsEta"] = np.array(data["aveAbsEta"], np.float32)
-    # data['aveAbsEtaOth']  = np.array(data['aveAbsEtaOth'],  np.float32)
-
-    # if FvTStatus: data['FvT'] = np.array(data['FvT'], np.float32)
-    # if ZHvBStatus: data['ZHvB'] = np.array(data['ZHvB'], np.float32)
-    # if ZZvBStatus: data['ZZvB'] = np.array(data['ZZvB'], np.float32)
+    data["s4j"] = np.array(data["s4j"], np.float32)
+    data["m4j"] = np.array(data["m4j"], np.float32)
 
     if verbose:
         for key, value in data.items():

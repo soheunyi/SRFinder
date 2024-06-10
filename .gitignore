@@ -3,3 +3,4 @@ figures
 *.pdf
 *.h5
 *.npy
+*.root

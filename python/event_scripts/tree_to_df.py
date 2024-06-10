@@ -34,6 +34,6 @@ args = parser.parse_args()
 print(args.fourTag)
 
 f = ROOT.TFile(args.pathin, "READ")
-t = f.Get("Tree")
-df = make_df.make_df(t, fromnp=False, fourTag=args.fourTag)
+t = f.Get("Events")
+df = make_df.make_df(t, fourTag=args.fourTag)
 df.to_hdf(args.pathout, key="df", mode="w")

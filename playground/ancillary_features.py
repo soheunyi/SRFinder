@@ -38,9 +38,9 @@ def PtEtaPhi_to_PxPyPz(Pt, Eta, Phi):
     return Px, Py, Pz
 
 
-def LorentzSum(jet0: torch.Tensor, jet1: torch.Tensor):
-    Pt0, Eta0, Phi0, m0 = get_jet_features(jet0)
-    Pt1, Eta1, Phi1, m1 = get_jet_features(jet1)
+def LorentzSum(jet0: torch.Tensor, jet1: torch.Tensor, dim=3):
+    Pt0, Eta0, Phi0, m0 = get_jet_features(jet0, dim=dim)
+    Pt1, Eta1, Phi1, m1 = get_jet_features(jet1, dim=dim)
 
     Px0, Px1 = Pt0 * torch.cos(Phi0), Pt1 * torch.cos(Phi1)
     Py0, Py1 = Pt0 * torch.sin(Phi0), Pt1 * torch.sin(Phi1)
@@ -63,13 +63,23 @@ def deltaR(jet0: torch.Tensor, jet1: torch.Tensor):
     return torch.sqrt((Eta0 - Eta1) ** 2 + dPhi**2)
 
 
-def get_jet_features(jet: torch.Tensor):
-    Pt, Eta, Phi, m = (
-        jet[:, 0:1, :],
-        jet[:, 1:2, :],
-        jet[:, 2:3, :],
-        jet[:, 3:4, :],
-    )
+def get_jet_features(jet: torch.Tensor, dim=3):
+    if dim == 3:
+        Pt, Eta, Phi, m = (
+            jet[:, 0:1, :],
+            jet[:, 1:2, :],
+            jet[:, 2:3, :],
+            jet[:, 3:4, :],
+        )
+    elif dim == 2:
+        Pt, Eta, Phi, m = (
+            jet[:, 0:1],
+            jet[:, 1:2],
+            jet[:, 2:3],
+            jet[:, 3:4],
+        )
+    else:
+        raise ValueError("dim should be 2 or 3")
     return Pt, Eta, Phi, m
 
 
@@ -209,3 +219,16 @@ def get_ancillary_features(J: torch.Tensor):
     )
 
     return augmented_jet_features, dijet_ancillary_features, quadjet_ancillary_features
+
+
+def get_m4j(X):
+    jet00 = X[:, [0 + 4 * i for i in range(4)]]
+    jet01 = X[:, [1 + 4 * i for i in range(4)]]
+
+    jet10 = X[:, [2 + 4 * i for i in range(4)]]
+    jet11 = X[:, [3 + 4 * i for i in range(4)]]
+
+    dijet0 = LorentzSum(jet00, jet01, dim=2)
+    dijet1 = LorentzSum(jet10, jet11, dim=2)
+    quadjet = LorentzSum(dijet0, dijet1, dim=2)
+    return quadjet[:, 3].cpu().numpy()
