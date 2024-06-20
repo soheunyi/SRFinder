@@ -90,14 +90,18 @@ def get_jet_from_features(
 
 
 def jets_to_dijets(
-    jet0: torch.Tensor, jet1: torch.Tensor, jet2: torch.Tensor, jet3: torch.Tensor
+    jet0: torch.Tensor,
+    jet1: torch.Tensor,
+    jet2: torch.Tensor,
+    jet3: torch.Tensor,
+    dim=3,
 ):
-    dijet01 = LorentzSum(jet0, jet1)
-    dijet23 = LorentzSum(jet2, jet3)
-    dijet02 = LorentzSum(jet0, jet2)
-    dijet13 = LorentzSum(jet1, jet3)
-    dijet03 = LorentzSum(jet0, jet3)
-    dijet12 = LorentzSum(jet1, jet2)
+    dijet01 = LorentzSum(jet0, jet1, dim=dim)
+    dijet23 = LorentzSum(jet2, jet3, dim=dim)
+    dijet02 = LorentzSum(jet0, jet2, dim=dim)
+    dijet13 = LorentzSum(jet1, jet3, dim=dim)
+    dijet03 = LorentzSum(jet0, jet3, dim=dim)
+    dijet12 = LorentzSum(jet1, jet2, dim=dim)
 
     return dijet01, dijet23, dijet02, dijet13, dijet03, dijet12
 

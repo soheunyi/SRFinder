@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 
 def get_fvt_reprs(X, model, device=torch.device("cuda:0")):
-    assert X.shape[0] % 1024 == 0
     dataset = TensorDataset(X)
     loader = DataLoader(dataset, batch_size=1024, shuffle=False)
     model = model.to(device)

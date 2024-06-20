@@ -2,6 +2,7 @@ import pathlib
 import sys
 import numpy as np
 import pandas as pd
+import torch
 
 sys.path.append("/home/soheuny/HH4bsim")
 
@@ -38,3 +39,24 @@ AE_4B_INDEX = rand_perm_4B[
 # Rest for testing
 TEST_3B_INDEX = rand_perm_3B[int((DR_RATIO + AE_RATIO) * df3B.index.size) :]
 TEST_4B_INDEX = rand_perm_4B[int((DR_RATIO + AE_RATIO) * df4B.index.size) :]
+
+
+def split_samples(*data, at: float, div: int = None, seed: int = 42):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    for d in data:
+        assert len(d) == len(data[0])
+
+    if div is None:
+        split_at = int(at * len(data[0]))
+        end_at = len(data[0])
+    else:
+        split_at = div * (int(at * len(data[0])) // div)
+        end_at = div * (len(data[0]) // div)
+
+    # shuffle
+    indices = np.random.permutation(len(data[0]))
+    data = [d[indices] for d in data]
+
+    return [d[:split_at] for d in data], [d[split_at:end_at] for d in data]

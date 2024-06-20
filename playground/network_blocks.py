@@ -375,13 +375,13 @@ class GhostBatchNorm1d(
             return x
         else:
             # inference stage, use running mean and standard deviation
-            x = x - self.m
-            x = x / self.s
+            x = x - self.m.type(x.dtype)
+            x = x / self.s.type(x.dtype)
             x = x.transpose(1, 2)
             x = x * self.gamma
             x = x + self.bias
             x = x.transpose(1, 2)
-            # x = (self.gamma * ((x - self.m)/self.s).transpose(1,2) + self.bias).transpose(1,2)
+
             return x
 
 

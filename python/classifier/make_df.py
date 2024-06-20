@@ -116,10 +116,14 @@ def make_df(tree, fourTag=True, verbose=False):
         data["Jet1_phi"].append(copy(tree.Jet_phi[1]))
         data["Jet2_phi"].append(copy(tree.Jet_phi[2]))
         data["Jet3_phi"].append(copy(tree.Jet_phi[3]))
-        data["Jet0_m"].append(copy(tree.Jet_mass[0]))
-        data["Jet1_m"].append(copy(tree.Jet_mass[1]))
-        data["Jet2_m"].append(copy(tree.Jet_mass[2]))
-        data["Jet3_m"].append(copy(tree.Jet_mass[3]))
+        data["Jet0_m"].append(0.0)
+        data["Jet1_m"].append(0.0)
+        data["Jet2_m"].append(0.0)
+        data["Jet3_m"].append(0.0)
+        # data["Jet0_m"].append(copy(tree.Jet_mass[0]))
+        # data["Jet1_m"].append(copy(tree.Jet_mass[1]))
+        # data["Jet2_m"].append(copy(tree.Jet_mass[2]))
+        # data["Jet3_m"].append(copy(tree.Jet_mass[3]))
 
         jets = [
             ROOT.TLorentzVector(),
