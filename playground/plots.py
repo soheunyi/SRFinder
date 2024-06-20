@@ -14,8 +14,8 @@ def plot_prob_weighted_histogram1d(
     labels_4b: np.ndarray,
     n_bins: int = 7,
     sample_weights: np.ndarray = None,
-    output_file: str = None,
     ylim: tuple[float, float] = None,
+    show_plot: bool = True,
 ):
     if sample_weights is None:
         sample_weights = np.ones_like(plot_feature_arr)
@@ -88,10 +88,11 @@ def plot_prob_weighted_histogram1d(
     if ylim != None:
         ax.set_ylim(ylim)
 
-    if output_file != None:
-        plt.savefig(output_file)
-    plt.show()
-    plt.close()
+    if show_plot:
+        plt.show()
+        plt.close()
+    else:
+        return fig
 
 
 def plot_prob_weighted_histogram2d(
@@ -99,8 +100,8 @@ def plot_prob_weighted_histogram2d(
     df_val: pd.DataFrame,
     plot_features: list[str],
     n_bins: int = 7,
-    output_file: str = None,
     ylim: tuple[float, float] = None,
+    show_plot: bool = True,
 ):
     assert "target" in df_val.columns
 
@@ -192,10 +193,12 @@ def plot_prob_weighted_histogram2d(
                 color="w",
             )
     plt.colorbar(im, ax=ax[1])
-    if output_file != None:
-        plt.savefig(output_file)
-    plt.show()
-    plt.close()
+
+    if show_plot:
+        plt.show()
+        plt.close()
+    else:
+        return fig
 
 
 def calibration_plot(
@@ -203,6 +206,7 @@ def calibration_plot(
     true_labels: np.ndarray,
     bins: int = 20,
     sample_weights: np.ndarray = None,
+    show_plot: bool = True,
 ):
     if sample_weights is None:
         sample_weights = np.ones_like(probs_est)
@@ -263,8 +267,12 @@ def calibration_plot(
     ax.legend()
     ax2.hist(probs_est, bins=bins, alpha=0.5, color="gray")
     # ax2.set_yscale("log")
-    plt.show()
-    plt.close()
+
+    if show_plot:
+        plt.show()
+        plt.close()
+    else:
+        return fig
 
 
 def plot_cluster(
@@ -275,6 +283,7 @@ def plot_cluster(
     weights,
     n_components=2,
     title="",
+    show_plot=True,
 ):
 
     assert q_repr.shape[1] == n_components
@@ -344,8 +353,11 @@ def plot_cluster(
         ax[1].legend()
         ax[1].set_xlabel("cluster")
 
-        plt.show()
-        plt.close()
+        if show_plot:
+            plt.show()
+            plt.close()
+        else:
+            return fig
     else:
         fig = go.Figure()
         fig.update_layout(width=600, height=600)
