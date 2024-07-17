@@ -115,12 +115,15 @@ def main(
     events_signal.shuffle(seed=seed)
     events_signal.trim(int(n_all4b * signal_ratio))
 
+    assert signal_ratio == 0 or int(n_all4b * signal_ratio) > 0
+
     # set weight ratio to be exactly signal ratio
-    new_hh4b_weights = (
-        (signal_ratio / (1 - signal_ratio))
-        * (events_bg4b.total_weight / events_signal.total_weight)
-        * events_signal.weights
-    )
+    if len(events_signal) > 0:
+        new_hh4b_weights = (
+            (signal_ratio / (1 - signal_ratio))
+            * (events_bg4b.total_weight / events_signal.total_weight)
+            * events_signal.weights
+        )
     events_signal.reweight(new_hh4b_weights)
 
     # set four tag ratio to be exactly four_tag_ratio

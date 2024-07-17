@@ -1,7 +1,7 @@
-for sr in 0 0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08 0.09 0.1
-do
-	for seed in 42 52 62
+for seed in 42 52
 	do
-		python fvt_first_training.py --seed $seed --signal_ratio $sr 
+	for sr in 0.0025 0.005 0.0075 0.01
+	do
+		python fvt_first_training.py --seed $seed --signal_ratio $sr --n_3b 2000000 --n_all4b 2000000
 	done
 done

@@ -213,7 +213,7 @@ class EventsData:
     def __repr__(self):
         ratio_4b = self.total_weight_4b / self.total_weight
         ratio_signal = self.total_weight_signal / self.total_weight_4b
-        return f"EventsData(name={self._name}, w_sum={self.total_weight:.2f}, ratio_4b={ratio_4b:.2f}, ratio_signal={ratio_signal:.2f})"
+        return f"EventsData(name={self._name}, w_sum={self.total_weight:.2f}, ratio_4b={ratio_4b:.2f}, ratio_signal={ratio_signal:.2f}, length={len(self)})"
 
     def __len__(self):
         return self._X.shape[0]
