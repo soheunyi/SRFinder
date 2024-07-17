@@ -22,37 +22,20 @@ def routine_1(
     max_epochs: int = 50,
     return_keys: list[str] = ["train", "val", "test"],
 ) -> dict[str, EventsData]:
+
     directory = pathlib.Path("../events/MG3")
-    path_df_3b = directory / "dataframes" / f"threeTag_picoAOD_{n_3b}_{seed}.h5"
-    if pathlib.Path(path_df_3b).exists():
-        df_3b = pd.read_hdf(path_df_3b)
-    else:
-        df_3b = pd.read_hdf(directory / "dataframes" / "threeTag_picoAOD.h5")
-        df_3b = df_3b.sample(frac=1, random_state=seed).reset_index(drop=True)
-        df_3b = df_3b.iloc[:n_3b]
-        df_3b.to_hdf(path_df_3b, key="df", mode="w")
 
-    path_df_bg4b = directory / "dataframes" / f"fourTag_10x_picoAOD_{n_all4b}_{seed}.h5"
-    if pathlib.Path(path_df_bg4b).exists():
-        df_bg4b = pd.read_hdf(path_df_bg4b)
-    else:
-        df_bg4b = pd.read_hdf(directory / "dataframes" / "fourTag_10x_picoAOD.h5")
-        df_bg4b = df_bg4b.sample(frac=1, random_state=seed).reset_index(drop=True)
-        df_bg4b = df_bg4b.iloc[:n_all4b]
-        df_bg4b.to_hdf(
-            path_df_bg4b,
-            key="df",
-            mode="w",
-        )
+    df_3b = pd.read_hdf(directory / "dataframes" / "threeTag_picoAOD.h5")
+    df_3b = df_3b.sample(frac=1, random_state=seed).reset_index(drop=True)
+    df_3b = df_3b.iloc[:n_3b]
 
-    path_df_signal = directory / "dataframes" / f"HH4b_picoAOD_{n_all4b}_{seed}.h5"
-    if pathlib.Path(path_df_signal).exists():
-        df_signal = pd.read_hdf(path_df_signal)
-    else:
-        df_signal = pd.read_hdf(directory / "dataframes" / "HH4b_picoAOD.h5")
-        df_signal = df_signal.sample(frac=1, random_state=seed).reset_index(drop=True)
-        df_signal = df_signal.iloc[:n_all4b]
-        df_signal.to_hdf(path_df_signal, key="df", mode="w")
+    df_bg4b = pd.read_hdf(directory / "dataframes" / "fourTag_10x_picoAOD.h5")
+    df_bg4b = df_bg4b.sample(frac=1, random_state=seed).reset_index(drop=True)
+    df_bg4b = df_bg4b.iloc[:n_all4b]
+
+    df_signal = pd.read_hdf(directory / "dataframes" / "HH4b_picoAOD.h5")
+    df_signal = df_signal.sample(frac=1, random_state=seed).reset_index(drop=True)
+    df_signal = df_signal.iloc[:n_all4b]
 
     df_3b["signal"] = False
     df_bg4b["signal"] = False
@@ -232,3 +215,78 @@ def fvt_score_hist(events_data: EventsData, ax: plt.Axes = None):
     )
     ax.legend()
     ax.set_xlabel("FvT output")
+
+
+def att_q_repr_hist(events_data: EventsData, dim_quadjet_features: int):
+    is_3b, is_bg4b, is_signal = (
+        events_data.is_3b,
+        events_data.is_bg4b,
+        events_data.is_signal,
+    )
+    fig, ax = plt.subplots(nrows=dim_quadjet_features, ncols=2, figsize=(12, 24))
+    w = events_data.weights
+    att_q_repr = events_data.att_q_repr
+
+    for i in range(dim_quadjet_features):
+        ax[i, 0].hist(
+            att_q_repr[is_3b, i],
+            bins=50,
+            label="bg 3b",
+            linewidth=1,
+            histtype="step",
+            density=False,
+            weights=w[is_3b],
+        )
+        ax[i, 0].hist(
+            att_q_repr[is_bg4b, i],
+            bins=50,
+            label="bg 4b",
+            linewidth=1,
+            histtype="step",
+            density=False,
+            weights=w[is_bg4b],
+        )
+        ax[i, 0].hist(
+            att_q_repr[is_signal, i],
+            bins=50,
+            label="HH 4b",
+            linewidth=1,
+            histtype="step",
+            density=False,
+            weights=w[is_signal],
+        )
+        ax[i, 0].legend()
+        ax[i, 0].set_xlabel(f"Feature {i}")
+
+        ax[i, 1].hist(
+            att_q_repr[is_3b, i],
+            bins=50,
+            label="bg 3b",
+            linewidth=1,
+            histtype="step",
+            density=True,
+            weights=w[is_3b],
+        )
+        ax[i, 1].hist(
+            att_q_repr[is_bg4b, i],
+            bins=50,
+            label="bg 4b",
+            linewidth=1,
+            histtype="step",
+            density=True,
+            weights=w[is_bg4b],
+        )
+        ax[i, 1].hist(
+            att_q_repr[is_signal, i],
+            bins=50,
+            label="HH 4b",
+            linewidth=1,
+            histtype="step",
+            density=True,
+            weights=w[is_signal],
+        )
+        ax[i, 1].legend()
+        ax[i, 1].set_xlabel(f"Feature {i}")
+
+    plt.show()
+    plt.close()

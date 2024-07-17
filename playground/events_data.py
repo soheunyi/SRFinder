@@ -220,7 +220,7 @@ class EventsData:
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return self.get(range(*idx))
+            return self.get(range(*idx.indices(len(self))))
         elif isinstance(idx, Iterable):
             return self.get(idx)
         else:

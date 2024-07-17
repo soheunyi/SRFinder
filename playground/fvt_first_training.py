@@ -37,38 +37,17 @@ def main(
 ):
 
     directory = pathlib.Path("../events/MG3")
-    path_df_3b = directory / "dataframes" / f"threeTag_picoAOD_{n_3b}_{seed}.h5"
-    if pathlib.Path(path_df_3b).exists():
-        df_3b = pd.read_hdf(path_df_3b)
-    else:
-        df_3b = pd.read_hdf(directory / "dataframes" / "threeTag_picoAOD.h5")
-        df_3b = df_3b.sample(frac=1, random_state=seed).reset_index(drop=True)
-        df_3b = df_3b.iloc[:n_3b]
-        df_3b.to_hdf(path_df_3b, key="df", mode="w")
+    df_3b = pd.read_hdf(directory / "dataframes" / "threeTag_picoAOD.h5")
+    df_3b = df_3b.sample(frac=1, random_state=seed).reset_index(drop=True)
+    df_3b = df_3b.iloc[:n_3b]
 
-    path_df_bg4b = directory / "dataframes" / f"fourTag_10x_picoAOD_{n_all4b}_{seed}.h5"
-    if pathlib.Path(path_df_bg4b).exists():
-        df_bg4b = pd.read_hdf(path_df_bg4b)
-    else:
-        df_bg4b = pd.read_hdf(directory / "dataframes" / "fourTag_10x_picoAOD.h5")
-        df_bg4b = df_bg4b.sample(frac=1, random_state=seed).reset_index(drop=True)
-        df_bg4b = df_bg4b.iloc[:n_all4b]
-        df_bg4b.to_hdf(
-            path_df_bg4b,
-            key="df",
-            mode="w",
-        )
+    df_bg4b = pd.read_hdf(directory / "dataframes" / "fourTag_10x_picoAOD.h5")
+    df_bg4b = df_bg4b.sample(frac=1, random_state=seed).reset_index(drop=True)
+    df_bg4b = df_bg4b.iloc[:n_all4b]
 
-    path_df_signal = directory / "dataframes" / f"HH4b_picoAOD_{n_all4b}_{seed}.h5"
-    if pathlib.Path(path_df_signal).exists():
-        df_signal = pd.read_hdf(path_df_signal)
-    else:
-        df_signal = pd.read_hdf(directory / "dataframes" / "HH4b_picoAOD.h5")
-        df_signal = df_signal.sample(frac=1, random_state=seed).reset_index(drop=True)
-        df_signal = df_signal.iloc[:n_all4b]
-        df_signal.to_hdf(path_df_signal, key="df", mode="w")
-
-    # shortcut: load short and shuffled version data
+    df_signal = pd.read_hdf(directory / "dataframes" / "HH4b_picoAOD.h5")
+    df_signal = df_signal.sample(frac=1, random_state=seed).reset_index(drop=True)
+    df_signal = df_signal.iloc[:n_all4b]
 
     df_3b["signal"] = False
     df_bg4b["signal"] = False
