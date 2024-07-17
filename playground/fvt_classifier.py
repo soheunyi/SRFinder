@@ -35,8 +35,10 @@ class FvTClassifier(pl.LightningModule):
 
         self.train_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
+        self.train_total_weights = 0.0
         self.validation_losses = torch.tensor([])
         self.validation_batchsizes = torch.tensor([])
+        self.validation_total_weights = 0.0
         self.best_val_loss = torch.inf
 
         self.num_classes = num_classes
@@ -109,6 +111,7 @@ class FvTClassifier(pl.LightningModule):
         self.train_batchsizes = torch.cat(
             (self.train_batchsizes, torch.tensor(x.shape[0]).view(1))
         )
+        self.train_total_weights += w.sum()
 
         return loss
 
@@ -127,22 +130,28 @@ class FvTClassifier(pl.LightningModule):
         self.validation_batchsizes = torch.cat(
             (self.validation_batchsizes, torch.tensor(x.shape[0]).view(1))
         )
+        self.validation_total_weights += w.sum()
+
         return loss
 
     def on_train_epoch_end(self):
-        avg_loss = torch.sum(self.train_losses * self.train_batchsizes) / torch.sum(
-            self.train_batchsizes
+        avg_loss = (
+            torch.sum(self.train_losses * self.train_batchsizes)
+            / self.train_total_weights
         )
+
         self.log("train_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.train_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
+        self.train_total_weights = 0.0
 
         self.nan_check()
 
     def on_validation_epoch_end(self):
-        avg_loss = torch.sum(
-            self.validation_losses * self.validation_batchsizes
-        ) / torch.sum(self.validation_batchsizes)
+        avg_loss = (
+            torch.sum(self.validation_losses * self.validation_batchsizes)
+            / self.validation_total_weights
+        )
         self.log(
             "val_loss",
             avg_loss,
@@ -154,6 +163,7 @@ class FvTClassifier(pl.LightningModule):
             self.best_val_loss = avg_loss
         self.validation_losses = torch.tensor([])
         self.validation_batchsizes = torch.tensor([])
+        self.validation_total_weights = 0.0
 
         self.nan_check()
 

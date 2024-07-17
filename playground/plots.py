@@ -7,6 +7,8 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
+from events_data import EventsData
+
 
 def plot_prob_weighted_histogram1d(
     probs_4b: np.ndarray,
@@ -276,33 +278,37 @@ def calibration_plot(
 
 
 def plot_cluster(
-    q_repr,
-    is_3b,
-    is_bg4b,
-    is_hh4b,
-    weights,
+    q_repr: np.ndarray,
+    events_data: EventsData,
     n_components=2,
     title="",
     show_plot=True,
+    n_bins=50,
 ):
+    # assert isinstance(events_data, EventsData)
+    assert q_repr.shape[0] == len(events_data)
+    is_3b = events_data.is_3b
+    is_bg4b = events_data.is_bg4b
+    is_signal = events_data.is_signal
+    weights = events_data.weights
 
     assert q_repr.shape[1] == n_components
 
     if n_components == 1:
         # histogram
-        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12, 6))
+        fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
         fig.suptitle(
             "\n".join(
                 [
                     title,
-                    "3b: {}, bg 4b: {}, HH 4b: {}".format(
-                        np.sum(is_3b), np.sum(is_bg4b), np.sum(is_hh4b)
+                    "3b: {}, bg 4b: {}, Signal: {}".format(
+                        np.sum(is_3b), np.sum(is_bg4b), np.sum(is_signal)
                     ),
                 ]
             )
         )
         q_repr = q_repr.reshape(-1)
-        bins_range = np.linspace(np.min(q_repr), np.max(q_repr), 50)
+        bins_range = np.linspace(np.min(q_repr), np.max(q_repr), n_bins)
         hist_3b, _, _ = ax[0].hist(
             q_repr[is_3b],
             weights=weights[is_3b],
@@ -321,11 +327,11 @@ def plot_cluster(
             histtype="step",
             density=False,
         )
-        hist_hh4b, _, _ = ax[0].hist(
-            q_repr[is_hh4b],
-            weights=weights[is_hh4b],
+        hist_signal, _, _ = ax[0].hist(
+            q_repr[is_signal],
+            weights=weights[is_signal],
             bins=bins_range,
-            label="HH 4b",
+            label="Signal",
             linewidth=1,
             histtype="step",
             density=False,
@@ -334,24 +340,64 @@ def plot_cluster(
         ax[0].set_xlabel("cluster")
         # 4b / 3b ratio
 
-        hist_4b = hist_bg4b + hist_hh4b
+        hist_4b = hist_bg4b + hist_signal
+        hist_all = hist_3b + hist_4b
 
         # ignore warnings
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio_mean = hist_4b / hist_3b
-            ratio_std = np.sqrt(
-                hist_4b * (1 / hist_3b) ** 2 + (hist_4b / hist_3b**2) ** 2
-            )
         alpha = 0.05
-        z = stats.norm.ppf(1 - alpha / 2)
+        l2a = np.log(2 / alpha)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio_4b_mean_count = hist_4b / hist_all
+
+            ratio_4b_mean_fvt = np.zeros_like(hist_4b)
+            for i in range(len(hist_4b)):
+                weights_bin = weights[
+                    (q_repr >= bins_range[i]) & (q_repr < bins_range[i + 1])
+                ]
+                fvt_scores_bin = events_data.fvt_score[
+                    (q_repr >= bins_range[i]) & (q_repr < bins_range[i + 1])
+                ]
+                ratio_4b_mean_fvt[i] = np.sum(weights_bin * fvt_scores_bin) / np.sum(
+                    weights_bin
+                )
+
+            var_ratio_4b_count = ratio_4b_mean_count * (1 - ratio_4b_mean_count)
+            var_ratio_4b_fvt = ratio_4b_mean_fvt * (1 - ratio_4b_mean_fvt)
+            # bernstein style error
+            ratio_4b_err_count = (
+                4 * np.sqrt(var_ratio_4b_count * l2a / hist_all) + 4 * l2a / hist_all
+            )
+            ratio_4b_err_fvt = (
+                4 * np.sqrt(var_ratio_4b_fvt * l2a / hist_all) + 4 * l2a / hist_all
+            )
 
         with np.errstate(divide="ignore", invalid="ignore"):
-            ratio_lb = ratio_mean.reshape(-1) - z * ratio_std.reshape(-1)
-            ratio_ub = ratio_mean.reshape(-1) + z * ratio_std.reshape(-1)
-        ax[1].plot(bins_range[:-1], ratio_mean, label="4b / 3b")
-        ax[1].fill_between(bins_range[:-1], ratio_lb, ratio_ub, alpha=0.3)
+            ratio_lb_count = np.clip(
+                ratio_4b_mean_count.reshape(-1) - ratio_4b_err_count, 0, 1
+            )
+            ratio_ub_count = np.clip(
+                ratio_4b_mean_count.reshape(-1) + ratio_4b_err_count, 0, 1
+            )
+        ax[1].plot(bins_range[:-1], ratio_4b_mean_count, label="Ratio 4b")
+        ax[1].fill_between(bins_range[:-1], ratio_lb_count, ratio_ub_count, alpha=0.3)
         ax[1].legend()
         ax[1].set_xlabel("cluster")
+
+        twin_ax0 = ax[0].twinx()
+        twin_ax0.plot(bins_range[:-1], ratio_4b_mean_count, label="Ratio 4b")
+        ax[0].grid(color="k", linestyle="--", linewidth=0.5, axis="both")
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio_lb_fvt = np.clip(
+                ratio_4b_mean_fvt.reshape(-1) - ratio_4b_err_fvt, 0, 1
+            )
+            ratio_ub_fvt = np.clip(
+                ratio_4b_mean_fvt.reshape(-1) + ratio_4b_err_fvt, 0, 1
+            )
+        ax[2].plot(bins_range[:-1], ratio_4b_mean_fvt, label="Ratio 4b")
+        ax[2].fill_between(bins_range[:-1], ratio_lb_fvt, ratio_ub_fvt, alpha=0.3)
+        ax[2].legend()
+        ax[2].set_xlabel("cluster")
 
         if show_plot:
             plt.show()
@@ -366,8 +412,8 @@ def plot_cluster(
             title="<br>".join(
                 [
                     title,
-                    "3b: {}, bg 4b: {}, HH 4b: {}".format(
-                        np.sum(is_3b), np.sum(is_bg4b), np.sum(is_hh4b)
+                    "3b: {}, bg 4b: {}, Signal: {}".format(
+                        np.sum(is_3b), np.sum(is_bg4b), np.sum(is_signal)
                     ),
                 ]
             )
@@ -393,10 +439,10 @@ def plot_cluster(
             )
             fig.add_trace(
                 go.Scatter(
-                    x=q_repr[is_hh4b, 0],
-                    y=q_repr[is_hh4b, 1],
+                    x=q_repr[is_signal, 0],
+                    y=q_repr[is_signal, 1],
                     mode="markers",
-                    name="HH 4b",
+                    name="Signal",
                     marker=dict(size=3, color="green"),
                 )
             )
@@ -423,11 +469,11 @@ def plot_cluster(
             )
             fig.add_trace(
                 go.Scatter3d(
-                    x=q_repr[is_hh4b, 0],
-                    y=q_repr[is_hh4b, 1],
-                    z=q_repr[is_hh4b, 2],
+                    x=q_repr[is_signal, 0],
+                    y=q_repr[is_signal, 1],
+                    z=q_repr[is_signal, 2],
                     mode="markers",
-                    name="HH 4b",
+                    name="Signal",
                     marker=dict(size=3, color="green"),
                 )
             )
@@ -435,7 +481,7 @@ def plot_cluster(
         fig.show()
 
 
-def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_hh4b, weights):
+def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_signal, weights):
     q_repr = q_repr.reshape(-1)
     bins_range = np.linspace(np.min(q_repr), np.max(q_repr), 50)
     hist_3b, _, _ = ax0.hist(
@@ -456,11 +502,11 @@ def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_hh4b, weights):
         histtype="step",
         density=False,
     )
-    hist_hh4b, _, _ = ax0.hist(
-        q_repr[is_hh4b],
-        weights=weights[is_hh4b],
+    hist_signal, _, _ = ax0.hist(
+        q_repr[is_signal],
+        weights=weights[is_signal],
         bins=bins_range,
-        label="HH 4b",
+        label="Signal",
         linewidth=1,
         histtype="step",
         density=False,
@@ -469,7 +515,7 @@ def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_hh4b, weights):
     ax0.set_xlabel("cluster")
     # 4b / 3b ratio
 
-    hist_4b = hist_bg4b + hist_hh4b
+    hist_4b = hist_bg4b + hist_signal
 
     # ignore warnings
     with np.errstate(divide="ignore", invalid="ignore"):

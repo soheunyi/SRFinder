@@ -594,9 +594,7 @@ for probs_4b_threshold in [0.4, 0.5, 0.6, 0.7]:
                 f"probs_4b_threshold={probs_4b_threshold}",
                 "pick_high_ratio_4b_exceeded",
             ]
-            + ["discard_failed"]
-            if discard_failed
-            else []
+            + (["discard_failed"] if discard_failed else [])
         )
 
         (X_sb_train, y_sb_train, w_sb_train), (X_sb_val, y_sb_val, w_sb_val) = (

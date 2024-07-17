@@ -3,8 +3,10 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
 
+from fvt_classifier import FvTClassifier
 
-def get_fvt_reprs(X, model, device=torch.device("cuda:0")):
+
+def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0")):
     dataset = TensorDataset(X)
     loader = DataLoader(dataset, batch_size=1024, shuffle=False)
     model = model.to(device)
