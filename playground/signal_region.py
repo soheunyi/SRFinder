@@ -7,6 +7,14 @@ import umap
 import multiprocessing as mp
 
 
+def np_put(p):
+    n = p.size
+    s = np.zeros(n, dtype=np.int32)
+    i = np.arange(n, dtype=np.int32)
+    np.put(s, p, i)  # s[p[i]] = i
+    return s
+
+
 def fast_umap(reducer: umap.UMAP, n_workers: int = 4):
     def fast_umap_inner(data: np.ndarray):
         with mp.Pool(n_workers) as pool:
@@ -234,3 +242,100 @@ def get_fvt_cut_regions(
             seed=seed,
             p4b_method=p4b_method,
         )
+
+
+def get_regions_via_histogram(
+    events_data: EventsData,
+    w_cuts: Iterable[float],
+    binning_method="uniform",
+    n_bins=10,
+):
+    """
+    binning_method: uniform, quantile
+    """
+    assert all(0 <= w_cut <= 1 for w_cut in w_cuts), "0 <= w_cut <= 1"
+
+    weights = events_data.weights
+    total_weight = events_data.total_weight
+    att_q_repr = events_data.att_q_repr
+    is_3b = events_data.is_3b
+    is_4b = events_data.is_4b
+
+    if binning_method == "uniform":
+        bins = [
+            np.linspace(att_q_repr[:, i].min(), att_q_repr[:, i].max(), n_bins + 1)
+            for i in range(att_q_repr.shape[1])
+        ]
+    elif binning_method == "quantile":
+        bins = [
+            np.quantile(att_q_repr[:, i], np.linspace(0, 1, n_bins + 1))
+            for i in range(att_q_repr.shape[1])
+        ]
+    else:
+        raise ValueError("Unknown binning_method")
+
+    # for each att_q_repr, calculate membership of the bins
+
+    att_q_repr_bin_idx = np.stack(
+        [
+            np.digitize(att_q_repr[:, i], bins[i]) - 1
+            for i in range(att_q_repr.shape[1])
+        ],
+        axis=1,
+    )
+    att_q_repr_bin_idx = np.clip(att_q_repr_bin_idx, 0, n_bins - 1)
+
+    # hist_3b, _ = np.histogramdd(att_q_repr[is_3b], bins=bins, weights=weights[is_3b])
+    hist_4b, _ = np.histogramdd(att_q_repr[is_4b], bins=bins, weights=weights[is_4b])
+    hist_all, _ = np.histogramdd(att_q_repr, bins=bins, weights=weights)
+
+    is_nonzero = hist_all > 0
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio_4b = hist_4b / hist_all
+
+    sorted_idx = np.argsort(ratio_4b[is_nonzero])[::-1]
+
+    is_in_region_list = []
+    nonzero_bins = np.transpose(np.nonzero(is_nonzero))
+
+    events_membership = -np.ones(len(events_data), dtype=int)
+    designated = np.zeros(len(events_data), dtype=bool)
+
+    for i in range(len(nonzero_bins)):
+        in_ith_bin = np.all(att_q_repr_bin_idx[~designated] == nonzero_bins[i], axis=1)
+        desig_idx = np.nonzero(~designated)[0][in_ith_bin]
+        events_membership[desig_idx] = i
+        designated[desig_idx] = True
+
+    assert np.all(events_membership >= 0) and np.all(
+        events_membership < len(nonzero_bins)
+    ), "Some events are not in the bins"
+
+    csum_all = np.cumsum(hist_all[is_nonzero][sorted_idx])
+    csum_all = csum_all / csum_all[-1]
+
+    for w_cut in w_cuts:
+        is_region_bins = csum_all <= w_cut
+        is_region_bins = is_region_bins[np_put(sorted_idx)]
+        is_in_region_list.append(is_region_bins[events_membership])
+
+    return is_in_region_list
+
+
+def get_regions_via_probs_4b(
+    events_data: EventsData,
+    w_cuts: Iterable[float],
+    probs_4b: np.ndarray,
+):
+    assert len(probs_4b) == len(events_data), "Need to provide probs_4b for all events"
+    assert all(0 <= w_cut <= 1 for w_cut in w_cuts), "0 <= w_cut <= 1"
+
+    sorted_idx = np.argsort(probs_4b)[::-1]
+    csum_all = np.cumsum(events_data.weights[sorted_idx])
+    csum_all = csum_all / csum_all[-1]
+    inv_sorted_idx = np_put(sorted_idx)
+
+    is_in_region_list = [(csum_all <= w_cut)[inv_sorted_idx] for w_cut in w_cuts]
+
+    return is_in_region_list

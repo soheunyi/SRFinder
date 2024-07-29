@@ -126,31 +126,50 @@ class EventsData:
         assert 0 <= frac <= 1
         if seed is not None:
             np.random.seed(seed)
-        self.shuffle(seed=seed)
 
         n = int(frac * len(self))
+        shuffle_idx = np.random.permutation(len(self))
+        first_idx = shuffle_idx[:n]
+        second_idx = shuffle_idx[n:]
 
-        npd_1 = {key: data[:n] for key, data in self._npd.items()}
-        npd_2 = {key: data[n:] for key, data in self._npd.items()}
+        npd_1 = {key: data[first_idx] for key, data in self._npd.items()}
+        npd_2 = {key: data[second_idx] for key, data in self._npd.items()}
 
         data1 = EventsData(
-            self._X[:n],
-            self._weights[:n],
-            self._is_4b[:n],
-            self._is_signal[:n],
+            self._X[first_idx],
+            self._weights[first_idx],
+            self._is_4b[first_idx],
+            self._is_signal[first_idx],
             self._name + "_1" if name_1 is None else name_1,
             npd_1,
         )
         data2 = EventsData(
-            self._X[n:],
-            self._weights[n:],
-            self._is_4b[n:],
-            self._is_signal[n:],
+            self._X[second_idx],
+            self._weights[second_idx],
+            self._is_4b[second_idx],
+            self._is_signal[second_idx],
             self._name + "_2" if name_2 is None else name_2,
             npd_2,
         )
 
         return data1, data2
+
+    def clone(self) -> Self:
+        events = EventsData(
+            self._X.copy(),
+            self._weights.copy(),
+            self._is_4b.copy(),
+            self._is_signal.copy(),
+            self._name,
+            {key: data.copy() for key, data in self._npd.items()},
+        )
+        events.fvt_score = self.fvt_score.copy() if self.fvt_score is not None else None
+        events.view_score = (
+            self.view_score.copy() if self.view_score is not None else None
+        )
+        events.q_repr = self.q_repr.copy() if self.q_repr is not None else None
+
+        return events
 
     def fit_batch_size(self, batch_size: int):
         n_batches = len(self) // batch_size

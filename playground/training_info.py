@@ -34,6 +34,7 @@ class TrainingInfo:
         self.dinfo_train = dinfo_train
         self.dinfo_val = dinfo_val
         self._hash = create_hash(SAVE_DIR)
+        self._aux_info = {}
 
     @property
     def hparams(self):
@@ -42,6 +43,13 @@ class TrainingInfo:
     @property
     def hash(self):
         return self._hash
+
+    @property
+    def aux_info(self):
+        return self._aux_info
+
+    def update_aux_info(self, key: str, value):
+        self._aux_info[key] = value
 
     def save(self):
         with open(SAVE_DIR / self.hash, "wb") as f:

@@ -48,7 +48,7 @@ class DatasetInfo:
         overwrite_features: dict[str, np.ndarray] = {},
     ):
         assert len(file_idx) == len(inner_idx)
-        assert max(file_idx) + 1 == len(files)
+        assert max(file_idx) + 1 <= len(files)
         # check if the file exists
         assert all([file.exists() for file in files])
         assert all([len(v) == len(inner_idx) for v in overwrite_features.values()])

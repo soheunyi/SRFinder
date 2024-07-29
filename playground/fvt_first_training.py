@@ -1,30 +1,58 @@
+from itertools import product
 import torch
-import pathlib
 import pandas as pd
 import numpy as np
 import pytorch_lightning as pl
 import click
+import yaml
 
 
 from events_data import EventsData
 from fvt_classifier import FvTClassifier
+from dataset import generate_tt_dataset
+from training_info import TrainingInfo
 
 
-@click.command()
-@click.option("--signal_ratio", type=float)
-@click.option("--four_tag_ratio", type=float, default=0.5)
-@click.option("--dim_dijet_features", type=int, default=6)
-@click.option("--dim_quadjet_features", type=int, default=6)
-@click.option("--n_3b", type=int, default=250000)
-@click.option("--n_all4b", type=int, default=250000)
-@click.option("--test_ratio", type=float, default=0.5)
-@click.option("--val_ratio", type=float, default=0.33)
-@click.option("--batch_size", type=int, default=1024)
-@click.option("--max_epochs", type=int, default=50)
-@click.option("--seed", type=int)
-def main(
+def routine_wrapper(config: dict):
+    required_keys = [
+        "signal_ratio",
+        "dim_dijet_features",
+        "dim_quadjet_features",
+        "n_3b",
+        "n_all4b",
+        "test_ratio",
+        "val_ratio",
+        "batch_size",
+        "max_epochs",
+        "seed",
+        "lr",
+        "experiment_name",
+        "n_sample_ratio",
+    ]
+
+    for key in required_keys:
+        if key not in config:
+            raise ValueError(f"Key {key} is missing in the config")
+
+    routine(
+        config["signal_ratio"],
+        config["dim_dijet_features"],
+        config["dim_quadjet_features"],
+        config["n_3b"],
+        config["n_all4b"],
+        config["test_ratio"],
+        config["val_ratio"],
+        config["batch_size"],
+        config["max_epochs"],
+        config["seed"],
+        config["lr"],
+        config["experiment_name"],
+        config["n_sample_ratio"],
+    )
+
+
+def routine(
     signal_ratio,
-    four_tag_ratio,
     dim_dijet_features,
     dim_quadjet_features,
     n_3b,
@@ -34,30 +62,18 @@ def main(
     batch_size,
     max_epochs,
     seed,
+    lr,
+    experiment_name,
+    n_sample_ratio,
 ):
 
-    directory = pathlib.Path("../events/MG3")
-    df_3b = pd.read_hdf(directory / "dataframes" / "threeTag_picoAOD.h5")
-    df_3b = df_3b.sample(frac=1, random_state=seed).reset_index(drop=True)
-    df_3b = df_3b.iloc[:n_3b]
-
-    df_bg4b = pd.read_hdf(directory / "dataframes" / "fourTag_10x_picoAOD.h5")
-    df_bg4b = df_bg4b.sample(frac=1, random_state=seed).reset_index(drop=True)
-    df_bg4b = df_bg4b.iloc[:n_all4b]
-
-    df_signal = pd.read_hdf(directory / "dataframes" / "HH4b_picoAOD.h5")
-    df_signal = df_signal.sample(frac=1, random_state=seed).reset_index(drop=True)
-    df_signal = df_signal.iloc[:n_all4b]
-
-    df_3b["signal"] = False
-    df_bg4b["signal"] = False
-    df_signal["signal"] = True
-
-    print("3b-jet events: ", len(df_3b))
-    print("4b-jet events: ", len(df_bg4b))
-    print("HH4b-jet events: ", len(df_signal))
-
-    # Training
+    dinfo_train_all, _ = generate_tt_dataset(
+        seed,
+        n_3b,
+        n_all4b,
+        signal_ratio,
+        test_ratio,
+    )
 
     features = [
         "sym_Jet0_pt",
@@ -78,46 +94,49 @@ def main(
         "sym_Jet3_m",
     ]
 
-    ###########################################################################################
-    ###########################################################################################
+    hparams = {
+        "signal_ratio": signal_ratio,
+        "dim_dijet_features": dim_dijet_features,
+        "dim_quadjet_features": dim_quadjet_features,
+        "n_3b": n_3b,
+        "n_all4b": n_all4b,
+        "test_ratio": test_ratio,
+        "val_ratio": val_ratio,
+        "batch_size": batch_size,
+        "max_epochs": max_epochs,
+        "seed": seed,
+        "lr": lr,
+        "experiment_name": experiment_name,
+        "n_sample_ratio": n_sample_ratio,
+    }
+
+    num_classes = 2
+    dim_input_jet_features = 4
+
     pl.seed_everything(seed)
     np.random.seed(seed)
 
-    events_3b = EventsData.from_dataframe(df_3b, features)
-    events_3b.shuffle(seed=seed)
-
-    events_bg4b = EventsData.from_dataframe(df_bg4b, features)
-    events_bg4b.shuffle(seed=seed)
-    events_bg4b.trim(n_all4b - int(n_all4b * signal_ratio))
-
-    events_signal = EventsData.from_dataframe(df_signal, features)
-    events_signal.shuffle(seed=seed)
-    events_signal.trim(int(n_all4b * signal_ratio))
-
-    assert signal_ratio == 0 or int(n_all4b * signal_ratio) > 0
-
-    # set weight ratio to be exactly signal ratio
-    if len(events_signal) > 0:
-        new_hh4b_weights = (
-            (signal_ratio / (1 - signal_ratio))
-            * (events_bg4b.total_weight / events_signal.total_weight)
-            * events_signal.weights
-        )
-    events_signal.reweight(new_hh4b_weights)
-
-    # set four tag ratio to be exactly four_tag_ratio
-
-    new_3b_weights = (
-        (four_tag_ratio / (1 - four_tag_ratio))
-        * (
-            (events_bg4b.total_weight + events_signal.total_weight)
-            / events_3b.total_weight
-        )
-        * events_3b.weights
+    n_train_val = int(n_sample_ratio * len(dinfo_train_all))
+    train_val_idx = np.random.choice(
+        len(dinfo_train_all),
+        n_train_val,
+        replace=False,
     )
-    events_3b.reweight(new_3b_weights)
+    n_val = int(val_ratio * n_train_val)
 
-    events_train = EventsData.merge([events_3b, events_bg4b, events_signal])
+    dinfo_train = dinfo_train_all[train_val_idx[n_val:]]
+    dinfo_val = dinfo_train_all[train_val_idx[:n_val]]
+
+    events_train = EventsData.from_dataframe(
+        dinfo_train.fetch_data(),
+        features,
+        name="fvt_train",
+    )
+    events_val = EventsData.from_dataframe(
+        dinfo_val.fetch_data(),
+        features,
+        name="fvt_val",
+    )
 
     # reduce number of 4b samples to 1/8
     print(
@@ -129,48 +148,21 @@ def main(
         events_train.total_weight_signal / events_train.total_weight_4b,
     )
 
-    events_train.shuffle(seed=seed)
-    events_train, _ = events_train.split(
-        1 - test_ratio, name_1="fvt_train", name_2="fvt_test", seed=seed
-    )
-    events_train.shuffle(seed=seed)
-    events_train, events_val = events_train.split(
-        1 - val_ratio, name_1="fvt_train", name_2="fvt_val", seed=seed
-    )
     events_train.fit_batch_size(batch_size)
     events_val.fit_batch_size(batch_size)
 
     ###########################################################################################
     ###########################################################################################
-
-    num_classes = 2
-    dim_input_jet_features = 4
-    run_name = "_".join(
-        [
-            "fvt_picoAOD",
-            f"signal_ratio={signal_ratio}",
-            f"four_tag_ratio={four_tag_ratio}",
-            f"dijet={dim_dijet_features}",
-            f"quadjet={dim_quadjet_features}",
-            f"n_3b={n_3b}",
-            f"n_all4b={n_all4b}",
-            f"epochs={max_epochs}",
-            f"batch_size={batch_size}",
-            f"val_ratio={val_ratio}",
-            f"test_ratio={test_ratio}",
-            f"seed={seed}",
-        ]
-    )
-    lr = 1e-3
-
-    pl.seed_everything(seed)
+    tinfo = TrainingInfo(hparams, dinfo_train, dinfo_val)
+    print("Training Hash: ", tinfo.hash)
+    tinfo.save()
 
     model = FvTClassifier(
         num_classes,
         dim_input_jet_features,
         dim_dijet_features,
         dim_quadjet_features,
-        run_name=run_name,
+        run_name=tinfo.hash,
         device=torch.device("cuda:0"),
         lr=lr,
     )
@@ -183,5 +175,65 @@ def main(
     )
 
 
+def listify(x):
+    if isinstance(x, list):
+        return x
+    elif isinstance(x, tuple):
+        return list(x)
+    else:
+        return [x]
+
+
+@click.command()
+@click.option("--config", type=str)
+def main(config):
+    with open(config, "r") as ymlfile:
+        config = yaml.safe_load(ymlfile)
+
+    single_value_keys = ["experiment_name"]
+    multiple_values_keys = [
+        "signal_ratio",
+        "dim_dijet_features",
+        "dim_quadjet_features",
+        "n_3b",
+        "n_all4b",
+        "test_ratio",
+        "val_ratio",
+        "batch_size",
+        "max_epochs",
+        "seed",
+        "lr",
+        "n_sample_ratio",
+    ]
+    yml_parsed = {}
+
+    missing_keys = []
+
+    for k in single_value_keys:
+        if k in config:
+            yml_parsed[k] = config[k]
+        else:
+            missing_keys.append(k)
+
+    for k in multiple_values_keys:
+        if k in config:
+            yml_parsed[k] = listify(config[k])
+        else:
+            missing_keys.append(k)
+
+    if len(missing_keys) > 0:
+        raise ValueError(f"Missing keys in the config: {missing_keys}")
+
+    configs = product(*[yml_parsed[k] for k in multiple_values_keys])
+    configs = [dict(zip(multiple_values_keys, c)) for c in configs]
+    for c in configs:
+        for k in single_value_keys:
+            c.update({k: yml_parsed[k]})
+
+    for c in configs:
+        routine_wrapper(c)
+
+
 if __name__ == "__main__":
+
     main()

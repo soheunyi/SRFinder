@@ -1,0 +1,29 @@
+signal_ratio: 
+- 0.00
+- 0.01
+- 0.02
+- 0.03
+- 0.04
+- 0.05
+dim_dijet_features: 6
+dim_quadjet_features: 6 
+n_3b: 500_000
+n_all4b: 550_000
+test_ratio: 0.2
+val_ratio: 0.33
+batch_size: 1024
+max_epochs: 50
+seed: 
+- 42
+- 52
+- 62
+- 72
+- 82
+- 92
+lr: 0.001
+n_sample_ratio:
+- 0.125
+- 0.25
+- 0.5
+- 1.0
+experiment_name: fvt_training_higher_sr

@@ -8,8 +8,8 @@ val_ratio: 0.33
 batch_size: 1024
 max_epochs: 50
 seeds: 
-- 42
-- 52
+- 82
+- 92
 lr: 0.001
 n_sample_ratios:
 - 0.03125

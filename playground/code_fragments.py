@@ -217,16 +217,18 @@ def fvt_score_hist(events_data: EventsData, ax: plt.Axes = None):
     ax.set_xlabel("FvT output")
 
 
-def att_q_repr_hist(events_data: EventsData, dim_quadjet_features: int):
+def att_q_repr_hist(events_data: EventsData, title: str = None):
     is_3b, is_bg4b, is_signal = (
         events_data.is_3b,
         events_data.is_bg4b,
         events_data.is_signal,
     )
-    fig, ax = plt.subplots(nrows=dim_quadjet_features, ncols=2, figsize=(12, 24))
+
     w = events_data.weights
     att_q_repr = events_data.att_q_repr
-
+    dim_quadjet_features = att_q_repr.shape[1]
+    fig, ax = plt.subplots(nrows=dim_quadjet_features, ncols=2, figsize=(12, 24))
+    fig.suptitle(title)
     for i in range(dim_quadjet_features):
         ax[i, 0].hist(
             att_q_repr[is_3b, i],
@@ -289,4 +291,3 @@ def att_q_repr_hist(events_data: EventsData, dim_quadjet_features: int):
         ax[i, 1].set_xlabel(f"Feature {i}")
 
     plt.show()
-    plt.close()

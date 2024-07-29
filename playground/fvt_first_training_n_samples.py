@@ -115,7 +115,7 @@ def routine(
 
     ###########################################################################################
     ###########################################################################################
-    tinfo = TrainingInfo(hparams, events_train, events_val)
+    tinfo = TrainingInfo(hparams, dinfo_train, dinfo_val)
     print("Training Hash: ", tinfo.hash)
     tinfo.save()
 
