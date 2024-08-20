@@ -175,7 +175,11 @@ def routine_1(
     return return_dict
 
 
-def fvt_score_hist(events_data: EventsData, ax: plt.Axes = None):
+def fvt_score_hist(
+    events_data: EventsData,
+    ax: plt.Axes = None,
+    logscale: bool = False,
+):
     is_3b, is_bg4b, is_signal = (
         events_data.is_3b,
         events_data.is_bg4b,
@@ -213,6 +217,8 @@ def fvt_score_hist(events_data: EventsData, ax: plt.Axes = None):
         density=False,
         weights=w[is_signal],
     )
+    if logscale:
+        ax.set_yscale("log")
     ax.legend()
     ax.set_xlabel("FvT output")
 

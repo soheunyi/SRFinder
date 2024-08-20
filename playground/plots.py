@@ -209,6 +209,8 @@ def calibration_plot(
     bins: int = 20,
     sample_weights: np.ndarray = None,
     show_plot: bool = True,
+    title: str = "",
+    ax=None,
 ):
     if sample_weights is None:
         sample_weights = np.ones_like(probs_est)
@@ -235,7 +237,13 @@ def calibration_plot(
             errors[i] = np.nan
 
     x_arr = (xs[:-1] + xs[1:]) / 2
-    fig, ax = plt.subplots(figsize=(5, 5))
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5, 5))
+        fig.suptitle(title)
+    else:
+        fig = ax.get_figure()
+
     includes_theo = np.abs(probs_actual - x_arr) < errors
     ax.errorbar(
         x_arr[includes_theo],
@@ -271,8 +279,7 @@ def calibration_plot(
     # ax2.set_yscale("log")
 
     if show_plot:
-        plt.show()
-        plt.close()
+        fig.show()
     else:
         return fig
 

@@ -111,6 +111,13 @@ class EventsData:
         self._is_4b = self._is_4b[idx]
         self._is_signal = self._is_signal[idx]
 
+        if self.fvt_score is not None:
+            self.fvt_score = self.fvt_score[idx]
+        if self.view_score is not None:
+            self.view_score = self.view_score[idx]
+        if self.q_repr is not None:
+            self.q_repr = self.q_repr[idx]
+
         for key in self._npd.keys():
             self._npd[key] = self._npd[key][idx]
 
@@ -152,6 +159,22 @@ class EventsData:
             npd_2,
         )
 
+        data1.fvt_score = (
+            self.fvt_score[first_idx] if self.fvt_score is not None else None
+        )
+        data1.view_score = (
+            self.view_score[first_idx] if self.view_score is not None else None
+        )
+        data1.q_repr = self.q_repr[first_idx] if self.q_repr is not None else None
+
+        data2.fvt_score = (
+            self.fvt_score[second_idx] if self.fvt_score is not None else None
+        )
+        data2.view_score = (
+            self.view_score[second_idx] if self.view_score is not None else None
+        )
+        data2.q_repr = self.q_repr[second_idx] if self.q_repr is not None else None
+
         return data1, data2
 
     def clone(self) -> Self:
@@ -184,6 +207,9 @@ class EventsData:
         self._weights = self._weights[:n]
         self._is_4b = self._is_4b[:n]
         self._is_signal = self._is_signal[:n]
+        self.fvt_score = self.fvt_score[:n] if self.fvt_score is not None else None
+        self.view_score = self.view_score[:n] if self.view_score is not None else None
+        self.q_repr = self.q_repr[:n] if self.q_repr is not None else None
 
         for key in self._npd.keys():
             self._npd[key] = self._npd[key][:n]

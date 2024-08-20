@@ -1,10 +1,14 @@
 # returns whether a given event is in the signal region
 
-from typing import Iterable
+from typing import Iterable, Literal
 import numpy as np
 from events_data import EventsData
 import umap
 import multiprocessing as mp
+
+from dist_to_nearest_peak import dist_to_nearest_peak
+from smearing import smeared_density_ratio
+from fvt_classifier import FvTClassifier
 
 
 def np_put(p):
@@ -65,28 +69,28 @@ def sort_samples_by_bins(
 
 
 def estimate_probs_4b(
-    events_data: EventsData,
+    events: EventsData,
     cluster_embed: np.ndarray,
     est_probs_4b: np.ndarray,
     bins: np.ndarray,
 ):
     assert len(est_probs_4b) == len(
-        events_data
+        events
     ), "Need to provide est_probs_4b of all events"
 
-    hist_all, _ = np.histogram(cluster_embed, bins=bins, weights=events_data.weights)
+    hist_all, _ = np.histogram(cluster_embed, bins=bins, weights=events.weights)
 
     hist_est_probs_4b, _ = np.histogram(
         cluster_embed,
         bins=bins,
-        weights=events_data.weights * est_probs_4b,
+        weights=events.weights * est_probs_4b,
     )
 
     return hist_est_probs_4b / hist_all
 
 
 def get_regions(
-    events_data: EventsData,
+    events: EventsData,
     reducer: umap.UMAP,
     target_idx: np.ndarray,
     w_cuts: Iterable[float],
@@ -105,23 +109,21 @@ def get_regions(
     p4b_method: method to estimate the ratio of 4b to 3b events.
     """
     assert all(0 < w_cut <= 1 for w_cut in w_cuts), "0 < w_cut <= 1"
-    assert len(target_idx) == len(
-        events_data
-    ), "Need to provide target_idx for all events"
+    assert len(target_idx) == len(events), "Need to provide target_idx for all events"
 
     if reuse_embed:
-        assert "cluster_embed" in events_data.npd, "Need to set cluster_embed in npd"
-        cluster_embed = events_data.npd["cluster_embed"]
+        assert "cluster_embed" in events.npd, "Need to set cluster_embed in npd"
+        cluster_embed = events.npd["cluster_embed"]
     else:
         fast_reducer = fast_umap(reducer, n_workers=4)
-        cluster_embed = fast_reducer(events_data.att_q_repr)
+        cluster_embed = fast_reducer(events.att_q_repr)
 
     if update_npd:
-        events_data.update_npd("cluster_embed", cluster_embed)
+        events.update_npd("cluster_embed", cluster_embed)
 
-    weights = events_data.weights
+    weights = events.weights
 
-    total_target_weight = events_data[target_idx].total_weight
+    total_target_weight = events[target_idx].total_weight
     min_weights_bin = total_target_weight / max_bins
 
     embed_bins = np.linspace(cluster_embed.min(), cluster_embed.max(), init_bins + 1)
@@ -144,16 +146,16 @@ def get_regions(
 
     if p4b_method == "simple":
         ratio_4b_target = estimate_probs_4b(
-            events_data[target_idx],
+            events[target_idx],
             cluster_embed[target_idx, 0],
-            events_data[target_idx].is_4b,
+            events[target_idx].is_4b,
             bins=merged_x_bins,
         )
     elif p4b_method == "fvt":
         ratio_4b_target = estimate_probs_4b(
-            events_data[target_idx],
+            events[target_idx],
             cluster_embed[target_idx, 0],
-            events_data[target_idx].fvt_score,
+            events[target_idx].fvt_score,
             bins=merged_x_bins,
         )
     else:
@@ -176,7 +178,7 @@ def get_regions(
 
 
 def get_fvt_cut_regions(
-    events_data: EventsData,
+    events: EventsData,
     fvt_cut: float,
     w_cuts: Iterable[float],
     init_bins: int = 1000,
@@ -194,14 +196,14 @@ def get_fvt_cut_regions(
 
     assert all(0 < w_cut <= 1 for w_cut in w_cuts), "0 < w_cut <= 1"
     assert 0 <= fvt_cut < 1, "0 <= fvt_cut < 1"
-    assert events_data.fvt_score is not None, "Need to set fvt_score in events_data"
+    assert events.fvt_score is not None, "Need to set fvt_score in events"
 
     if seed is not None:
         np.random.seed(seed)
 
     reducer = umap.UMAP(n_components=1, **reducer_args)
-    fvt_exceeded = events_data.fvt_score > fvt_cut
-    is_4b = events_data.is_4b
+    fvt_exceeded = events.fvt_score > fvt_cut
+    is_4b = events.is_4b
 
     # clusters at most 10000 points for performance reasons
     # sample it via poisson sampling
@@ -210,17 +212,17 @@ def get_fvt_cut_regions(
     cluster_idx = np.random.choice(
         np.where(cluster_candidates)[0],
         min(10000, np.sum(cluster_candidates)),
-        replace=False,
-        p=events_data.weights[cluster_candidates]
-        / np.sum(events_data.weights[cluster_candidates]),
+        replace=True,
+        p=events.weights[cluster_candidates]
+        / np.sum(events.weights[cluster_candidates]),
     )
-    cluster_events = events_data[cluster_idx]
+    cluster_events = events[cluster_idx]
     reducer.fit(cluster_events.att_q_repr)
 
     if return_reducer:
         return (
             get_regions(
-                events_data,
+                events,
                 reducer,
                 fvt_exceeded,
                 w_cuts,
@@ -233,7 +235,7 @@ def get_fvt_cut_regions(
         )
     else:
         return get_regions(
-            events_data,
+            events,
             reducer,
             fvt_exceeded,
             w_cuts,
@@ -245,7 +247,7 @@ def get_fvt_cut_regions(
 
 
 def get_regions_via_histogram(
-    events_data: EventsData,
+    events: EventsData,
     w_cuts: Iterable[float],
     binning_method="uniform",
     n_bins=10,
@@ -255,11 +257,11 @@ def get_regions_via_histogram(
     """
     assert all(0 <= w_cut <= 1 for w_cut in w_cuts), "0 <= w_cut <= 1"
 
-    weights = events_data.weights
-    total_weight = events_data.total_weight
-    att_q_repr = events_data.att_q_repr
-    is_3b = events_data.is_3b
-    is_4b = events_data.is_4b
+    weights = events.weights
+    total_weight = events.total_weight
+    att_q_repr = events.att_q_repr
+    is_3b = events.is_3b
+    is_4b = events.is_4b
 
     if binning_method == "uniform":
         bins = [
@@ -299,8 +301,8 @@ def get_regions_via_histogram(
     is_in_region_list = []
     nonzero_bins = np.transpose(np.nonzero(is_nonzero))
 
-    events_membership = -np.ones(len(events_data), dtype=int)
-    designated = np.zeros(len(events_data), dtype=bool)
+    events_membership = -np.ones(len(events), dtype=int)
+    designated = np.zeros(len(events), dtype=bool)
 
     for i in range(len(nonzero_bins)):
         in_ith_bin = np.all(att_q_repr_bin_idx[~designated] == nonzero_bins[i], axis=1)
@@ -324,18 +326,112 @@ def get_regions_via_histogram(
 
 
 def get_regions_via_probs_4b(
-    events_data: EventsData,
+    events: EventsData,
     w_cuts: Iterable[float],
     probs_4b: np.ndarray,
 ):
-    assert len(probs_4b) == len(events_data), "Need to provide probs_4b for all events"
+    assert len(probs_4b) == len(events), "Need to provide probs_4b for all events"
     assert all(0 <= w_cut <= 1 for w_cut in w_cuts), "0 <= w_cut <= 1"
 
     sorted_idx = np.argsort(probs_4b)[::-1]
-    csum_all = np.cumsum(events_data.weights[sorted_idx])
+    csum_all = np.cumsum(events.weights[sorted_idx])
     csum_all = csum_all / csum_all[-1]
     inv_sorted_idx = np_put(sorted_idx)
 
     is_in_region_list = [(csum_all <= w_cut)[inv_sorted_idx] for w_cut in w_cuts]
 
     return is_in_region_list
+
+
+def get_regions_stats(
+    events: EventsData,
+    fvt_hash: str,
+    method: Literal["fvt", "density_peak", "smearing"],
+    events_sr_train: EventsData = None,
+    **kwargs,
+):
+    """
+    Returns scalar statistics that can be used to define the signal region.
+    Higher values of the statistics indicate that the event is more likely to be in the signal region.
+
+    Parameters
+    ----------
+    events : EventsData
+        Events to evaluate.
+    fvt_hash : str
+        Hash of the pretrained FvT model used for signal region definition.
+    method : Literal["fvt", "density_peak", "smearing"]
+        Method to use.
+    events_sr_train : EventsData, optional
+        Training events, by default None (necessary for smearing and density_peak).
+
+    Returns
+    -------
+    np.ndarray
+        Scalar statistics.
+    """
+
+    fvt_model = FvTClassifier.load_from_checkpoint(
+        f"./checkpoints/{fvt_hash}_best.ckpt"
+    )
+    fvt_model.eval()
+    if method == "fvt":
+        return fvt_model.predict(events.X_torch)[:, 1].numpy()
+
+    elif method == "density_peak":
+        assert "peak_pct" in kwargs, f"method={method} needs to provide peak_pct"
+        peak_pct = kwargs["peak_pct"]
+        nbd_pct = kwargs.get("nbd_pct", 0.02)
+        n_points = kwargs.get("n_points", 10000)
+        seed = kwargs.get("seed", None)
+        n_workers = kwargs.get("n_workers", 4)
+
+        assert (
+            events_sr_train is not None
+        ), f"method={method} needs to provide events_sr_train"
+
+        events.set_model_scores(fvt_model)
+        events_sr_train.set_model_scores(fvt_model)
+
+        X = events_sr_train.att_q_repr
+        rho = events_sr_train.fvt_score
+        val_func = dist_to_nearest_peak(
+            X,
+            rho,
+            events_sr_train.weights,
+            peak_pct,
+            nbd_pct=nbd_pct,
+            n_points=n_points,
+            seed=seed,
+            n_workers=n_workers,
+        )
+
+        return -val_func(events.att_q_repr)
+
+    elif method == "smearing":
+        assert "noise_scale" in kwargs, f"method={method} needs to provide noise_scale"
+        noise_scale = kwargs["noise_scale"]
+        base_noise_scale = kwargs.get("base_noise_scale", "minmax")
+        pretrained_fvt_hash = kwargs.get("pretrained_fvt_hash", fvt_hash)
+        max_epochs = kwargs.get("max_epochs", 10)
+
+        events.set_model_scores(fvt_model)
+        events_sr_train.set_model_scores(fvt_model)
+
+        val_func = smeared_density_ratio(
+            events_sr_train.q_repr,
+            events_sr_train.is_4b,
+            events_sr_train.weights,
+            noise_scale=noise_scale,
+            base_noise_scale=base_noise_scale,
+            pretrained_fvt_hash=pretrained_fvt_hash,
+            max_epochs=max_epochs,
+        )
+        dr_smeared = val_func(events.q_repr)
+        probs_4b_not_smeared = fvt_model.predict(events.X_torch)[:, 1].numpy()
+        dr_not_smeared = probs_4b_not_smeared / (1 - probs_4b_not_smeared)
+
+        return dr_not_smeared / dr_smeared
+
+    else:
+        raise ValueError("Unknown method")

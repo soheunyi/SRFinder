@@ -450,7 +450,7 @@ class conv1d(nn.Module):
         if self.bias:
             nn.init.uniform_(self.module.bias, -(self.k**0.5), self.k**0.5)
 
-    def forward(self, x: torch.Tensor, mask=None, debug=False):
+    def forward(self, x: torch.Tensor, mask=None, debug=False) -> torch.Tensor:
         if self.hiddenIn:
             x = NonLU(self.moduleHiddenIn(x), self.moduleHiddenIn.training)
         if self.hiddenOut:
