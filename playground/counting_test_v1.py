@@ -35,6 +35,9 @@ def require_keys(config: dict, keys: list):
 
 
 def routine(config: dict):
+    print("Experiment Configuration")
+    print(config)
+
     require_keys(
         config,
         [
@@ -288,15 +291,6 @@ def events_from_scdinfo(scdinfo: SCDatasetInfo, features: list, signal_filename:
     events = EventsData.from_dataframe(df, features)
 
     return events
-
-
-def listify(x):
-    if isinstance(x, list):
-        return x
-    elif isinstance(x, tuple):
-        return list(x)
-    else:
-        return [x]
 
 
 @click.command()
