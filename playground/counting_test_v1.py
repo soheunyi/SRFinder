@@ -11,8 +11,9 @@ import yaml
 from events_data import EventsData
 from fvt_classifier import FvTClassifier
 from dataset import SCDatasetInfo, generate_mother_dataset, split_scdinfo
-from playground.signal_region import get_regions_stats
+from signal_region import get_SR_stats
 from training_info import TrainingInfoV2
+from tst_info import TSTInfo
 
 
 ###########################################################################################
@@ -115,10 +116,6 @@ def routine(config: dict):
         seed=seed,
     )
 
-    ratio_4b_est = (
-        df_all.loc[df_all["fourTag"], "weight"].sum() / df_all["weight"].sum()
-    )
-
     # 2. Split the mother dataset into train and test
     # Train -- validation split will be done by TrainingInfoV2
 
@@ -154,28 +151,23 @@ def routine(config: dict):
         max_epochs=base_fvt_hparams["max_epochs"],
         train_seed=base_fvt_hparams["train_seed"],
     )
+    base_fvt_model.eval()
 
     # Get control region
 
-    scdinfo_SR_train, scdinfo_2stest = split_scdinfo(
+    scdinfo_SR_train, scdinfo_tst = split_scdinfo(
         scdinfo_not_base_fvt, config["SR_train_ratio"], seed
     )
 
-    df_SR_train, df_2stest = SCDatasetInfo.fetch_multiple_data(
-        [scdinfo_SR_train, scdinfo_2stest]
-    )
-
-    # Should be modified: get_regions_stats should not have an access to "signal"
+    # Should be modified: get_SR_stats should not have an access to "signal"
     # But initiation of EventsData requires "signal" in the dataframe...
-    df_SR_train["signal"] = get_is_signal(scdinfo_SR_train, signal_filename)
-    df_2stest["signal"] = get_is_signal(scdinfo_2stest, signal_filename)
-    events_SR_train = EventsData.from_dataframe(df_SR_train, features)
-    events_2stest = EventsData.from_dataframe(df_2stest, features)
+    events_SR_train = events_from_scdinfo(scdinfo_SR_train, features, signal_filename)
+    events_tst = events_from_scdinfo(scdinfo_tst, features, signal_filename)
 
     if SRCR_hparams["method"] == "smearing":
         require_keys(SRCR_hparams, ["noise_scale"])
-        SR_stats = get_regions_stats(
-            events_2stest,
+        SR_stats = get_SR_stats(
+            events_tst,
             fvt_hash=base_fvt_tinfo.hash,
             method=SRCR_hparams["method"],
             events_SR_train=events_SR_train,
@@ -184,8 +176,8 @@ def routine(config: dict):
 
     elif SRCR_hparams["method"] == "density_peak":
         require_keys(SRCR_hparams, ["peak_pct"])
-        SR_stats = get_regions_stats(
-            events_2stest,
+        SR_stats = get_SR_stats(
+            events_tst,
             fvt_hash=base_fvt_tinfo.hash,
             method=SRCR_hparams["method"],
             events_SR_train=events_SR_train,
@@ -193,8 +185,8 @@ def routine(config: dict):
         )
 
     elif SRCR_hparams["method"] == "fvt":
-        SR_stats = get_regions_stats(
-            events_2stest,
+        SR_stats = get_SR_stats(
+            events_tst,
             fvt_hash=base_fvt_tinfo.hash,
             method=SRCR_hparams["method"],
             events_SR_train=events_SR_train,
@@ -202,13 +194,11 @@ def routine(config: dict):
     else:
         raise ValueError("Method {} not recognized".format(SRCR_hparams["method"]))
 
-    events_2stest.npd["SR_stats"] = SR_stats
-
     SR_stats_argsort = np.argsort(SR_stats)[::-1]
     SR_stats_sorted = SR_stats[SR_stats_argsort]
 
-    weights = events_2stest.weights[SR_stats_argsort]
-    is_4b = events_2stest.is_4b[SR_stats_argsort]
+    weights = events_tst.weights[SR_stats_argsort]
+    is_4b = events_tst.is_4b[SR_stats_argsort]
     cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
 
     SR_cut = SR_stats_sorted[np.argmin(cumul_4b_ratio < SRCR_hparams["4b_in_SR"])]
@@ -216,21 +206,22 @@ def routine(config: dict):
         np.argmin(cumul_4b_ratio < SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"])
     ]
 
-    assert np.all(events_2stest.X == df_2stest.loc[:, features].values)
+    df_tst = scdinfo_tst.fetch_data()
+    assert np.all(events_tst.X == df_tst.loc[:, features].values)
 
     SR_idx = SR_stats >= SR_cut
-    events_2stest_SR = events_2stest[SR_idx]
-    scdinfo_2stest_SR = scdinfo_2stest[SR_idx]
+    events_tst_SR = events_tst[SR_idx]
+    scdinfo_tst_SR = scdinfo_tst[SR_idx]
 
     CR_idx = (SR_stats >= CR_cut) & (SR_stats < SR_cut)
-    events_2stest_CR = events_2stest[CR_idx]
-    scdinfo_2stest_CR = scdinfo_2stest[CR_idx]
+    events_tst_CR = events_tst[CR_idx]
+    scdinfo_tst_CR = scdinfo_tst[CR_idx]
 
-    CR_fvt_info = TrainingInfoV2(CR_fvt_hparams, scdinfo_2stest_CR)
-    print("CR FvT Training Hash: ", CR_fvt_info.hash)
-    CR_fvt_info.save()
+    CR_fvt_tinfo = TrainingInfoV2(CR_fvt_hparams, scdinfo_tst_CR)
+    print("CR FvT Training Hash: ", CR_fvt_tinfo.hash)
+    CR_fvt_tinfo.save()
 
-    CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_info.fetch_train_val_tensor_datasets(
+    CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_tinfo.fetch_train_val_tensor_datasets(
         features, "fourTag", "weight"
     )
 
@@ -239,7 +230,7 @@ def routine(config: dict):
         dim_input_jet_features,
         CR_fvt_hparams["dim_dijet_features"],
         CR_fvt_hparams["dim_quadjet_features"],
-        run_name=CR_fvt_info.hash,
+        run_name=CR_fvt_tinfo.hash,
         device=torch.device("cuda:0"),
         lr=CR_fvt_hparams["lr"],
     )
@@ -251,23 +242,31 @@ def routine(config: dict):
         max_epochs=CR_fvt_hparams["max_epochs"],
         train_seed=CR_fvt_hparams["train_seed"],
     )
-
     CR_fvt_model.eval()
 
     cond_prob_4b_est = (
-        CR_fvt_model.predict(events_2stest_SR.X_torch)[:, 1].detach().cpu().numpy()
+        CR_fvt_model.predict(events_tst_SR.X_torch)[:, 1].detach().cpu().numpy()
     )
-    reweights = (
-        ratio_4b_est * cond_prob_4b_est / ((1 - ratio_4b_est) * (1 - cond_prob_4b_est))
-    )
-    events_2stest_SR.reweight(
+    reweights = ratio_4b * cond_prob_4b_est / ((1 - ratio_4b) * (1 - cond_prob_4b_est))
+    events_tst_SR.reweight(
         np.where(
-            events_2stest_SR.is_4b,
-            events_2stest_SR.weights,
-            events_2stest_SR.weights * reweights,
+            events_tst_SR.is_4b,
+            events_tst_SR.weights,
+            events_tst_SR.weights * reweights,
         )
     )
-    is_signal_2test_SR = get_is_signal(scdinfo_2stest_SR, signal_filename)
+
+    tst_info = TSTInfo(
+        hparams=config,
+        scdinfo_tst=scdinfo_tst,
+        SR_stats=SR_stats,
+        SR_cut=SR_cut,
+        CR_cut=CR_cut,
+        base_fvt_tinfo_hash=base_fvt_tinfo.hash,
+        CR_fvt_tinfo_hash=CR_fvt_tinfo.hash,
+    )
+    print("Two Sample Test Hash: ", tst_info.hash)
+    tst_info.save()
 
 
 def get_is_signal(scdinfo: SCDatasetInfo, signal_filename: str):
@@ -310,5 +309,6 @@ def main(config):
 
 
 if __name__ == "__main__":
+    # load base yml file
 
     main()

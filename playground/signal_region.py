@@ -343,11 +343,11 @@ def get_regions_via_probs_4b(
     return is_in_region_list
 
 
-def get_regions_stats(
+def get_SR_stats(
     events: EventsData,
     fvt_hash: str,
     method: Literal["fvt", "density_peak", "smearing"],
-    events_sr_train: EventsData = None,
+    events_SR_train: EventsData = None,
     **kwargs,
 ):
     """
@@ -362,7 +362,7 @@ def get_regions_stats(
         Hash of the pretrained FvT model used for signal region definition.
     method : Literal["fvt", "density_peak", "smearing"]
         Method to use.
-    events_sr_train : EventsData, optional
+    events_SR_train : EventsData, optional
         Training events, by default None (necessary for smearing and density_peak).
 
     Returns
@@ -387,18 +387,18 @@ def get_regions_stats(
         n_workers = kwargs.get("n_workers", 4)
 
         assert (
-            events_sr_train is not None
-        ), f"method={method} needs to provide events_sr_train"
+            events_SR_train is not None
+        ), f"method={method} needs to provide events_SR_train"
 
         events.set_model_scores(fvt_model)
-        events_sr_train.set_model_scores(fvt_model)
+        events_SR_train.set_model_scores(fvt_model)
 
-        X = events_sr_train.att_q_repr
-        rho = events_sr_train.fvt_score
+        X = events_SR_train.att_q_repr
+        rho = events_SR_train.fvt_score
         val_func = dist_to_nearest_peak(
             X,
             rho,
-            events_sr_train.weights,
+            events_SR_train.weights,
             peak_pct,
             nbd_pct=nbd_pct,
             n_points=n_points,
@@ -410,18 +410,22 @@ def get_regions_stats(
 
     elif method == "smearing":
         assert "noise_scale" in kwargs, f"method={method} needs to provide noise_scale"
+        assert (
+            events_SR_train is not None
+        ), f"method={method} needs to provide events_SR_train"
+
         noise_scale = kwargs["noise_scale"]
         base_noise_scale = kwargs.get("base_noise_scale", "minmax")
         pretrained_fvt_hash = kwargs.get("pretrained_fvt_hash", fvt_hash)
         max_epochs = kwargs.get("max_epochs", 10)
 
         events.set_model_scores(fvt_model)
-        events_sr_train.set_model_scores(fvt_model)
+        events_SR_train.set_model_scores(fvt_model)
 
         val_func = smeared_density_ratio(
-            events_sr_train.q_repr,
-            events_sr_train.is_4b,
-            events_sr_train.weights,
+            events_SR_train.q_repr,
+            events_SR_train.is_4b,
+            events_SR_train.weights,
             noise_scale=noise_scale,
             base_noise_scale=base_noise_scale,
             pretrained_fvt_hash=pretrained_fvt_hash,

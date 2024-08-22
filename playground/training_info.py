@@ -13,13 +13,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from dataset import DatasetInfo, SCDatasetInfo, split_scdinfo
 
 # get current directory of the file
-SAVE_DIR = pathlib.Path(__file__).parent / "data/training_info"
-# check if SAVE_DIR exists, if not, create it
-SAVE_DIR.mkdir(parents=True, exist_ok=True)
-
-SAVE_DIR_V2 = pathlib.Path(__file__).parent / "data/training_info_v2"
-# check if SAVE_DIR exists, if not, create it
-SAVE_DIR_V2.mkdir(parents=True, exist_ok=True)
+TINFO_SAVE_DIR = pathlib.Path(__file__).parent / "data/training_info"
+# check if TINFO_SAVE_DIR exists, if not, create it
+TINFO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def create_hash(directory: pathlib.Path) -> str:
@@ -39,7 +35,7 @@ class TrainingInfo:
         self._hparams = hparams
         self.dinfo_train = dinfo_train
         self.dinfo_val = dinfo_val
-        self._hash = create_hash(SAVE_DIR)
+        self._hash = create_hash(TINFO_SAVE_DIR)
         self._aux_info = {}
 
     @property
@@ -58,30 +54,30 @@ class TrainingInfo:
         self._aux_info[key] = value
 
     def save(self):
-        with open(SAVE_DIR / self.hash, "wb") as f:
+        with open(TINFO_SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 
     def get_training_data(self):
         return self.dinfo_train.fetch_data(), self.dinfo_val.fetch_data()
 
-    @classmethod
-    def load(cls, hash: str) -> TrainingInfo:
-        with open(SAVE_DIR / hash, "rb") as f:
+    @staticmethod
+    def load(hash: str) -> TrainingInfo:
+        with open(TINFO_SAVE_DIR / hash, "rb") as f:
             return pickle.load(f)
 
-    @classmethod
-    def get_existing_hparams(cls):
+    @staticmethod
+    def get_existing_hparams():
         hparams_list = []
-        for file in SAVE_DIR.glob("*"):
+        for file in TINFO_SAVE_DIR.glob("*"):
             tinfo = TrainingInfo.load(file)
             hparams_list.append(tinfo.hparams)
 
         return hparams_list
 
-    @classmethod
-    def find(cls, hparam_filter: dict):
+    @staticmethod
+    def find(hparam_filter: dict):
         hashes = []
-        for file in SAVE_DIR.glob("*"):
+        for file in TINFO_SAVE_DIR.glob("*"):
             tinfo = TrainingInfo.load(file)
             is_match = True
             for key, value in hparam_filter.items():
@@ -106,7 +102,7 @@ class TrainingInfoV2:
         self.data_seed = hparams["data_seed"]
         self.val_ratio = hparams["val_ratio"]
         self.scdinfo = scdinfo
-        self._hash = create_hash(SAVE_DIR_V2)
+        self._hash = create_hash(TINFO_SAVE_DIR)
         self._aux_info = {}
 
     def fetch_train_val_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -180,28 +176,28 @@ class TrainingInfoV2:
         self._aux_info[key] = value
 
     def save(self):
-        with open(SAVE_DIR_V2 / self.hash, "wb") as f:
+        with open(TINFO_SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 
-    @classmethod
-    def load(cls, hash: str) -> TrainingInfo:
-        with open(SAVE_DIR_V2 / hash, "rb") as f:
+    @staticmethod
+    def load(hash: str) -> TrainingInfoV2:
+        with open(TINFO_SAVE_DIR / hash, "rb") as f:
             return pickle.load(f)
 
-    @classmethod
-    def get_existing_hparams(cls):
+    @staticmethod
+    def get_existing_hparams():
         hparams_list = []
-        for file in SAVE_DIR_V2.glob("*"):
-            tinfo = TrainingInfo.load(file)
+        for file in TINFO_SAVE_DIR.glob("*"):
+            tinfo = TrainingInfoV2.load(file)
             hparams_list.append(tinfo.hparams)
 
         return hparams_list
 
-    @classmethod
-    def find(cls, hparam_filter: dict):
+    @staticmethod
+    def find(hparam_filter: dict):
         hashes = []
-        for file in SAVE_DIR_V2.glob("*"):
-            tinfo = TrainingInfo.load(file)
+        for file in TINFO_SAVE_DIR.glob("*"):
+            tinfo = TrainingInfoV2.load(file)
             is_match = True
             for key, value in hparam_filter.items():
                 if tinfo.hparams.get(key) != value:
