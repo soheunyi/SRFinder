@@ -4,39 +4,7 @@ import pathlib
 from typing import Iterable
 import numpy as np
 import pandas as pd
-import torch
 from torch.utils.data import DataLoader, TensorDataset
-
-
-def split_dataset(
-    X: torch.Tensor,
-    y: torch.Tensor,
-    valid_split: float,
-    train_batch_size: int = 32,
-    valid_batch_size: int = 32,
-    seed: int = 42,
-):
-    np.random.seed(seed)
-    n_samples = X.shape[0]
-    n_valid = int(n_samples * valid_split)
-    valid_indices = np.random.choice(n_samples, n_valid, replace=False)
-
-    X_train, y_train = X[~valid_indices], y[~valid_indices]
-    X_valid, y_valid = X[valid_indices], y[valid_indices]
-
-    train_loader = DataLoader(
-        TensorDataset(X_train, y_train),
-        batch_size=train_batch_size,
-        shuffle=True,
-    )
-
-    valid_loader = DataLoader(
-        TensorDataset(X_valid, y_valid),
-        batch_size=valid_batch_size,
-        shuffle=True,
-    )
-
-    return train_loader, valid_loader
 
 
 class DatasetInfo:
@@ -68,6 +36,8 @@ class DatasetInfo:
             assert "sort_idx_" not in df.columns
 
             idx = self.file_idx == fi
+            if np.sum(idx) == 0:
+                continue
             inner_idx = self.inner_idx[idx]
             df = df.iloc[inner_idx]
             df["sort_idx_"] = sort_idx[idx]
@@ -104,12 +74,156 @@ class DatasetInfo:
             return self.get([idx])
 
     def __repr__(self):
-        return f"DatasetInfo(files={self.files},overwrite_features={self.overwrite_features.keys()}, length={len(self)})"
+        return f"DatasetInfo(files={self.files}, overwrite_features={self.overwrite_features.keys()}, length={len(self)})"
+
+
+class SCDatasetInfo:
+    def __init__(
+        self,
+        files: Iterable[pathlib.Path],
+        inner_idxs: Iterable[Iterable[bool]],
+    ):
+        """
+        SCDatasetInfo refers to "Simply concatenated dataset info".
+        This class is used to store the information about the dataset that is split into multiple files.
+        Better in terms of memory usage than DatasetInfo.
+        Does not allow overwritting features that are not present in the files due to memory concerns.
+        """
+        assert len(files) == len(inner_idxs)
+        assert all([file.exists() for file in files])
+
+        self.files = files
+        self.inner_idxs = inner_idxs
+
+    @staticmethod
+    def fetch_multiple_data(scdinfos: Iterable[SCDatasetInfo]) -> list[pd.DataFrame]:
+        """
+        To reduce loading time, fetches data from multiple SCDatasetInfo objects.
+        """
+        assert len(scdinfos) > 0
+        assert all(
+            [len(scdinfo.files) == len(scdinfos[0].files) for scdinfo in scdinfos]
+        )
+        assert all(
+            [
+                all(
+                    [
+                        scdinfos[0].files[j] == scdinfo.files[j]
+                        for j in range(len(scdinfo.files))
+                    ]
+                )
+                for scdinfo in scdinfos
+            ]
+        )
+
+        original_df_list = [pd.read_hdf(file) for file in scdinfos[0].files]
+        df_list = []
+
+        for scdinfo in scdinfos:
+            df_list_inner = []
+            for fi, inner_idx in enumerate(scdinfo.inner_idxs):
+                if np.sum(inner_idx) == 0:
+                    continue
+
+                df_inner = original_df_list[fi]
+                df_list_inner.append(df_inner[inner_idx])
+
+            df = pd.concat(df_list_inner).reset_index(drop=True)
+            df_list.append(df)
+
+        return df_list
+
+    def fetch_data(self):
+        df_list = []
+        for file, inner_idx in zip(self.files, self.inner_idxs):
+            if np.sum(inner_idx) == 0:
+                continue
+
+            df = pd.read_hdf(file)
+            assert len(df) == len(inner_idx)
+
+            df_list.append(df[inner_idx])
+
+        df = pd.concat(df_list).reset_index(drop=True)
+
+        return df
+
+    def to_dataset_info(
+        self, overwrite_features: dict[str, np.ndarray] = {}
+    ) -> DatasetInfo:
+        file_idx = np.concatenate(
+            [
+                np.full(np.sum(inner_idx), fi)
+                for fi, inner_idx in enumerate(self.inner_idxs)
+            ]
+        )
+        inner_idx = np.concatenate(
+            [np.where(self.inner_idxs[fi])[0] for fi in range(len(self.files))]
+        )
+        # assert all([len(v) == len(inner_idx) for v in overwrite_features.values()])
+
+        return DatasetInfo(self.files, file_idx, inner_idx, overwrite_features)
+
+    def check_validity(self):
+        for file, inner_idx in zip(self.files, self.inner_idxs):
+            df = pd.read_hdf(file)
+            assert len(df) == len(inner_idx)
+
+    def get_original_file_shapes(self):
+        # assumes all files are hdf files
+        file_shapes = []
+        for file in self.files:
+            with pd.HDFStore(file, mode="r") as store:
+                shape = store.get_storer(store.keys()[0]).shape
+                nrows = shape[0]
+                ncols = shape[1]
+            file_shapes.append((nrows, ncols))
+
+        return file_shapes
+
+    def get_file_lengths(self):
+        return [np.sum(inner_idx) for inner_idx in self.inner_idxs]
+
+    def get(self, idx: Iterable[int] | Iterable[bool]) -> SCDatasetInfo:
+        idx = np.array(idx)
+        if idx.dtype == bool:
+            idx = np.where(idx)[0]
+        file_seps = np.cumsum([0] + self.get_file_lengths())
+        file_original_lengths = [nrow for nrow, _ in self.get_original_file_shapes()]
+
+        new_inner_idxs = []
+
+        for inner_idx, start, end, file_original_length in zip(
+            self.inner_idxs, file_seps[:-1], file_seps[1:], file_original_lengths
+        ):
+            new_inner_idx = np.full(file_original_length, False)
+            current_idx = idx[(start <= idx) & (idx < end)]
+            if len(current_idx) > 0:
+                inner_idx_int = np.where(inner_idx)[0]
+                new_inner_idx[inner_idx_int[current_idx - start]] = True
+
+            new_inner_idxs.append(new_inner_idx)
+
+        return SCDatasetInfo(self.files, new_inner_idxs)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            return self.get(range(*idx.indices(len(self))))
+        elif isinstance(idx, Iterable):
+            return self.get(idx)
+        else:
+            return self.get([idx])
+
+    def __len__(self):
+        return sum([np.sum(inner_idx) for inner_idx in self.inner_idxs])
+
+    def __repr__(self):
+        return f"SCDatasetInfo(files={self.files}, length={len(self)})"
 
 
 def generate_tt_dataset(
     seed: int, n_3b: int, n_all4b: int, signal_ratio: float, test_ratio: float
-):
+) -> tuple[DatasetInfo, DatasetInfo]:
     directory = pathlib.Path("../events/MG3")
     np.random.seed(seed)
 
@@ -171,3 +285,112 @@ def generate_tt_dataset(
     dinfo_test = dinfo[:n_test]
 
     return dinfo_train, dinfo_test
+
+
+def generate_mother_dataset(
+    n_3b: int,
+    ratio_4b: float,
+    signal_ratio: float,
+    signal_filename: str,
+    seed: int,
+) -> tuple[SCDatasetInfo, pd.DataFrame]:
+    """
+    Generates "Mother samples" or all the samples used for a single experiment.
+    Returns SCDataInfo and the DataFrame containing all the samples.
+
+    1. Select n_3b 3b samples.
+    2. Calculate total weight of 3b samples (=total_w_3b)
+    3. Calculate total weight of bg4b and signal samples
+    total_w_bg4b = ratio_4b / (1 - ratio_4b) * (1-signal_ratio) * total_w_3b,
+    total_w_signal = ratio_4b / (1 - ratio_4b) * signal_ratio * total_w_3b.
+    4. Choose bg4b samples in a random order until total weight of bg4b samples exceeds total_w_bg4b.
+    5. Do the same for signal samples until total weight of signal samples exceeds total_w_signal.
+
+    """
+    assert 0 < n_3b
+    assert 0 < ratio_4b < 1
+    assert 0 <= signal_ratio <= 1
+
+    directory = pathlib.Path("../events/MG3")
+    np.random.seed(seed)
+
+    dir_3b = directory / "dataframes" / "threeTag_picoAOD.h5"
+    dir_bg4b = directory / "dataframes" / "fourTag_10x_picoAOD.h5"
+    dir_signal = directory / "dataframes" / signal_filename
+
+    # 1. Select n_3b 3b samples.
+    df_3b = pd.read_hdf(dir_3b)
+    assert n_3b <= len(df_3b)
+    indices_3b = np.full(len(df_3b), False)
+    indices_3b[np.random.choice(len(df_3b), n_3b, replace=False)] = True
+    df_3b = df_3b[indices_3b]
+    df_3b["signal"] = False
+
+    # 2. Calculate total weight of 3b samples
+    total_w_3b = df_3b["weight"].sum()
+
+    # 3. Calculate total weight of bg4b and signal samples
+    total_w_bg4b = ratio_4b / (1 - ratio_4b) * (1 - signal_ratio) * total_w_3b
+    total_w_signal = ratio_4b / (1 - ratio_4b) * signal_ratio * total_w_3b
+
+    # 4. Choose bg4b samples in a random order until total weight of bg4b samples exceeds total_w_bg4b.
+    df_bg4b = pd.read_hdf(dir_bg4b)
+    random_idx = np.random.permutation(len(df_bg4b))
+    weights_bg4b = df_bg4b["weight"].values
+    exceeded = np.cumsum(weights_bg4b[random_idx]) >= total_w_bg4b
+    if not np.any(exceeded):
+        raise ValueError("Not enough bg4b samples to fit the ratio.")
+    idx_until = 0 if np.all(exceeded) else np.argmax(exceeded) + 1
+    random_idx = np.sort(random_idx[:idx_until])
+    indices_bg4b = np.full(len(df_bg4b), False)
+    indices_bg4b[random_idx] = True
+    df_bg4b = df_bg4b.iloc[random_idx]
+    df_bg4b["signal"] = False
+
+    # 5. Do the same for signal samples until total weight of signal samples exceeds total_w_signal.
+    df_signal = pd.read_hdf(dir_signal)
+    random_idx = np.random.permutation(len(df_signal))
+    weights_signal = df_signal["weight"].values
+    exceeded = np.cumsum(weights_signal[random_idx]) >= total_w_signal
+    if not np.any(exceeded):
+        raise ValueError("Not enough signal samples to fit the ratio.")
+    idx_until = 0 if np.all(exceeded) else np.argmax(exceeded) + 1
+    random_idx = np.sort(random_idx[:idx_until])
+    indices_signal = np.full(len(df_signal), False)
+    indices_signal[random_idx] = True
+    df_signal = df_signal.iloc[random_idx]
+    df_signal["signal"] = True
+
+    inner_idxs = [indices_3b, indices_bg4b, indices_signal]
+    df_list = [df_3b, df_bg4b, df_signal]
+    df_list = [df for df in df_list if len(df) > 0]
+    df = pd.concat(df_list).reset_index(drop=True)
+    files = [dir_3b, dir_bg4b, dir_signal]
+
+    scdinfo = SCDatasetInfo(files, inner_idxs)
+
+    return scdinfo, df
+
+
+def split_scdinfo(
+    scdinfo: SCDatasetInfo,
+    frac: float,
+    seed: int,
+) -> tuple[SCDatasetInfo, SCDatasetInfo]:
+    """
+    Splits SCDatasetInfo into two SCDatasetInfo objects.
+    """
+    assert 0 < frac < 1
+
+    np.random.seed(seed)
+    n_total = len(scdinfo)
+    n_1 = int(frac * n_total)
+
+    idx = np.random.permutation(n_total)
+    idx_1 = idx[:n_1]
+    idx_2 = idx[n_1:]
+
+    scdinfo_1 = scdinfo[idx_1]
+    scdinfo_2 = scdinfo[idx_2]
+
+    return scdinfo_1, scdinfo_2

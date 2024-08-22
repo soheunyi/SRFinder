@@ -7,13 +7,19 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+import torch
+from torch.utils.data import DataLoader, TensorDataset
 
-from dataset import DatasetInfo
+from dataset import DatasetInfo, SCDatasetInfo, split_scdinfo
 
 # get current directory of the file
 SAVE_DIR = pathlib.Path(__file__).parent / "data/training_info"
 # check if SAVE_DIR exists, if not, create it
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
+SAVE_DIR_V2 = pathlib.Path(__file__).parent / "data/training_info_v2"
+# check if SAVE_DIR exists, if not, create it
+SAVE_DIR_V2.mkdir(parents=True, exist_ok=True)
 
 
 def create_hash(directory: pathlib.Path) -> str:
@@ -76,6 +82,125 @@ class TrainingInfo:
     def find(cls, hparam_filter: dict):
         hashes = []
         for file in SAVE_DIR.glob("*"):
+            tinfo = TrainingInfo.load(file)
+            is_match = True
+            for key, value in hparam_filter.items():
+                if tinfo.hparams.get(key) != value:
+                    is_match = False
+                    break
+            if is_match:
+                hashes.append(tinfo.hash)
+
+        return hashes
+
+
+class TrainingInfoV2:
+    def __init__(self, hparams: dict, scdinfo: SCDatasetInfo):
+        """
+        Save the hparams, scdinfo, and seed for training models.
+        hparams must include val_ratio, data_seed (for reproducing train/val data),
+        """
+        self._hparams = hparams
+        assert "data_seed" in hparams
+        assert "val_ratio" in hparams
+        self.data_seed = hparams["data_seed"]
+        self.val_ratio = hparams["val_ratio"]
+        self.scdinfo = scdinfo
+        self._hash = create_hash(SAVE_DIR_V2)
+        self._aux_info = {}
+
+    def fetch_train_val_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Return the training and validation data.
+        """
+        scdinfo_train, scdinfo_val = split_scdinfo(
+            self.scdinfo, 1 - self.val_ratio, self.data_seed
+        )
+
+        df_train, df_val = SCDatasetInfo.fetch_multiple_data(
+            [scdinfo_train, scdinfo_val]
+        )
+
+        df_train = df_train.sample(frac=1, random_state=self.data_seed).reset_index(
+            drop=True
+        )
+        df_val = df_val.sample(frac=1, random_state=self.data_seed).reset_index(
+            drop=True
+        )
+
+        fit_batch_size = self.hparams.get("fit_batch_size", False)
+        if fit_batch_size:
+            assert (
+                "batch_size" in self.hparams
+            ), "batch_size must be in hparams if fit_batch_size is True"
+            batch_size = self.hparams["batch_size"]
+            df_train = df_train.iloc[: (len(df_train) // batch_size) * batch_size]
+            df_val = df_val.iloc[: (len(df_val) // batch_size) * batch_size]
+
+        return df_train, df_val
+
+    def fetch_train_val_tensor_datasets(
+        self,
+        features: Iterable[str],
+        label: str,
+        weight: str,
+        label_dtype: str = torch.long,
+    ) -> tuple[TensorDataset, TensorDataset]:
+        """
+        fetch train and val dataloader
+        """
+        df_train, df_val = self.fetch_train_val_data()
+
+        X_train = torch.tensor(df_train[features].values, dtype=torch.float32)
+        y_train = torch.tensor(df_train[label].values, dtype=label_dtype)
+        w_train = torch.tensor(df_train[weight].values, dtype=torch.float32)
+
+        X_val = torch.tensor(df_val[features].values, dtype=torch.float32)
+        y_val = torch.tensor(df_val[label].values, dtype=label_dtype)
+        w_val = torch.tensor(df_val[weight].values, dtype=torch.float32)
+
+        train_dataset = TensorDataset(X_train, y_train, w_train)
+        val_dataset = TensorDataset(X_val, y_val, w_val)
+
+        return train_dataset, val_dataset
+
+    @property
+    def hparams(self):
+        return self._hparams
+
+    @property
+    def hash(self):
+        return self._hash
+
+    @property
+    def aux_info(self):
+        return self._aux_info
+
+    def update_aux_info(self, key: str, value):
+        self._aux_info[key] = value
+
+    def save(self):
+        with open(SAVE_DIR_V2 / self.hash, "wb") as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def load(cls, hash: str) -> TrainingInfo:
+        with open(SAVE_DIR_V2 / hash, "rb") as f:
+            return pickle.load(f)
+
+    @classmethod
+    def get_existing_hparams(cls):
+        hparams_list = []
+        for file in SAVE_DIR_V2.glob("*"):
+            tinfo = TrainingInfo.load(file)
+            hparams_list.append(tinfo.hparams)
+
+        return hparams_list
+
+    @classmethod
+    def find(cls, hparam_filter: dict):
+        hashes = []
+        for file in SAVE_DIR_V2.glob("*"):
             tinfo = TrainingInfo.load(file)
             is_match = True
             for key, value in hparam_filter.items():

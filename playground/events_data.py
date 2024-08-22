@@ -243,6 +243,16 @@ class EventsData:
         mask = self.npd[mask_str]
         return self.get_from_mask(mask, name)
 
+    def poisson_sample(self, n: int, idx: np.ndarray, seed: int = None) -> EventsData:
+        if seed is not None:
+            np.random.seed(seed)
+        if idx.dtype == np.dtype("bool"):
+            idx = np.where(idx)[0]
+        weights = self.weights[idx]
+        p = weights / np.sum(weights)
+        samples = np.random.choice(len(weights), size=n, p=p, replace=True)
+        return self.get(idx[samples])
+
     def get_signal(self) -> Self:
         return self.get(self._is_signal, "signal")
 

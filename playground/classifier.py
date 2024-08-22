@@ -8,8 +8,6 @@ from torch.autograd import grad
 from torch.utils.data import DataLoader, TensorDataset
 from torch.func import hessian
 
-from dataset import split_dataset
-
 
 class MLPClassifier(nn.Module):
     # Input: 2d

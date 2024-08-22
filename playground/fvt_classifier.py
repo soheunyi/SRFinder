@@ -7,10 +7,10 @@ from torch.utils.data import DataLoader
 from torch import optim
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import EarlyStopping
 
 
 from network_blocks import conv1d
-from lorentz_net import LorentzNet
 
 
 class FvTClassifier(pl.LightningModule):
@@ -140,7 +140,7 @@ class FvTClassifier(pl.LightningModule):
             / self.train_total_weights
         )
 
-        self.log("train_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train_loss", avg_loss, on_epoch=True, prog_bar=True)
         self.train_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
         self.train_total_weights = 0.0
@@ -155,7 +155,6 @@ class FvTClassifier(pl.LightningModule):
         self.log(
             "val_loss",
             avg_loss,
-            on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
@@ -170,12 +169,25 @@ class FvTClassifier(pl.LightningModule):
     def configure_optimizers(self):
         return optim.Adam(self.parameters(), lr=self.lr)
 
-    def fit(self, train_dataset, val_dataset, batch_size, max_epochs=100):
+    def fit(
+        self,
+        train_dataset,
+        val_dataset,
+        batch_size,
+        max_epochs=30,
+        train_seed: int = None,
+    ):
+        if train_seed is not None:
+            pl.seed_everything(train_seed)
+
         logger = TensorBoardLogger("tb_logs", name=self.run_name)
+        early_stop_callback = EarlyStopping(
+            monitor="val_loss", min_delta=0.00, patience=5, verbose=False, mode="min"
+        )
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,
-            callbacks=[self.checkpoint_callback],
+            callbacks=[self.checkpoint_callback, early_stop_callback],
             logger=logger,
         )
 

@@ -139,7 +139,6 @@ class AttentionClassifier(pl.LightningModule):
         val_loader = DataLoader(
             val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
         )
-
         early_stop_callback = EarlyStopping(
             monitor="avg_val_loss", min_delta=0.0, patience=5, mode="min"
         )
@@ -163,6 +162,7 @@ def smeared_density_ratio(
     base_noise_scale: Literal["minmax", "std"] = "minmax",
     pretrained_fvt_hash: str = None,
     max_epochs: int = 10,
+    seed: int = 42,
 ):
     """
     Calculate the smeared density ratio.
@@ -203,7 +203,7 @@ def smeared_density_ratio(
         input_size=X.shape[1],
         num_classes=n_classes,
         learning_rate=1e-3,
-        random_state=42,
+        random_state=seed,
         fvt_hash=pretrained_fvt_hash,
     )
 
