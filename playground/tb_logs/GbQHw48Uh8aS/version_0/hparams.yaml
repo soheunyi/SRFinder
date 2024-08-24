@@ -1,0 +1,9 @@
+device: !!python/object/apply:torch.device
+- cuda
+- 0
+dim_dijet_features: 6
+dim_input_jet_features: 4
+dim_quadjet_features: 6
+lr: 0.001
+num_classes: 2
+run_name: GbQHw48Uh8aS

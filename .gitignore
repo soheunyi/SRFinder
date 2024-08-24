@@ -4,3 +4,10 @@ figures
 *.h5
 *.npy
 *.root
+
+reducers/
+embeddings/
+*.ckpt
+training_info/
+tst_info/
+checkpoints/
