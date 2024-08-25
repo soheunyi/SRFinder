@@ -176,6 +176,7 @@ class TrainingInfoV2:
         self._aux_info[key] = value
 
     def save(self):
+        print(f"Saving Training Info: {self.hash}")
         with open(TINFO_SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 

@@ -59,6 +59,7 @@ class TSTInfo:
         self._aux_info[key] = value
 
     def save(self):
+        print(f"Saving TSTInfo with hash: {self.hash}")
         with open(TST_SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 

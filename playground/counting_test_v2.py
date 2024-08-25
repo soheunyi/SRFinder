@@ -1,17 +1,12 @@
 from copy import deepcopy
-from itertools import product
-import torch
-import pandas as pd
 import numpy as np
 import pytorch_lightning as pl
 import click
 import yaml
 
 
-from events_data import EventsData
+from events_data import events_from_scdinfo
 from fvt_classifier import FvTClassifier
-from dataset import SCDatasetInfo, generate_mother_dataset, split_scdinfo
-from signal_region import get_SR_stats
 from training_info import TrainingInfoV2
 from tst_info import TSTInfo
 
@@ -124,7 +119,7 @@ def routine(config: dict):
     SR_cut = tst_info.SR_cut
     CR_cut = tst_info.CR_cut
     scdinfo_tst = tst_info.scdinfo_tst
-    events_tst = scdinfo_tst.fetch_data()
+    events_tst = events_from_scdinfo(scdinfo_tst, features, signal_filename)
 
     SR_idx = SR_stats >= SR_cut
     events_tst_SR = events_tst[SR_idx]
@@ -134,15 +129,19 @@ def routine(config: dict):
 
     CR_fvt_tinfo = TrainingInfoV2(CR_fvt_hparams, scdinfo_tst_CR)
     print("CR FvT Training Hash: ", CR_fvt_tinfo.hash)
-    CR_fvt_tinfo.save()
+
+    CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_tinfo.fetch_train_val_tensor_datasets(
+        features, "fourTag", "weight"
+    )
 
     pl.seed_everything(seed)
     np.random.seed(seed)
 
     # Initialize CR model with weights from base model
     CR_fvt_model = FvTClassifier.load_from_checkpoint(
-        f"checkpoints/{tst_info.base_fvt_tinfo_hash}.ckpt",
+        f"checkpoints/{tst_info.base_fvt_tinfo_hash}_best.ckpt",
     )
+    CR_fvt_model.run_name = CR_fvt_tinfo.hash
     # Train CR model
     CR_fvt_model.fit(
         CR_fvt_train_dset,
@@ -152,27 +151,6 @@ def routine(config: dict):
         train_seed=CR_fvt_hparams["train_seed"],
     )
 
-    CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_tinfo.fetch_train_val_tensor_datasets(
-        features, "fourTag", "weight"
-    )
-
-    CR_fvt_model = FvTClassifier(
-        num_classes,
-        dim_input_jet_features,
-        CR_fvt_hparams["dim_dijet_features"],
-        CR_fvt_hparams["dim_quadjet_features"],
-        run_name=CR_fvt_tinfo.hash,
-        device=torch.device("cuda:0"),
-        lr=CR_fvt_hparams["lr"],
-    )
-
-    CR_fvt_model.fit(
-        CR_fvt_train_dset,
-        CR_fvt_val_dset,
-        batch_size=CR_fvt_hparams["batch_size"],
-        max_epochs=CR_fvt_hparams["max_epochs"],
-        train_seed=CR_fvt_hparams["train_seed"],
-    )
     CR_fvt_model.eval()
 
     cond_prob_4b_est = (
@@ -193,32 +171,13 @@ def routine(config: dict):
         SR_stats=SR_stats,
         SR_cut=SR_cut,
         CR_cut=CR_cut,
-        base_fvt_tinfo_hash=base_fvt_tinfo.hash,
+        base_fvt_tinfo_hash=tst_info.base_fvt_tinfo_hash,
         CR_fvt_tinfo_hash=CR_fvt_tinfo.hash,
     )
     print("Two Sample Test Hash: ", tst_info.hash)
+
+    CR_fvt_tinfo.save()
     tst_info.save()
-
-
-def get_is_signal(scdinfo: SCDatasetInfo, signal_filename: str):
-    # Now show the answer
-    is_signals = []
-    for file, file_len in zip(scdinfo.files, scdinfo.get_file_lengths()):
-        is_signals.append(
-            np.full(file_len, True)
-            if file.name == signal_filename
-            else np.full(file_len, False)
-        )
-    is_signal = np.concatenate(is_signals)
-    return is_signal
-
-
-def events_from_scdinfo(scdinfo: SCDatasetInfo, features: list, signal_filename: str):
-    df = scdinfo.fetch_data()
-    df["signal"] = get_is_signal(scdinfo, signal_filename)
-    events = EventsData.from_dataframe(df, features)
-
-    return events
 
 
 @click.command()

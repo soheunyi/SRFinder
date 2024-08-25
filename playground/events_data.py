@@ -7,6 +7,7 @@ from torch.utils.data import TensorDataset
 
 from fvt_representations import get_fvt_reprs
 from fvt_classifier import FvTClassifier
+from dataset import SCDatasetInfo
 
 
 class EventsData:
@@ -353,3 +354,24 @@ class EventsData:
         return (self.q_repr @ self.view_score[:, :, None]).reshape(
             -1, self.q_repr.shape[1]
         )
+
+
+def get_is_signal(scdinfo: SCDatasetInfo, signal_filename: str):
+    # Now show the answer
+    is_signals = []
+    for file, file_len in zip(scdinfo.files, scdinfo.get_file_lengths()):
+        is_signals.append(
+            np.full(file_len, True)
+            if file.name == signal_filename
+            else np.full(file_len, False)
+        )
+    is_signal = np.concatenate(is_signals)
+    return is_signal
+
+
+def events_from_scdinfo(scdinfo: SCDatasetInfo, features: list, signal_filename: str):
+    df = scdinfo.fetch_data()
+    df["signal"] = get_is_signal(scdinfo, signal_filename)
+    events = EventsData.from_dataframe(df, features)
+
+    return events
