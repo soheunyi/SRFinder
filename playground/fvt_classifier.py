@@ -8,6 +8,7 @@ from torch import optim
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import EarlyStopping
+import pathlib
 
 
 from network_blocks import conv1d
@@ -44,14 +45,6 @@ class FvTClassifier(pl.LightningModule):
         self.num_classes = num_classes
         self.lr = lr
         self.run_name = run_name
-
-        self.checkpoint_callback = ModelCheckpoint(
-            dirpath="checkpoints/",
-            filename=f"{run_name}_best",
-            save_top_k=1,
-            monitor="val_loss",
-            mode="min",
-        )
 
         self.encoder = FvTEncoder(
             dim_input_jet_features=dim_input_jet_features,
@@ -176,6 +169,7 @@ class FvTClassifier(pl.LightningModule):
         batch_size,
         max_epochs=30,
         train_seed: int = None,
+        save_checkpoint: bool = True,
     ):
         if train_seed is not None:
             pl.seed_everything(train_seed)
@@ -185,9 +179,26 @@ class FvTClassifier(pl.LightningModule):
             monitor="val_loss", min_delta=0.00, patience=5, verbose=False, mode="min"
         )
 
+        callbacks = [early_stop_callback]
+
+        if save_checkpoint:
+            # raise error if checkpoint file exists
+            checkpoint_path = pathlib.Path(f"checkpoints/{self.run_name}_best.ckpt")
+            if checkpoint_path.exists():
+                raise FileExistsError(f"{checkpoint_path} already exists")
+
+            checkpoint_callback = ModelCheckpoint(
+                dirpath="checkpoints/",
+                filename=f"{self.run_name}_best",
+                save_top_k=1,
+                monitor="val_loss",
+                mode="min",
+            )
+            callbacks.append(checkpoint_callback)
+
         trainer = pl.Trainer(
             max_epochs=max_epochs,
-            callbacks=[self.checkpoint_callback, early_stop_callback],
+            callbacks=[checkpoint_callback, early_stop_callback],
             logger=logger,
         )
 

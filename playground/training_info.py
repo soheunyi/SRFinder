@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+import tqdm
 
 from dataset import DatasetInfo, SCDatasetInfo, split_scdinfo
 
@@ -75,19 +76,30 @@ class TrainingInfo:
         return hparams_list
 
     @staticmethod
-    def find(hparam_filter: dict):
+    def find(hparam_filter: dict, return_hparams=False):
         hashes = []
-        for file in TINFO_SAVE_DIR.glob("*"):
+        for file in tqdm.tqdm(TINFO_SAVE_DIR.glob("*")):
             tinfo = TrainingInfo.load(file)
             is_match = True
             for key, value in hparam_filter.items():
-                if tinfo.hparams.get(key) != value:
+                if callable(value):
+                    if not value(tinfo.hparams.get(key)):
+                        is_match = False
+                        break
+                elif tinfo.hparams.get(key) != value:
                     is_match = False
                     break
             if is_match:
-                hashes.append(tinfo.hash)
+                if return_hparams:
+                    hashes.append((tinfo.hash, tinfo.hparams))
+                else:
+                    hashes.append(tinfo.hash)
 
-        return hashes
+        if return_hparams:
+            hashes, hparams = zip(*hashes)
+            return hashes, hparams
+        else:
+            return hashes
 
 
 class TrainingInfoV2:

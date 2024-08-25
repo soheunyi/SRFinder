@@ -1,5 +1,6 @@
 from copy import deepcopy
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import click
 import yaml
@@ -29,6 +30,8 @@ def require_keys(config: dict, keys: list):
 def routine(config: dict):
     print("Experiment Configuration")
     print(config)
+
+    print("Current Time: ", pd.Timestamp.now())
 
     require_keys(
         config,

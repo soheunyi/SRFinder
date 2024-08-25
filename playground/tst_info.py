@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import TensorDataset
+import tqdm
 
 from dataset import SCDatasetInfo
 from training_info import TrainingInfoV2, create_hash
@@ -78,9 +79,9 @@ class TSTInfo:
         return hparams_list
 
     @staticmethod
-    def find(hparam_filter: dict[str, any]) -> list[str]:
+    def find(hparam_filter: dict[str, any], return_hparams=False) -> list[str]:
         hashes = []
-        for file in TST_SAVE_DIR.glob("*"):
+        for file in tqdm.tqdm(TST_SAVE_DIR.glob("*")):
             tinfo = TSTInfo.load(file)
             is_match = True
             for key, value in hparam_filter.items():
@@ -92,6 +93,13 @@ class TSTInfo:
                     is_match = False
                     break
             if is_match:
-                hashes.append(tinfo.hash)
+                if return_hparams:
+                    hashes.append((tinfo.hash, tinfo.hparams))
+                else:
+                    hashes.append(tinfo.hash)
 
-        return hashes
+        if return_hparams:
+            hashes, hparams = zip(*hashes)
+            return hashes, hparams
+        else:
+            return hashes
