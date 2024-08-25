@@ -30,9 +30,6 @@ class EventsData:
         self._is_4b = is_4b
         self._is_signal = is_signal
 
-        self._is_3b = None
-        self._is_bg4b = None
-
         self.fvt_score = None
         self.view_score = None
         self.q_repr = None
@@ -40,15 +37,22 @@ class EventsData:
         self._name = name
         self._npd = npd
 
-        self.update()
+    def get_memory_usage(self):
+        mem_usage = (
+            self._X.nbytes
+            + self._weights.nbytes
+            + self._is_4b.nbytes
+            + self._is_signal.nbytes
+            + sum([data.nbytes for data in self._npd.values()])
+        )
+        for d in [self.fvt_score, self.view_score, self.q_repr]:
+            if d is not None:
+                mem_usage += d.nbytes
+        return mem_usage
 
     def update_npd(self, key: str, data: np.ndarray):
         assert len(data) == len(self)
         self._npd[key] = data
-
-    def update(self):
-        self._is_3b = ~self._is_4b
-        self._is_bg4b = self._is_4b & ~self._is_signal
 
     def set_model_scores(self, model: FvTClassifier):
         device = model.device
@@ -120,8 +124,6 @@ class EventsData:
 
         for key in self._npd.keys():
             self._npd[key] = self._npd[key][idx]
-
-        self.update()
 
     def split(
         self,
@@ -213,8 +215,6 @@ class EventsData:
 
         for key in self._npd.keys():
             self._npd[key] = self._npd[key][:n]
-
-        self.update()
 
     def get(self, idx: Iterable[int], name: str = "") -> EventsData:
         events = EventsData(
@@ -315,11 +315,11 @@ class EventsData:
 
     @property
     def is_3b(self):
-        return self._is_3b
+        return ~self._is_4b
 
     @property
     def is_bg4b(self):
-        return self._is_bg4b
+        return self._is_4b & ~self._is_signal
 
     @property
     def is_signal(self):

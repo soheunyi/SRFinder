@@ -74,7 +74,6 @@ def routine(config: dict):
     signal_ratio = config["signal_ratio"]
     n_3b = config["n_3b"]
     ratio_4b = config["ratio_4b"]
-    experiment_name = config["experiment_name"]
     signal_filename = config["signal_filename"]
     seed = config["seed"]
 

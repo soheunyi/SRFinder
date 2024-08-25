@@ -77,13 +77,17 @@ class TSTInfo:
         return hparams_list
 
     @staticmethod
-    def find(hparam_filter: dict):
+    def find(hparam_filter: dict[str, any]) -> list[str]:
         hashes = []
         for file in TST_SAVE_DIR.glob("*"):
             tinfo = TSTInfo.load(file)
             is_match = True
             for key, value in hparam_filter.items():
-                if tinfo.hparams.get(key) != value:
+                if callable(value):
+                    if not value(tinfo.hparams.get(key)):
+                        is_match = False
+                        break
+                elif tinfo.hparams.get(key) != value:
                     is_match = False
                     break
             if is_match:
