@@ -7,8 +7,8 @@ DATA=MG3   # Modify this to the nickname of your dataset.
 
 TTREE_PATH=../../events/$DATA/TTree   # This script assumes this path exists already.
 DF_PATH=../../events/$DATA/dataframes
-PT_PATH=../../events/$DATA/PtEtaPhi
-PTM_PATH=../../events/$DATA/PtEtaPhiM
+# PT_PATH=../../events/$DATA/PtEtaPhi
+# PTM_PATH=../../events/$DATA/PtEtaPhiM
 
 # mkdir $DF_PATH
 # mkdir $PT_PATH
