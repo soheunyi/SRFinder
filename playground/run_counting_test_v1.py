@@ -23,8 +23,8 @@ def edit_config(
 @click.command()
 @click.option("--config", type=str)
 def main(config):
-    signal_ratios = [0.0, 0.01, 0.02]
-    seeds = np.arange(1, 100)
+    signal_ratios = [0.0, 0.01]
+    seeds = np.arange(0, 1)
 
     with open(config, "r") as ymlfile:
         config = yaml.safe_load(ymlfile)
