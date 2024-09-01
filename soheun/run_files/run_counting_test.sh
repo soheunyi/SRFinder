@@ -19,8 +19,8 @@
 
 ## Choose one:
 
-CONFIG_FILENAME="counting_test_more_CR_train_data.yml"
-RUN_FILENAME="run_counting_test_v1.py"
+CONFIG_FILENAME="counting_test_high_4b_in_CR.yml"
+RUN_FILENAME="run_counting_test_v2.py"
 CONDA_ENV_NAME="coffea_torch"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"

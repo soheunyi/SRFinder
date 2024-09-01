@@ -15,6 +15,7 @@ from signal_region import get_SR_stats
 from training_info import TrainingInfoV2
 from tst_info import TSTInfo
 
+W_4B_CUT_MAX = 0.999
 
 ###########################################################################################
 ###########################################################################################
@@ -133,7 +134,8 @@ def routine(config: dict):
     base_fvt_tinfo.save()
 
     base_fvt_train_dset, base_fvt_val_dset = (
-        base_fvt_tinfo.fetch_train_val_tensor_datasets(features, "fourTag", "weight")
+        base_fvt_tinfo.fetch_train_val_tensor_datasets(
+            features, "fourTag", "weight")
     )
 
     base_fvt_model = FvTClassifier(
@@ -163,7 +165,8 @@ def routine(config: dict):
 
     # Should be modified: get_SR_stats should not have an access to "signal"
     # But initiation of EventsData requires "signal" in the dataframe...
-    events_SR_train = events_from_scdinfo(scdinfo_SR_train, features, signal_filename)
+    events_SR_train = events_from_scdinfo(
+        scdinfo_SR_train, features, signal_filename)
     events_tst = events_from_scdinfo(scdinfo_tst, features, signal_filename)
 
     if SRCR_hparams["method"] == "smearing":
@@ -194,7 +197,8 @@ def routine(config: dict):
             events_SR_train=events_SR_train,
         )
     else:
-        raise ValueError("Method {} not recognized".format(SRCR_hparams["method"]))
+        raise ValueError("Method {} not recognized".format(
+            SRCR_hparams["method"]))
 
     SR_stats_argsort = np.argsort(SR_stats)[::-1]
     SR_stats_sorted = SR_stats[SR_stats_argsort]
@@ -203,9 +207,11 @@ def routine(config: dict):
     is_4b = events_tst.is_4b[SR_stats_argsort]
     cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
 
-    SR_cut = SR_stats_sorted[np.argmin(cumul_4b_ratio < SRCR_hparams["4b_in_SR"])]
+    SR_cut = SR_stats_sorted[np.argmin(
+        cumul_4b_ratio < min(SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))]
     CR_cut = SR_stats_sorted[
-        np.argmin(cumul_4b_ratio < SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"])
+        np.argmin(cumul_4b_ratio <
+                  max(SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))
     ]
 
     df_tst = scdinfo_tst.fetch_data()
@@ -247,9 +253,11 @@ def routine(config: dict):
     CR_fvt_model.eval()
 
     cond_prob_4b_est = (
-        CR_fvt_model.predict(events_tst_SR.X_torch)[:, 1].detach().cpu().numpy()
+        CR_fvt_model.predict(events_tst_SR.X_torch)[
+            :, 1].detach().cpu().numpy()
     )
-    reweights = ratio_4b * cond_prob_4b_est / ((1 - ratio_4b) * (1 - cond_prob_4b_est))
+    reweights = ratio_4b * cond_prob_4b_est / \
+        ((1 - ratio_4b) * (1 - cond_prob_4b_est))
     events_tst_SR.reweight(
         np.where(
             events_tst_SR.is_4b,

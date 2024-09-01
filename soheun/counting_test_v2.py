@@ -20,6 +20,8 @@ from tst_info import TSTInfo
 # 4. Perform two sample test
 ###########################################################################################
 
+W_4B_CUT_MAX = 0.999
+
 
 def require_keys(config: dict, keys: list):
     for key in keys:
@@ -113,16 +115,32 @@ def routine(config: dict):
         "ratio_4b": config["ratio_4b"],
         "signal_filename": config["signal_filename"],
         "seed": config["seed"],
+        "experiment_name": "counting_test_v1",
     }
     hashes = TSTInfo.find(hparam_filter)
     assert len(hashes) == 1
     tst_info = TSTInfo.load(hashes[0])
 
     SR_stats = tst_info.SR_stats
-    SR_cut = tst_info.SR_cut
-    CR_cut = tst_info.CR_cut
     scdinfo_tst = tst_info.scdinfo_tst
     events_tst = events_from_scdinfo(scdinfo_tst, features, signal_filename)
+
+    # SR_cut = tst_info.SR_cut
+    # CR_cut = tst_info.CR_cut
+
+    SR_stats_argsort = np.argsort(SR_stats)[::-1]
+    SR_stats_sorted = SR_stats[SR_stats_argsort]
+
+    weights = events_tst.weights[SR_stats_argsort]
+    is_4b = events_tst.is_4b[SR_stats_argsort]
+    cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
+
+    SR_cut = SR_stats_sorted[np.argmin(
+        cumul_4b_ratio < min(SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))]
+    CR_cut = SR_stats_sorted[
+        np.argmin(cumul_4b_ratio <
+                  min(SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))
+    ]
 
     SR_idx = SR_stats >= SR_cut
     events_tst_SR = events_tst[SR_idx]
