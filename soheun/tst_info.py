@@ -81,8 +81,8 @@ class TSTInfo:
         return hparams_list
 
     @staticmethod
-    def find(hparam_filter: dict[str, any], return_hparams=False) -> list[str]:
-        hashes = []
+    def find(hparam_filter: dict[str, any], return_hparams=False, sort_by: list[str] = []) -> list[str]:
+        hash_hparams = []
         for file in tqdm.tqdm(TST_SAVE_DIR.glob("*")):
             tinfo = TSTInfo.load(file)
             is_match = True
@@ -95,15 +95,25 @@ class TSTInfo:
                     is_match = False
                     break
             if is_match:
-                if return_hparams:
-                    hashes.append((tinfo.hash, tinfo.hparams))
-                else:
-                    hashes.append(tinfo.hash)
+                hash_hparams.append((tinfo.hash, tinfo.hparams))
+
+        if len(hash_hparams) == 0:
+            hashes, hparams = [], []
+        else:
+            hashes, hparams = zip(*hash_hparams)
+
+        # sort by the given keys
+        if len(sort_by) > 0 and len(hashes) > 0:
+            for hp in hparams:
+                assert all([key in hp for key in sort_by]
+                           ), f"sort_by keys {sort_by} not in hparams {hp}"
+
+            argsort = np.lexsort(tuple([hp[key] for hp in hparams]
+                                 for key in sort_by))
+            hashes = [hashes[i] for i in argsort]
+            hparams = [hparams[i] for i in argsort]
 
         if return_hparams:
-            if len(hashes) == 0:
-                return [], []
-            hashes, hparams = zip(*hashes)
             return hashes, hparams
         else:
             return hashes

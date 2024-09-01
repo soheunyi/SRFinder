@@ -4,8 +4,8 @@
 #SBATCH --ntasks 1
 
 # number of CPUs and amount of memory you need:
-#SBATCH --cpus-per-task 16
-#SBATCH --mem-per-cpu 16G
+#SBATCH --cpus-per-task 8
+#SBATCH --mem-per-cpu 8G
 
 # number of GPUs you need
 #SBATCH --gres=gpu:1
@@ -25,7 +25,10 @@ CONDA_ENV_NAME="coffea_torch"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 
+SEED_START=0
+SEED_END=10
+
 export TQDM_MININTERVAL=5
 # to run a Python script in a Conda environment called ENV
 cd ..
-srun $PYTHON $RUN_FILENAME --config configs/$CONFIG_FILENAME
+srun $PYTHON $RUN_FILENAME --config configs/$CONFIG_FILENAME --seed-start $SEED_START --seed-end $SEED_END
