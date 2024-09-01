@@ -35,7 +35,7 @@ class AttentionClassifier(pl.LightningModule):
 
         if fvt_hash is not None:
             fvt_model = FvTClassifier.load_from_checkpoint(
-                f"./checkpoints/{fvt_hash}_best.ckpt"
+                f"./data/checkpoints/{fvt_hash}_best.ckpt"
             )
             fvt_model.eval()
             self.select_q = fvt_model.select_q

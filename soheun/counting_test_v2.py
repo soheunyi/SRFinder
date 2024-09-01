@@ -142,7 +142,7 @@ def routine(config: dict):
 
     # Initialize CR model with weights from base model
     CR_fvt_model = FvTClassifier.load_from_checkpoint(
-        f"checkpoints/{tst_info.base_fvt_tinfo_hash}_best.ckpt",
+        f"./data/checkpoints/{tst_info.base_fvt_tinfo_hash}_best.ckpt",
     )
     CR_fvt_model.run_name = CR_fvt_tinfo.hash
     # Train CR model
@@ -157,9 +157,11 @@ def routine(config: dict):
     CR_fvt_model.eval()
 
     cond_prob_4b_est = (
-        CR_fvt_model.predict(events_tst_SR.X_torch)[:, 1].detach().cpu().numpy()
+        CR_fvt_model.predict(events_tst_SR.X_torch)[
+            :, 1].detach().cpu().numpy()
     )
-    reweights = ratio_4b * cond_prob_4b_est / ((1 - ratio_4b) * (1 - cond_prob_4b_est))
+    reweights = ratio_4b * cond_prob_4b_est / \
+        ((1 - ratio_4b) * (1 - cond_prob_4b_est))
     events_tst_SR.reweight(
         np.where(
             events_tst_SR.is_4b,

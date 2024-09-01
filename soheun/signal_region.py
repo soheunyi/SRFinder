@@ -387,7 +387,7 @@ def get_SR_stats(
 
     if fvt_hash is not None:
         fvt_model = FvTClassifier.load_from_checkpoint(
-            f"./checkpoints/{fvt_hash}_best.ckpt"
+            f"./data/checkpoints/{fvt_hash}_best.ckpt"
         )
 
     fvt_model.eval()

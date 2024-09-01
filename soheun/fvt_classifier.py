@@ -187,12 +187,12 @@ class FvTClassifier(pl.LightningModule):
         if save_checkpoint:
             # raise error if checkpoint file exists
             checkpoint_path = pathlib.Path(
-                f"checkpoints/{self.run_name}_best.ckpt")
+                f"./data/checkpoints/{self.run_name}_best.ckpt")
             if checkpoint_path.exists():
                 raise FileExistsError(f"{checkpoint_path} already exists")
 
             checkpoint_callback = ModelCheckpoint(
-                dirpath="checkpoints/",
+                dirpath="./data/checkpoints/",
                 filename=f"{self.run_name}_best",
                 save_top_k=1,
                 monitor="val_loss",
