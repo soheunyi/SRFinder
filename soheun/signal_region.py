@@ -31,7 +31,8 @@ def fast_umap(reducer: umap.UMAP, n_workers: int = 4):
 
 def sort_samples_by_bins(
     embeddings: np.ndarray,
-    bins: list[tuple[float, float]],  # modify get_bin_idx to use other types of bins
+    # modify get_bin_idx to use other types of bins
+    bins: list[tuple[float, float]],
     seed: int = None,
 ):
     """
@@ -78,7 +79,8 @@ def estimate_probs_4b(
         events
     ), "Need to provide est_probs_4b of all events"
 
-    hist_all, _ = np.histogram(cluster_embed, bins=bins, weights=events.weights)
+    hist_all, _ = np.histogram(
+        cluster_embed, bins=bins, weights=events.weights)
 
     hist_est_probs_4b, _ = np.histogram(
         cluster_embed,
@@ -109,7 +111,8 @@ def get_regions(
     p4b_method: method to estimate the ratio of 4b to 3b events.
     """
     assert all(0 < w_cut <= 1 for w_cut in w_cuts), "0 < w_cut <= 1"
-    assert len(target_idx) == len(events), "Need to provide target_idx for all events"
+    assert len(target_idx) == len(
+        events), "Need to provide target_idx for all events"
 
     if reuse_embed:
         assert "cluster_embed" in events.npd, "Need to set cluster_embed in npd"
@@ -126,7 +129,8 @@ def get_regions(
     total_target_weight = events[target_idx].total_weight
     min_weights_bin = total_target_weight / max_bins
 
-    embed_bins = np.linspace(cluster_embed.min(), cluster_embed.max(), init_bins + 1)
+    embed_bins = np.linspace(
+        cluster_embed.min(), cluster_embed.max(), init_bins + 1)
     hist_target, _ = np.histogram(
         cluster_embed[target_idx, 0],
         bins=embed_bins,
@@ -164,7 +168,8 @@ def get_regions(
     # sort by ratio_4b_target and plot csum
 
     sorted_bin_idx = np.argsort(ratio_4b_target)[::-1]
-    sorted_bins = [(merged_x_bins[i], merged_x_bins[i + 1]) for i in sorted_bin_idx]
+    sorted_bins = [(merged_x_bins[i], merged_x_bins[i + 1])
+                   for i in sorted_bin_idx]
     sample_idx_sorted = sort_samples_by_bins(
         cluster_embed[:, 0], sorted_bins, seed=seed
     )
@@ -172,7 +177,8 @@ def get_regions(
     csum_all = csum_all / csum_all[-1]
     inv_sample_idx_sorted = np.argsort(sample_idx_sorted)
 
-    is_in_region_list = [(csum_all <= w_cut)[inv_sample_idx_sorted] for w_cut in w_cuts]
+    is_in_region_list = [(csum_all <= w_cut)[inv_sample_idx_sorted]
+                         for w_cut in w_cuts]
 
     return is_in_region_list
 
@@ -265,7 +271,8 @@ def get_regions_via_histogram(
 
     if binning_method == "uniform":
         bins = [
-            np.linspace(att_q_repr[:, i].min(), att_q_repr[:, i].max(), n_bins + 1)
+            np.linspace(att_q_repr[:, i].min(),
+                        att_q_repr[:, i].max(), n_bins + 1)
             for i in range(att_q_repr.shape[1])
         ]
     elif binning_method == "quantile":
@@ -288,7 +295,8 @@ def get_regions_via_histogram(
     att_q_repr_bin_idx = np.clip(att_q_repr_bin_idx, 0, n_bins - 1)
 
     # hist_3b, _ = np.histogramdd(att_q_repr[is_3b], bins=bins, weights=weights[is_3b])
-    hist_4b, _ = np.histogramdd(att_q_repr[is_4b], bins=bins, weights=weights[is_4b])
+    hist_4b, _ = np.histogramdd(
+        att_q_repr[is_4b], bins=bins, weights=weights[is_4b])
     hist_all, _ = np.histogramdd(att_q_repr, bins=bins, weights=weights)
 
     is_nonzero = hist_all > 0
@@ -305,7 +313,8 @@ def get_regions_via_histogram(
     designated = np.zeros(len(events), dtype=bool)
 
     for i in range(len(nonzero_bins)):
-        in_ith_bin = np.all(att_q_repr_bin_idx[~designated] == nonzero_bins[i], axis=1)
+        in_ith_bin = np.all(
+            att_q_repr_bin_idx[~designated] == nonzero_bins[i], axis=1)
         desig_idx = np.nonzero(~designated)[0][in_ith_bin]
         events_membership[desig_idx] = i
         designated[desig_idx] = True
@@ -330,7 +339,8 @@ def get_regions_via_probs_4b(
     w_cuts: Iterable[float],
     probs_4b: np.ndarray,
 ):
-    assert len(probs_4b) == len(events), "Need to provide probs_4b for all events"
+    assert len(probs_4b) == len(
+        events), "Need to provide probs_4b for all events"
     assert all(0 <= w_cut <= 1 for w_cut in w_cuts), "0 <= w_cut <= 1"
 
     sorted_idx = np.argsort(probs_4b)[::-1]
@@ -338,15 +348,17 @@ def get_regions_via_probs_4b(
     csum_all = csum_all / csum_all[-1]
     inv_sorted_idx = np_put(sorted_idx)
 
-    is_in_region_list = [(csum_all <= w_cut)[inv_sorted_idx] for w_cut in w_cuts]
+    is_in_region_list = [(csum_all <= w_cut)[inv_sorted_idx]
+                         for w_cut in w_cuts]
 
     return is_in_region_list
 
 
 def get_SR_stats(
     events: EventsData,
-    fvt_hash: str,
-    method: Literal["fvt", "density_peak", "smearing"],
+    fvt_hash: str = None,
+    fvt_model: FvTClassifier = None,
+    method: Literal["fvt", "density_peak", "smearing"] = "smearing",
     events_SR_train: EventsData = None,
     **kwargs,
 ):
@@ -370,10 +382,14 @@ def get_SR_stats(
     np.ndarray
         Scalar statistics.
     """
+    assert (fvt_model == None) ^ (
+        fvt_hash == None), "Need to provide only one of fvt_model or fvt_hash"
 
-    fvt_model = FvTClassifier.load_from_checkpoint(
-        f"./checkpoints/{fvt_hash}_best.ckpt"
-    )
+    if fvt_hash is not None:
+        fvt_model = FvTClassifier.load_from_checkpoint(
+            f"./checkpoints/{fvt_hash}_best.ckpt"
+        )
+
     fvt_model.eval()
     if method == "fvt":
         return fvt_model.predict(events.X_torch)[:, 1].numpy()

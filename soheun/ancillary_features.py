@@ -26,7 +26,8 @@ def get_M01(
         + 2
         * (
             E0 * E1
-            - Pt0 * Pt1 * (torch.cos(Phi0 - Phi1) + torch.sinh(Eta0) * torch.sinh(Eta1))
+            - Pt0 * Pt1 * (torch.cos(Phi0 - Phi1) +
+                           torch.sinh(Eta0) * torch.sinh(Eta1))
         )
     ) ** 0.5
 
@@ -159,7 +160,8 @@ def get_ancillary_features(J: torch.Tensor):
     # J is a tensor of shape (batch, 4 * 4)
     nj_features = 4
     J = J.view(-1, nj_features, 4)
-    jet0, jet1, jet2, jet3 = J[:, :, 0:1], J[:, :, 1:2], J[:, :, 2:3], J[:, :, 3:4]
+    jet0, jet1, jet2, jet3 = J[:, :, 0:1], J[:,
+                                             :, 1:2], J[:, :, 2:3], J[:, :, 3:4]
 
     # augmented jet features
     augmented_jet_features = torch.cat(
@@ -183,9 +185,6 @@ def get_ancillary_features(J: torch.Tensor):
     dijet01, dijet23, dijet02, dijet13, dijet03, dijet12 = jets_to_dijets(
         jet0, jet1, jet2, jet3
     )
-    # quadjet0123, quadjet0213, quadjet0312 = dijets_to_quadjets(
-    #     dijet01, dijet23, dijet02, dijet13, dijet03, dijet12
-    # )
 
     m01, m23, m02, m13, m03, m12 = (
         dijet01[:, 3:4, :],

@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torch import optim
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import EarlyStopping
+from pytorch_lightning.callbacks import EarlyStopping, TQDMProgressBar
 import pathlib
 
 
@@ -23,7 +23,8 @@ class FvTClassifier(pl.LightningModule):
         dim_quadjet_features,
         run_name: str,
         device: str = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+            torch.device("cuda") if torch.cuda.is_available(
+            ) else torch.device("cpu")
         ),
         lr: float = 1e-3,
     ):
@@ -178,12 +179,15 @@ class FvTClassifier(pl.LightningModule):
         early_stop_callback = EarlyStopping(
             monitor="val_loss", min_delta=0.00, patience=5, verbose=False, mode="min"
         )
+        progress_bar = TQDMProgressBar(refresh_rate=max(
+            1, (len(train_dataset) // batch_size) // 10))
 
-        callbacks = [early_stop_callback]
+        callbacks = [early_stop_callback, progress_bar]
 
         if save_checkpoint:
             # raise error if checkpoint file exists
-            checkpoint_path = pathlib.Path(f"checkpoints/{self.run_name}_best.ckpt")
+            checkpoint_path = pathlib.Path(
+                f"checkpoints/{self.run_name}_best.ckpt")
             if checkpoint_path.exists():
                 raise FileExistsError(f"{checkpoint_path} already exists")
 
@@ -198,7 +202,7 @@ class FvTClassifier(pl.LightningModule):
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,
-            callbacks=[checkpoint_callback, early_stop_callback],
+            callbacks=callbacks,
             logger=logger,
         )
 

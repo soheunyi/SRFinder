@@ -23,7 +23,8 @@ def create_hash(directory: pathlib.Path) -> str:
     # create a new hash that is not already in the directory
     files = directory.glob("*")
     hashes = [file.name for file in files]
-    random_string = "".join(random.choices(string.ascii_letters + string.digits, k=12))
+    random_string = "".join(random.choices(
+        string.ascii_letters + string.digits, k=12))
     while random_string in hashes:
         random_string = "".join(
             random.choices(string.ascii_letters + string.digits, k=12)
@@ -32,6 +33,8 @@ def create_hash(directory: pathlib.Path) -> str:
 
 
 class TrainingInfo:
+    SAVE_DIR = TINFO_SAVE_DIR
+
     def __init__(self, hparams: dict, dinfo_train: DatasetInfo, dinfo_val: DatasetInfo):
         self._hparams = hparams
         self.dinfo_train = dinfo_train
@@ -103,6 +106,8 @@ class TrainingInfo:
 
 
 class TrainingInfoV2:
+    SAVE_DIR = TINFO_SAVE_DIR
+
     def __init__(self, hparams: dict, scdinfo: SCDatasetInfo):
         """
         Save the hparams, scdinfo, and seed for training models.
@@ -142,7 +147,8 @@ class TrainingInfoV2:
                 "batch_size" in self.hparams
             ), "batch_size must be in hparams if fit_batch_size is True"
             batch_size = self.hparams["batch_size"]
-            df_train = df_train.iloc[: (len(df_train) // batch_size) * batch_size]
+            df_train = df_train.iloc[: (
+                len(df_train) // batch_size) * batch_size]
             df_val = df_val.iloc[: (len(df_val) // batch_size) * batch_size]
 
         return df_train, df_val

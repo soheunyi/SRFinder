@@ -19,7 +19,8 @@ class DatasetInfo:
         assert max(file_idx) + 1 <= len(files)
         # check if the file exists
         assert all([file.exists() for file in files])
-        assert all([len(v) == len(inner_idx) for v in overwrite_features.values()])
+        assert all([len(v) == len(inner_idx)
+                   for v in overwrite_features.values()])
 
         self.files = files
         self.file_idx = file_idx
@@ -95,6 +96,19 @@ class SCDatasetInfo:
         self.files = files
         self.inner_idxs = inner_idxs
 
+    def compare(self, other: SCDatasetInfo) -> bool:
+        return all(
+            [
+                self.files == other.files,
+                all(
+                    [
+                        np.all(self.inner_idxs[i] == other.inner_idxs[i])
+                        for i in range(len(self.files))
+                    ]
+                ),
+            ]
+        )
+
     @staticmethod
     def fetch_multiple_data(scdinfos: Iterable[SCDatasetInfo]) -> list[pd.DataFrame]:
         """
@@ -102,7 +116,8 @@ class SCDatasetInfo:
         """
         assert len(scdinfos) > 0
         assert all(
-            [len(scdinfo.files) == len(scdinfos[0].files) for scdinfo in scdinfos]
+            [len(scdinfo.files) == len(scdinfos[0].files)
+             for scdinfo in scdinfos]
         )
         assert all(
             [
@@ -189,12 +204,14 @@ class SCDatasetInfo:
         if idx.dtype == bool:
             idx = np.where(idx)[0]
         file_seps = np.cumsum([0] + self.get_file_lengths())
-        file_original_lengths = [nrow for nrow, _ in self.get_original_file_shapes()]
+        file_original_lengths = [nrow for nrow,
+                                 _ in self.get_original_file_shapes()]
 
         new_inner_idxs = []
 
         for inner_idx, start, end, file_original_length in zip(
-            self.inner_idxs, file_seps[:-1], file_seps[1:], file_original_lengths
+            self.inner_idxs, file_seps[:-
+                                       1], file_seps[1:], file_original_lengths
         ):
             new_inner_idx = np.full(file_original_length, False)
             current_idx = idx[(start <= idx) & (idx < end)]
@@ -274,7 +291,8 @@ def generate_tt_dataset(
     ]
     file_idx = np.concatenate(file_idxs)
     inner_idx = np.concatenate(inner_idxs)
-    overwrite_features = {"signal": df["signal"].values, "weight": df["weight"].values}
+    overwrite_features = {
+        "signal": df["signal"].values, "weight": df["weight"].values}
 
     # includes all test and train data
     dinfo = DatasetInfo(files, file_idx, inner_idx, overwrite_features)

@@ -12,3 +12,4 @@ training_info/
 tst_info/
 checkpoints/
 tb_logs/
+slurm-*.out

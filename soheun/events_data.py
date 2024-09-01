@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from fvt_classifier import FvTClassifier
 from dataset import SCDatasetInfo
 
+
 def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0")):
     dataset = TensorDataset(X)
     loader = DataLoader(dataset, batch_size=1024, shuffle=False)
@@ -24,13 +25,13 @@ def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0")):
 
         view_scores_batch = model.select_q(q)
         view_scores_batch = F.softmax(view_scores_batch, dim=-1)
-        view_scores.append(view_scores_batch.detach().cpu().numpy().reshape(-1, 3))
+        view_scores.append(
+            view_scores_batch.detach().cpu().numpy().reshape(-1, 3))
 
     q_repr = np.concatenate(q_repr, axis=0)
     view_scores = np.concatenate(view_scores, axis=0)
 
     return q_repr, view_scores
-
 
 
 class EventsData:
@@ -51,8 +52,8 @@ class EventsData:
 
         self._X = X
         self._weights = weights
-        self._is_4b = is_4b
-        self._is_signal = is_signal
+        self._is_4b = is_4b.astype(bool)
+        self._is_signal = is_signal.astype(bool)
 
         self.fvt_score = None
         self.view_score = None
@@ -94,14 +95,17 @@ class EventsData:
     @staticmethod
     def merge(events_data_list: list[EventsData]):
         X = np.concatenate([data.X for data in events_data_list], axis=0)
-        weights = np.concatenate([data.weights for data in events_data_list], axis=0)
-        is_4b = np.concatenate([data.is_4b for data in events_data_list], axis=0)
+        weights = np.concatenate(
+            [data.weights for data in events_data_list], axis=0)
+        is_4b = np.concatenate(
+            [data.is_4b for data in events_data_list], axis=0)
         is_signal = np.concatenate(
             [data.is_signal for data in events_data_list], axis=0
         )
         name = "_".join([data.name for data in events_data_list])
         npd = {
-            key: np.concatenate([data._npd[key] for data in events_data_list], axis=0)
+            key: np.concatenate([data._npd[key]
+                                for data in events_data_list], axis=0)
             for key in events_data_list[0]._npd.keys()
         }
 
@@ -234,7 +238,8 @@ class EventsData:
         self._is_4b = self._is_4b[:n]
         self._is_signal = self._is_signal[:n]
         self.fvt_score = self.fvt_score[:n] if self.fvt_score is not None else None
-        self.view_score = self.view_score[:n] if self.view_score is not None else None
+        self.view_score = self.view_score[:
+                                          n] if self.view_score is not None else None
         self.q_repr = self.q_repr[:n] if self.q_repr is not None else None
 
         for key in self._npd.keys():
@@ -279,19 +284,21 @@ class EventsData:
         weights = self.weights[idx]
         p = weights / np.sum(weights)
         samples = np.random.choice(len(weights), size=n, p=p, replace=True)
-        return self.get(idx[samples])
+        sampled_events = self.get(idx[samples])
+        sampled_events.reweight(np.ones(n))
+        return sampled_events
 
     def get_signal(self) -> Self:
         return self.get(self._is_signal, "signal")
 
     def get_bg4b(self) -> Self:
-        return self.get(self._is_bg4b, "bg4b")
+        return self.get(self.is_bg4b, "bg4b")
 
     def get_4b(self) -> Self:
         return self.get(self._is_4b, "4b")
 
     def get_3b(self) -> Self:
-        return self.get(self._is_3b, "3b")
+        return self.get(self.is_3b, "3b")
 
     def __repr__(self):
         ratio_4b = self.total_weight_4b / self.total_weight

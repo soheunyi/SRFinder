@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from network_blocks import conv1d
 from torch.utils.data import DataLoader, TensorDataset
-from pytorch_lightning.callbacks import EarlyStopping
+from pytorch_lightning.callbacks import EarlyStopping, TQDMProgressBar
 
 from fvt_classifier import FvTClassifier
 
@@ -44,7 +44,8 @@ class AttentionClassifier(pl.LightningModule):
             self.select_q = conv1d(
                 input_size, 1, 1, name="quadjet selector", batchNorm=True
             )
-            self.out = conv1d(input_size, num_classes, 1, name="out", batchNorm=True)
+            self.out = conv1d(input_size, num_classes, 1,
+                              name="out", batchNorm=True)
 
         self.val_losses = []
         self.val_weights = []
@@ -97,7 +98,8 @@ class AttentionClassifier(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        optimizer = torch.optim.Adam(
+            self.parameters(), lr=self.hparams.learning_rate)
         return optimizer
 
     def predict(self, x) -> np.ndarray:
@@ -142,11 +144,12 @@ class AttentionClassifier(pl.LightningModule):
         early_stop_callback = EarlyStopping(
             monitor="avg_val_loss", min_delta=0.0, patience=5, mode="min"
         )
+        progress_bar = TQDMProgressBar(
+            refresh_rate=max(1, (len(train_loader) // batch_size) // 10))
         trainer = pl.Trainer(
             max_epochs=max_epochs,
-            callbacks=[early_stop_callback],
+            callbacks=[early_stop_callback, progress_bar],
             logger=False,
-            enable_progress_bar=False,
             enable_model_summary=False,
             enable_checkpointing=False,
         )

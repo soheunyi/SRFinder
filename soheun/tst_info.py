@@ -21,6 +21,8 @@ TST_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class TSTInfo:
+    SAVE_DIR = TST_SAVE_DIR
+
     def __init__(
         self,
         hparams: dict,
@@ -99,6 +101,8 @@ class TSTInfo:
                     hashes.append(tinfo.hash)
 
         if return_hparams:
+            if len(hashes) == 0:
+                return [], []
             hashes, hparams = zip(*hashes)
             return hashes, hparams
         else:

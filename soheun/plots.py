@@ -22,7 +22,8 @@ def plot_prob_weighted_histogram1d(
     if sample_weights is None:
         sample_weights = np.ones_like(plot_feature_arr)
     assert (
-        len(probs_4b) == len(plot_feature_arr) == len(labels_4b) == len(sample_weights)
+        len(probs_4b) == len(plot_feature_arr) == len(
+            labels_4b) == len(sample_weights)
     )
     weights = probs_4b / (1 - probs_4b)
     weights_3b = weights[labels_4b == 0]
@@ -45,7 +46,8 @@ def plot_prob_weighted_histogram1d(
 
     ratio_mean = hist_4b / w_hist_3b
     ratio_std = np.sqrt(
-        hist_4b * (1 / w_hist_3b) ** 2 + w_sq_hist_3b * (hist_4b / w_hist_3b**2) ** 2
+        hist_4b * (1 / w_hist_3b) ** 2 + w_sq_hist_3b *
+        (hist_4b / w_hist_3b**2) ** 2
     )
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 5))
@@ -137,7 +139,8 @@ def plot_prob_weighted_histogram2d(
     )
     ratio_mean = (hist_4b / w_hist_3b).T
     ratio_std = np.sqrt(
-        hist_4b * (1 / w_hist_3b) ** 2 + w_sq_hist_3b * (hist_4b / w_hist_3b**2) ** 2
+        hist_4b * (1 / w_hist_3b) ** 2 + w_sq_hist_3b *
+        (hist_4b / w_hist_3b**2) ** 2
     ).T
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 5))
@@ -227,7 +230,8 @@ def calibration_plot(
         bincounts[i] = np.sum(sample_weights[falls_within])
         if bincounts[i] > 1:
             probs_actual[i] = (
-                np.sum((sample_weights * true_labels)[falls_within]) / bincounts[i]
+                np.sum((sample_weights * true_labels)
+                       [falls_within]) / bincounts[i]
             )
             errors[i] = 1.96 * np.sqrt(
                 probs_actual[i] * (1 - probs_actual[i]) / bincounts[i]
@@ -368,14 +372,17 @@ def plot_cluster(
                     weights_bin
                 )
 
-            var_ratio_4b_count = ratio_4b_mean_count * (1 - ratio_4b_mean_count)
+            var_ratio_4b_count = ratio_4b_mean_count * \
+                (1 - ratio_4b_mean_count)
             var_ratio_4b_fvt = ratio_4b_mean_fvt * (1 - ratio_4b_mean_fvt)
             # bernstein style error
             ratio_4b_err_count = (
-                4 * np.sqrt(var_ratio_4b_count * l2a / hist_all) + 4 * l2a / hist_all
+                4 * np.sqrt(var_ratio_4b_count * l2a /
+                            hist_all) + 4 * l2a / hist_all
             )
             ratio_4b_err_fvt = (
-                4 * np.sqrt(var_ratio_4b_fvt * l2a / hist_all) + 4 * l2a / hist_all
+                4 * np.sqrt(var_ratio_4b_fvt * l2a / hist_all) +
+                4 * l2a / hist_all
             )
 
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -386,7 +393,8 @@ def plot_cluster(
                 ratio_4b_mean_count.reshape(-1) + ratio_4b_err_count, 0, 1
             )
         ax[1].plot(bins_range[:-1], ratio_4b_mean_count, label="Ratio 4b")
-        ax[1].fill_between(bins_range[:-1], ratio_lb_count, ratio_ub_count, alpha=0.3)
+        ax[1].fill_between(bins_range[:-1], ratio_lb_count,
+                           ratio_ub_count, alpha=0.3)
         ax[1].legend()
         ax[1].set_xlabel("cluster")
 
@@ -402,7 +410,8 @@ def plot_cluster(
                 ratio_4b_mean_fvt.reshape(-1) + ratio_4b_err_fvt, 0, 1
             )
         ax[2].plot(bins_range[:-1], ratio_4b_mean_fvt, label="Ratio 4b")
-        ax[2].fill_between(bins_range[:-1], ratio_lb_fvt, ratio_ub_fvt, alpha=0.3)
+        ax[2].fill_between(bins_range[:-1], ratio_lb_fvt,
+                           ratio_ub_fvt, alpha=0.3)
         ax[2].legend()
         ax[2].set_xlabel("cluster")
 
@@ -527,7 +536,8 @@ def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_signal, weights):
     # ignore warnings
     with np.errstate(divide="ignore", invalid="ignore"):
         ratio_mean = hist_4b / hist_3b
-        ratio_std = np.sqrt(hist_4b * (1 / hist_3b) ** 2 + (hist_4b / hist_3b**2) ** 2)
+        ratio_std = np.sqrt(hist_4b * (1 / hist_3b) **
+                            2 + (hist_4b / hist_3b**2) ** 2)
     alpha = 0.05
     z = stats.norm.ppf(1 - alpha / 2)
 
@@ -538,3 +548,35 @@ def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_signal, weights):
     ax1.fill_between(bins_range[:-1], ratio_lb, ratio_ub, alpha=0.3)
     ax1.legend()
     ax1.set_xlabel("cluster")
+
+
+def hist_events_by_labels(events: EventsData, values: np.ndarray, bins, ax, **hist_kwargs):
+    assert len(values) == len(events)
+    ax.hist(values[events.is_3b],
+            bins=bins, histtype="step", label="3b",
+            weights=events.weights[events.is_3b],
+            **hist_kwargs)
+    ax.hist(values[events.is_bg4b],
+            bins=bins, histtype="step", label="bg4b",
+            weights=events.weights[events.is_bg4b],
+            **hist_kwargs)
+    ax.hist(values[events.is_signal],
+            bins=bins, histtype="step", label="signal",
+            weights=events.weights[events.is_signal],
+            **hist_kwargs)
+
+
+def plot_sr_stats(events: EventsData, sr_stats: np.ndarray, ax, label, **plot_kwargs):
+    assert len(events) == len(sr_stats)
+
+    sr_stats_argsort = np.argsort(sr_stats)[::-1]
+    weights = events.weights[sr_stats_argsort]
+    is_signal = events.is_signal[sr_stats_argsort]
+    is_4b = events.is_4b[sr_stats_argsort]
+
+    ax.plot(
+        np.cumsum(weights * is_4b) / np.sum(weights * is_4b),
+        np.cumsum(weights * is_signal) / np.sum(weights * is_signal),
+        label=label,
+        **plot_kwargs,
+    )
