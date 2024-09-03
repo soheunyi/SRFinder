@@ -5,33 +5,38 @@ import torch
 from typing import Iterable, Self
 from torch.utils.data import TensorDataset, DataLoader
 from torch.nn import functional as F
+import tqdm
 
 
 from fvt_classifier import FvTClassifier
 from dataset import SCDatasetInfo
 
 
-def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0")):
-    dataset = TensorDataset(X)
-    loader = DataLoader(dataset, batch_size=1024, shuffle=False)
-    model = model.to(device)
-    q_repr = []
-    view_scores = []
+def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0"), do_tqdm=False):
+    with torch.no_grad():
+        dataset = TensorDataset(X)
+        loader = DataLoader(dataset, batch_size=1024, shuffle=False)
+        model = model.to(device)
+        q_repr = []
+        view_scores = []
 
-    for batch in loader:
-        x = batch[0].to(device)
-        q = model.encoder(x)
-        q_repr.append(q.detach().cpu().numpy())
+        loader = loader if not do_tqdm else tqdm.tqdm(loader)
 
-        view_scores_batch = model.select_q(q)
-        view_scores_batch = F.softmax(view_scores_batch, dim=-1)
-        view_scores.append(
-            view_scores_batch.detach().cpu().numpy().reshape(-1, 3))
+        for (x, ) in loader:
+            x = x.to(device)
+            q = model.encoder(x)
+            q_repr.append(q.cpu().numpy())
 
-    q_repr = np.concatenate(q_repr, axis=0)
-    view_scores = np.concatenate(view_scores, axis=0)
+            view_scores_batch = model.select_q(q)
+            view_scores_batch = F.softmax(view_scores_batch, dim=-1)
+            view_scores.append(
+                view_scores_batch.cpu().numpy().reshape(-1, 3))
+
+        q_repr = np.concatenate(q_repr, axis=0)
+        view_scores = np.concatenate(view_scores, axis=0)
 
     return q_repr, view_scores
+
 
 
 class EventsData:
@@ -79,11 +84,16 @@ class EventsData:
         assert len(data) == len(self)
         self._npd[key] = data
 
-    def set_model_scores(self, model: FvTClassifier):
+    def set_model_scores(self, model: FvTClassifier, do_tqdm=False):
         device = model.device
 
-        fvt_score = model.predict(self.X_torch)[:, 1].cpu().detach().numpy()
-        q_repr, view_score = get_fvt_reprs(self.X_torch, model, device=device)
+        fvt_score = model.predict(self.X_torch, do_tqdm=do_tqdm)[
+            :, 1].cpu().detach().numpy()
+        q_repr, view_score = model.representations(
+            self.X_torch, do_tqdm=do_tqdm
+        )
+        q_repr = q_repr.cpu().detach().numpy()
+        view_score = view_score.cpu().detach().numpy()
 
         self.fvt_score = fvt_score
         self.view_score = view_score

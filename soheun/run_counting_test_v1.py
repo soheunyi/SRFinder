@@ -24,9 +24,11 @@ def edit_config(
 
 @click.command()
 @click.option("--config", type=str)
-def main(config):
+@click.option("--seed-start", type=int, default=0)
+@click.option("--seed-end", type=int, default=10)
+def main(config, seed_start, seed_end):
     signal_ratios = [0.0, 0.01, 0.02]
-    seeds = np.arange(0, 10)
+    seeds = np.arange(seed_start, seed_end)
 
     print("signal_ratios: ", signal_ratios)
     print("seeds: ", seeds)

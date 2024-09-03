@@ -1,13 +1,13 @@
 import torch
+import tqdm
 from fvt_encoder import FvTEncoder
 import pytorch_lightning as pl
 from torch.nn import functional as F
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import optim
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import EarlyStopping, TQDMProgressBar
+from pytorch_lightning.callbacks import EarlyStopping, TQDMProgressBar, Callback
 import pathlib
 
 
@@ -171,9 +171,12 @@ class FvTClassifier(pl.LightningModule):
         max_epochs=30,
         train_seed: int = None,
         save_checkpoint: bool = True,
+        callbacks: list[Callback] = [],
     ):
         if train_seed is not None:
             pl.seed_everything(train_seed)
+
+        torch.set_float32_matmul_precision('medium')
 
         logger = TensorBoardLogger("tb_logs", name=self.run_name)
         early_stop_callback = EarlyStopping(
@@ -181,8 +184,7 @@ class FvTClassifier(pl.LightningModule):
         )
         progress_bar = TQDMProgressBar(refresh_rate=max(
             1, (len(train_dataset) // batch_size) // 10))
-
-        callbacks = [early_stop_callback, progress_bar]
+        callbacks = callbacks + [early_stop_callback, progress_bar]
 
         if save_checkpoint:
             # raise error if checkpoint file exists
@@ -218,10 +220,12 @@ class FvTClassifier(pl.LightningModule):
             ),
         )
 
-    def predict(self, x: torch.Tensor):
+    def predict(self, x: torch.Tensor, do_tqdm=False):
         with torch.no_grad():
-            x_dataloader = DataLoader(x, batch_size=1024)
+            x_dataloader = DataLoader(x, batch_size=1024, shuffle=False)
             y_pred = torch.tensor([])
+            if do_tqdm:
+                x_dataloader = tqdm.tqdm(x_dataloader)
             for batch in x_dataloader:
                 batch = batch.to(self.device)
                 logit = self(batch)
@@ -235,6 +239,28 @@ class FvTClassifier(pl.LightningModule):
                 y_pred = torch.cat((y_pred, pred.to("cpu")), dim=0)
 
         return y_pred
+
+    def representations(self, x: torch.Tensor, do_tqdm=False) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.no_grad():
+            x_dataloader = DataLoader(x, batch_size=1024, shuffle=False)
+
+            x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(
+                x_dataloader)
+            q_repr = torch.tensor([])
+            view_scores = torch.tensor([])
+
+            for batch in x_dataloader:
+                batch = batch.to(self.device)
+                q = self.encoder(batch)
+                q_repr = torch.cat((q_repr, q.to("cpu")), dim=0)
+
+                view_scores_batch = self.select_q(q)
+                view_scores_batch = F.softmax(view_scores_batch, dim=-1)
+                view_scores = torch.cat(
+                    (view_scores, view_scores_batch.to("cpu")), dim=0
+                )
+
+        return q_repr, view_scores
 
     def save(self, path):
         torch.save(self.state_dict(), path)

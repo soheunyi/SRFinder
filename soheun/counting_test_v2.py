@@ -20,6 +20,7 @@ from tst_info import TSTInfo
 # 4. Perform two sample test
 ###########################################################################################
 
+W_4B_CUT_MIN = 0.001
 W_4B_CUT_MAX = 0.999
 
 
@@ -135,12 +136,28 @@ def routine(config: dict):
     is_4b = events_tst.is_4b[SR_stats_argsort]
     cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
 
-    SR_cut = SR_stats_sorted[np.argmin(
-        cumul_4b_ratio < min(SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))]
-    CR_cut = SR_stats_sorted[
-        np.argmin(cumul_4b_ratio <
-                  min(SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))
-    ]
+    w_4b_SR_ratio = np.clip(
+        SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
+    w_4b_CR_ratio = np.clip(
+        SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
+
+    SR_cut, CR_cut = None, None
+    for i in range(1, len(cumul_4b_ratio)):
+        if cumul_4b_ratio[i] > w_4b_SR_ratio and SR_cut is None:
+            SR_cut = SR_stats_sorted[i - 1]
+        if cumul_4b_ratio[i] > w_4b_CR_ratio and CR_cut is None:
+            CR_cut = SR_stats_sorted[i - 1]
+        if SR_cut is not None and CR_cut is not None:
+            break
+
+    # If the cut is not found, set the cut to the minimum value
+    # Both SR and CR cuts should be different
+    if SR_cut is None:
+        SR_cut = SR_stats_sorted[-1]
+    if CR_cut is None:
+        CR_cut = SR_stats_sorted[-1]
+    if SR_cut == CR_cut:
+        raise ValueError("SR and CR cuts are the same")
 
     SR_idx = SR_stats >= SR_cut
     events_tst_SR = events_tst[SR_idx]

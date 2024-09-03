@@ -15,6 +15,7 @@ from signal_region import get_SR_stats
 from training_info import TrainingInfoV2
 from tst_info import TSTInfo
 
+W_4B_CUT_MIN = 0.001
 W_4B_CUT_MAX = 0.999
 
 ###########################################################################################
@@ -70,7 +71,12 @@ def routine(config: dict):
             ],
         )
 
+    require_keys(config["CR_fvt"], ["intialize_with_base_fvt"])
     require_keys(config["SRCR"], ["method", "4b_in_CR", "4b_in_SR"])
+
+    assert config["SRCR"]["4b_in_SR"] > 0
+    assert config["SRCR"]["4b_in_CR"] > 0
+    assert config["SRCR"]["4b_in_CR"] + config["SRCR"]["4b_in_SR"] <= 1.0
 
     signal_ratio = config["signal_ratio"]
     n_3b = config["n_3b"]
@@ -207,41 +213,58 @@ def routine(config: dict):
     is_4b = events_tst.is_4b[SR_stats_argsort]
     cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
 
-    SR_cut = SR_stats_sorted[np.argmin(
-        cumul_4b_ratio < min(SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))]
-    CR_cut = SR_stats_sorted[
-        np.argmin(cumul_4b_ratio <
-                  max(SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MAX))
-    ]
+    w_4b_SR_ratio = np.clip(
+        SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
+    w_4b_CR_ratio = np.clip(
+        SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
 
-    df_tst = scdinfo_tst.fetch_data()
-    assert np.all(events_tst.X == df_tst.loc[:, features].values)
+    SR_cut, CR_cut = None, None
+    for i in range(1, len(cumul_4b_ratio)):
+        if cumul_4b_ratio[i] > w_4b_SR_ratio and SR_cut is None:
+            SR_cut = SR_stats_sorted[i - 1]
+        if cumul_4b_ratio[i] > w_4b_CR_ratio and CR_cut is None:
+            CR_cut = SR_stats_sorted[i - 1]
+        if SR_cut is not None and CR_cut is not None:
+            break
+
+    # If the cut is not found, set the cut to the minimum value
+    # Both SR and CR cuts should be different
+    if SR_cut is None:
+        SR_cut = SR_stats_sorted[-1]
+    if CR_cut is None:
+        CR_cut = SR_stats_sorted[-1]
+    if SR_cut == CR_cut:
+        raise ValueError("SR and CR cuts are the same")
 
     SR_idx = SR_stats >= SR_cut
     events_tst_SR = events_tst[SR_idx]
-    scdinfo_tst_SR = scdinfo_tst[SR_idx]
 
     CR_idx = (SR_stats >= CR_cut) & (SR_stats < SR_cut)
-    events_tst_CR = events_tst[CR_idx]
     scdinfo_tst_CR = scdinfo_tst[CR_idx]
 
     CR_fvt_tinfo = TrainingInfoV2(CR_fvt_hparams, scdinfo_tst_CR)
     print("CR FvT Training Hash: ", CR_fvt_tinfo.hash)
-    CR_fvt_tinfo.save()
 
     CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_tinfo.fetch_train_val_tensor_datasets(
         features, "fourTag", "weight"
     )
 
-    CR_fvt_model = FvTClassifier(
-        num_classes,
-        dim_input_jet_features,
-        CR_fvt_hparams["dim_dijet_features"],
-        CR_fvt_hparams["dim_quadjet_features"],
-        run_name=CR_fvt_tinfo.hash,
-        device=torch.device("cuda:0"),
-        lr=CR_fvt_hparams["lr"],
-    )
+    if CR_fvt_hparams["intialize_with_base_fvt"]:
+        CR_fvt_model = FvTClassifier.load_from_checkpoint(
+            f"./data/checkpoints/{base_fvt_tinfo.hash}_best.ckpt",
+        )
+        CR_fvt_model.run_name = CR_fvt_tinfo.hash
+
+    else:
+        CR_fvt_model = FvTClassifier(
+            num_classes,
+            dim_input_jet_features,
+            CR_fvt_hparams["dim_dijet_features"],
+            CR_fvt_hparams["dim_quadjet_features"],
+            run_name=CR_fvt_tinfo.hash,
+            device=torch.device("cuda:0"),
+            lr=CR_fvt_hparams["lr"],
+        )
 
     CR_fvt_model.fit(
         CR_fvt_train_dset,
@@ -276,6 +299,8 @@ def routine(config: dict):
         CR_fvt_tinfo_hash=CR_fvt_tinfo.hash,
     )
     print("Two Sample Test Hash: ", tst_info.hash)
+
+    CR_fvt_tinfo.save()
     tst_info.save()
 
 
