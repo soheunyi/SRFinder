@@ -135,18 +135,16 @@ if __name__ == "__main__":
 
     verbose = False
     show_plots = False
-    n_3b = 140_0000
+    n_3b = 100_0000
     device = torch.device("cuda")
     do_tqdm = True
     calibration_nbin = 20
 
+    experiment_name = "counting_test_v2"
     hparam_filter = {
-        "experiment_name": lambda x: x in ["counting_test_high_4b_in_CR"],
+        "experiment_name": lambda x: x in [experiment_name],
         "n_3b": n_3b,
-        # "signal_ratio": 0.0,
     }
-
-    experiment_name = "counting_test_high_4b_in_CR"
     df_name = f"./data/tsv/tst_results_summary_{experiment_name}_n_3b={n_3b}_debiased.tsv"
 
     if not os.path.exists(df_name):
