@@ -15,8 +15,6 @@ from signal_region import get_SR_stats
 from training_info import TrainingInfoV2
 from tst_info import TSTInfo
 
-W_4B_CUT_MIN = 0.001
-W_4B_CUT_MAX = 0.999
 
 ###########################################################################################
 ###########################################################################################
@@ -28,6 +26,8 @@ W_4B_CUT_MAX = 0.999
 # For smear-based SR definition, there is a AttentionClassifier to be trained, but we first
 # do not save them in the checkpoints.
 ###########################################################################################
+W_4B_CUT_MIN = 0.001
+W_4B_CUT_MAX = 0.999
 
 
 def require_keys(config: dict, keys: list):
@@ -39,6 +39,7 @@ def require_keys(config: dict, keys: list):
 def routine(config: dict):
     print("Experiment Configuration")
     print(config)
+    print("Current Time: ", pd.Timestamp.now())
 
     require_keys(
         config,
@@ -71,7 +72,10 @@ def routine(config: dict):
             ],
         )
 
-    require_keys(config["CR_fvt"], ["intialize_with_base_fvt"])
+    require_keys(config["CR_fvt"], [
+                 "intialize_with_base_fvt", "freeze_encoder"])
+    assert (not config["CR_fvt"]["freeze_encoder"]
+            ) or config["CR_fvt"]["intialize_with_base_fvt"], "Cannot freeze encoder without initializing with base FvT"
     require_keys(config["SRCR"], ["method", "4b_in_CR", "4b_in_SR"])
 
     assert config["SRCR"]["4b_in_SR"] > 0
@@ -248,12 +252,15 @@ def routine(config: dict):
     CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_tinfo.fetch_train_val_tensor_datasets(
         features, "fourTag", "weight"
     )
-
+    pl.seed_everything(seed)
+    np.random.seed(seed)
     if CR_fvt_hparams["intialize_with_base_fvt"]:
         CR_fvt_model = FvTClassifier.load_from_checkpoint(
             f"./data/checkpoints/{base_fvt_tinfo.hash}_best.ckpt",
         )
         CR_fvt_model.run_name = CR_fvt_tinfo.hash
+        if CR_fvt_hparams["freeze_encoder"]:
+            CR_fvt_model.freeze_encoder()
 
     else:
         CR_fvt_model = FvTClassifier(
@@ -302,6 +309,10 @@ def routine(config: dict):
 
     CR_fvt_tinfo.save()
     tst_info.save()
+
+    # update metadata
+    TrainingInfoV2.update_metadata()
+    TSTInfo.update_metadata()
 
 
 def get_is_signal(scdinfo: SCDatasetInfo, signal_filename: str):

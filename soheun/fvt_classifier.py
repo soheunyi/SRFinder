@@ -277,3 +277,7 @@ class FvTClassifier(pl.LightningModule):
                 print(name, "has inf")
                 raise ValueError("NaN or inf found in model parameters")
         return
+
+    def freeze_encoder(self, freeze=True):
+        for param in self.encoder.parameters():
+            param.requires_grad = not freeze

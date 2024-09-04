@@ -14,7 +14,7 @@
 #SBATCH --time=24:00:00
 
 # email you when job is finished:
-#SBATCH --mail-user=soheuny@andrew.cmu.edu
+#SBATCH --mail-user=no.reply@gmail.com
 #SBATCH --mail-type=END
 
 ## Choose one:

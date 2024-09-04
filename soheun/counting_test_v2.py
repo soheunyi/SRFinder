@@ -33,7 +33,6 @@ def require_keys(config: dict, keys: list):
 def routine(config: dict):
     print("Experiment Configuration")
     print(config)
-
     print("Current Time: ", pd.Timestamp.now())
 
     require_keys(
@@ -66,6 +65,8 @@ def routine(config: dict):
                 "lr",
             ],
         )
+
+    require_keys(config["CR_fvt"], ["freeze_encoder"])
 
     require_keys(config["SRCR"], ["method", "4b_in_CR", "4b_in_SR"])
 
@@ -116,10 +117,10 @@ def routine(config: dict):
         "ratio_4b": config["ratio_4b"],
         "signal_filename": config["signal_filename"],
         "seed": config["seed"],
-        "experiment_name": "counting_test_v1",
+        "experiment_name": lambda x: x in ["counting_test_v1", "counting_test_high_4b_in_CR"],
     }
     hashes = TSTInfo.find(hparam_filter)
-    assert len(hashes) == 1
+    # assert len(hashes) == 1
     tst_info = TSTInfo.load(hashes[0])
 
     SR_stats = tst_info.SR_stats
@@ -180,6 +181,10 @@ def routine(config: dict):
         f"./data/checkpoints/{tst_info.base_fvt_tinfo_hash}_best.ckpt",
     )
     CR_fvt_model.run_name = CR_fvt_tinfo.hash
+
+    if CR_fvt_hparams["freeze_encoder"]:
+        CR_fvt_model.freeze_encoder()
+
     # Train CR model
     CR_fvt_model.fit(
         CR_fvt_train_dset,
@@ -218,6 +223,10 @@ def routine(config: dict):
 
     CR_fvt_tinfo.save()
     tst_info.save()
+
+    # update metadata
+    TrainingInfoV2.update_metadata()
+    TSTInfo.update_metadata()
 
 
 @click.command()
