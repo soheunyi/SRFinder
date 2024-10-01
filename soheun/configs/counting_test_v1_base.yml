@@ -1,7 +1,7 @@
 experiment_name: counting_test_v1
 signal_filename: HH4b_picoAOD.h5
-signal_ratio: 0.0
-n_3b: 100_0000
+signal_ratio: 0.05
+n_3b: 100_000
 ratio_4b: 0.5
 seed: 42
 base_fvt_train_ratio: 0.75
@@ -31,3 +31,5 @@ CR_fvt:
   train_seed: 42 
   val_ratio: 0.33
   lr: 0.001
+  intialize_with_base_fvt: False
+  freeze_encoder: False

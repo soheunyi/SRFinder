@@ -8,7 +8,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import TensorDataset
 import tqdm
 import time
 
@@ -128,14 +128,18 @@ class TrainingInfoV2:
         self.scdinfo = scdinfo
         self._hash = create_hash(TrainingInfoV2.SAVE_DIR)
         self._aux_info = {}
+        
+    def fetch_train_val_scdinfo(self) -> tuple[SCDatasetInfo, SCDatasetInfo]:
+        """
+        Return the training and validation scdinfo.
+        """
+        return split_scdinfo(self.scdinfo, 1 - self.val_ratio, self.data_seed)
 
     def fetch_train_val_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Return the training and validation data.
         """
-        scdinfo_train, scdinfo_val = split_scdinfo(
-            self.scdinfo, 1 - self.val_ratio, self.data_seed
-        )
+        scdinfo_train, scdinfo_val = self.fetch_train_val_scdinfo()
 
         df_train, df_val = SCDatasetInfo.fetch_multiple_data(
             [scdinfo_train, scdinfo_val]

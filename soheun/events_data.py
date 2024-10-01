@@ -12,7 +12,9 @@ from fvt_classifier import FvTClassifier
 from dataset import SCDatasetInfo
 
 
-def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0"), do_tqdm=False):
+def get_fvt_reprs(
+    X, model: FvTClassifier, device=torch.device("cuda:0"), do_tqdm=False
+):
     with torch.no_grad():
         dataset = TensorDataset(X)
         loader = DataLoader(dataset, batch_size=1024, shuffle=False)
@@ -22,21 +24,19 @@ def get_fvt_reprs(X, model: FvTClassifier, device=torch.device("cuda:0"), do_tqd
 
         loader = loader if not do_tqdm else tqdm.tqdm(loader)
 
-        for (x, ) in loader:
+        for (x,) in loader:
             x = x.to(device)
             q = model.encoder(x)
             q_repr.append(q.cpu().numpy())
 
             view_scores_batch = model.select_q(q)
             view_scores_batch = F.softmax(view_scores_batch, dim=-1)
-            view_scores.append(
-                view_scores_batch.cpu().numpy().reshape(-1, 3))
+            view_scores.append(view_scores_batch.cpu().numpy().reshape(-1, 3))
 
         q_repr = np.concatenate(q_repr, axis=0)
         view_scores = np.concatenate(view_scores, axis=0)
 
     return q_repr, view_scores
-
 
 
 class EventsData:
@@ -87,11 +87,10 @@ class EventsData:
     def set_model_scores(self, model: FvTClassifier, do_tqdm=False):
         device = model.device
 
-        fvt_score = model.predict(self.X_torch, do_tqdm=do_tqdm)[
-            :, 1].cpu().detach().numpy()
-        q_repr, view_score = model.representations(
-            self.X_torch, do_tqdm=do_tqdm
+        fvt_score = (
+            model.predict(self.X_torch, do_tqdm=do_tqdm)[:, 1].cpu().detach().numpy()
         )
+        q_repr, view_score = model.representations(self.X_torch, do_tqdm=do_tqdm)
         q_repr = q_repr.cpu().detach().numpy()
         view_score = view_score.cpu().detach().numpy()
 
@@ -105,17 +104,14 @@ class EventsData:
     @staticmethod
     def merge(events_data_list: list[EventsData]):
         X = np.concatenate([data.X for data in events_data_list], axis=0)
-        weights = np.concatenate(
-            [data.weights for data in events_data_list], axis=0)
-        is_4b = np.concatenate(
-            [data.is_4b for data in events_data_list], axis=0)
+        weights = np.concatenate([data.weights for data in events_data_list], axis=0)
+        is_4b = np.concatenate([data.is_4b for data in events_data_list], axis=0)
         is_signal = np.concatenate(
             [data.is_signal for data in events_data_list], axis=0
         )
         name = "_".join([data.name for data in events_data_list])
         npd = {
-            key: np.concatenate([data._npd[key]
-                                for data in events_data_list], axis=0)
+            key: np.concatenate([data._npd[key] for data in events_data_list], axis=0)
             for key in events_data_list[0]._npd.keys()
         }
 
@@ -248,8 +244,7 @@ class EventsData:
         self._is_4b = self._is_4b[:n]
         self._is_signal = self._is_signal[:n]
         self.fvt_score = self.fvt_score[:n] if self.fvt_score is not None else None
-        self.view_score = self.view_score[:
-                                          n] if self.view_score is not None else None
+        self.view_score = self.view_score[:n] if self.view_score is not None else None
         self.q_repr = self.q_repr[:n] if self.q_repr is not None else None
 
         for key in self._npd.keys():
@@ -391,8 +386,11 @@ class EventsData:
         assert self.q_repr is not None
         assert self.view_score is not None
 
-        return (self.q_repr @ self.view_score[:, :, None]).reshape(
-            -1, self.q_repr.shape[1]
+        n_views = self.q_repr.shape[-1]
+        n_features = self.q_repr.shape[1]
+
+        return (self.q_repr @ self.view_score.reshape(-1, n_views, 1)).reshape(
+            -1, n_features
         )
 
 

@@ -24,7 +24,7 @@ def SiLU(
     return x * torch.sigmoid(x)
 
 
-def NonLU(x, training=False):  # Non-Linear Unit
+def NonLU(x, training=False) -> torch.Tensor:  # Non-Linear Unit
     # return ReLU(x)
     # return F.rrelu(x, training=training)
     # return F.leaky_relu(x, negative_slope=0.1)
@@ -168,7 +168,6 @@ class scaler(
         )
 
     def forward(self, x, mask=None, debug=False):
-
         x = x - self.m
         x = x / self.s
         return x
@@ -252,11 +251,11 @@ class GhostBatchNorm1d(
         if self.training:
             batch_size = x.shape[0]
             pixels = x.shape[2]
-            ##            if self.ngb: # if number of ghost batches is specified, compute corresponding ghost batch size
+            # if self.ngb: # if number of ghost batches is specified, compute corresponding ghost batch size
             self.gbs = batch_size // self.ngb
-            ##                self.register_buffer('gbs', torch.tensor(batch_size//16, dtype=torch.long))
-            ##            else: # ghost batch size is specified, compute corresponding number of ghost batches
-            ##            self.ngb = batch_size // self.gbs
+            # self.register_buffer('gbs', torch.tensor(batch_size//16, dtype=torch.long))
+            # else: # ghost batch size is specified, compute corresponding number of ghost batches
+            # self.ngb = batch_size // self.gbs
 
             #
             # Apply batch normalization with Ghost Batch statistics
@@ -503,7 +502,8 @@ class layerOrganizer:
 
     def addLayer(self, newLayer, inputLayers=None, startIndex=1):
         if inputLayers:
-            inputIndicies = inputLayers  # [layer.index for layer in inputLayers]
+            # [layer.index for layer in inputLayers]
+            inputIndicies = inputLayers
             newLayer.index = max(inputIndicies) + 1
         else:
             newLayer.index = startIndex
@@ -967,7 +967,9 @@ class DijetResNetBlock(nn.Module):
     def __init__(
         self,
         dim_d,
-        device="cpu",
+        device=(
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        ),
         layers: layerOrganizer = None,
         inputLayers=None,
         nAveraging=4,
@@ -1055,7 +1057,7 @@ class QuadjetReinforceLayer(nn.Module):
 
     def forward(self, d: torch.Tensor, q: torch.Tensor):
         d_sym = self.sym(d)
-        d_antisym = self.antisym(d).abs()
+        d_antisym = torch.abs(self.antisym(d))
         q = torch.cat(
             (
                 d_sym[:, :, 0:1],
@@ -1078,7 +1080,9 @@ class QuadjetResNetBlock(nn.Module):
     def __init__(
         self,
         dim_q,
-        device="cpu",
+        device=(
+            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        ),
         layers: layerOrganizer = None,
         inputLayers=None,
         nAveraging=4,
