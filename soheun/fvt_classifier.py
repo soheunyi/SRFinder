@@ -6,13 +6,14 @@ from fvt_encoder import FvTEncoder
 import pytorch_lightning as pl
 from torch.nn import functional as F
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch import optim
 from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import EarlyStopping, TQDMProgressBar, Callback
 import pathlib
 from scipy.optimize import minimize
+
 
 from network_blocks import conv1d
 from training_info import TrainingInfoV2
@@ -72,6 +73,7 @@ class FvTClassifier(pl.LightningModule):
         ] = "gaussian",
         cheating_beta: float = 0.0,
         cheating_h: float = 0.05,
+        variance_beta: float = 0.0,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -88,6 +90,8 @@ class FvTClassifier(pl.LightningModule):
         self.cheating_beta = cheating_beta
         self.cheating_h = cheating_h
 
+        self.variance_beta = variance_beta
+
         self.train_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
         self.train_total_weights = 0.0
@@ -101,6 +105,13 @@ class FvTClassifier(pl.LightningModule):
 
         self.train_ce_losses = torch.tensor([])
         self.val_ce_losses = torch.tensor([])
+
+        self.train_variance_losses = torch.tensor([])
+        self.val_variance_losses = torch.tensor([])
+
+        self.val_preds = torch.tensor([])
+        self.val_labels = torch.tensor([])
+        self.val_weights = torch.tensor([])
 
         self.num_classes = num_classes
         self.lr = lr
@@ -166,6 +177,46 @@ class FvTClassifier(pl.LightningModule):
 
         return (acc - preds).abs() ** p
 
+    def variance_loss(
+        self, y_logits: torch.Tensor, y_labels: torch.Tensor, weights: torch.Tensor
+    ):
+        batch_size = y_logits.shape[0]
+        preds = torch.sigmoid(y_logits[:, 1] - y_logits[:, 0])
+        # Should include ratio_4b here
+        reweights = torch.where(
+            y_labels == 1,
+            1,
+            -preds / (1 - preds),
+        )
+        reweights = reweights * weights
+
+        nbins = int(1 / self.calibration_h)
+        bins = torch.linspace(0, 1, nbins + 1).to(preds.device)
+        bin_idx = torch.bucketize(preds, bins)
+        bin_idx = torch.clip(bin_idx, 1, len(bins) - 1) - 1
+
+        bin_losses = torch.zeros(nbins).to(preds.device)
+        for bin_i in range(nbins):
+            bin_mask = bin_idx == bin_i
+            bin_weights = reweights[bin_mask]
+            bin_size = bin_weights.shape[0]
+            if bin_size <= 1:
+                continue
+            bin_preds_sum = torch.sum(bin_weights)
+            bin_preds_sq_sum = torch.sum(bin_weights**2)
+            bin_loss = bin_preds_sum**2 - bin_preds_sq_sum
+            bin_losses[bin_i] = bin_loss / (bin_size * (bin_size - 1))
+
+        return torch.mean(bin_losses)
+
+        # # preds_sum = torch.sum(reweights)
+        # # preds_sq_sum = torch.sum(reweights**2)
+
+        # return torch.min(
+        #     torch.tensor(0.01),
+        #     (preds_sum**2 - preds_sq_sum) / (batch_size * (batch_size - 1)),
+        # )
+
     def cheating_loss(
         self, y_logits: torch.Tensor, y_labels: torch.Tensor, weights: torch.Tensor
     ):
@@ -179,13 +230,15 @@ class FvTClassifier(pl.LightningModule):
         # return reweighted.sum() ** 2 / weights.sum()
         return torch.tensor(0.0)  # disable cheating loss
 
-    def loss(self, y_logits: torch.Tensor, y: torch.Tensor, w: torch.Tensor):
-        ce_loss = self.ce_loss(y_logits, y, reduction="none")
-        loss = ce_loss + self.calibration_beta * (
-            self.calibration_loss(y_logits, y, w, p=self.calibration_p)
-        ) ** (1 / self.calibration_p)
-        loss = (loss * w).mean()
-        return loss
+    # def loss(self, y_logits: torch.Tensor, y: torch.Tensor, w: torch.Tensor):
+    #     ce_loss = self.ce_loss(y_logits, y, reduction="none")
+    #     loss = ce_loss + self.calibration_beta * (
+    #         self.calibration_loss(y_logits, y, w, p=self.calibration_p)
+    #     ) ** (1 / self.calibration_p)
+    #     loss = (loss * w).mean() + self.variance_beta * (
+    #         self.variance_loss(y_logits, y, w)
+    #     )
+    #     return loss
 
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx
@@ -195,7 +248,12 @@ class FvTClassifier(pl.LightningModule):
         y_logits = self(x)
         ce_loss = (self.ce_loss(y_logits, y, reduction="none") * w).mean()
         cal_loss = (self.calibration_loss(y_logits, y, w) * w).mean()
-        loss = ce_loss + self.calibration_beta * cal_loss
+        variance_loss = self.variance_loss(y_logits, y, w)
+        loss = (
+            ce_loss
+            + self.calibration_beta * cal_loss
+            # + self.variance_beta * variance_loss
+        )
 
         self.train_losses = torch.cat(
             (self.train_losses, loss.detach().to("cpu").view(1))
@@ -205,6 +263,12 @@ class FvTClassifier(pl.LightningModule):
         )
         self.train_ce_losses = torch.cat(
             (self.train_ce_losses, ce_loss.detach().to("cpu").view(1))
+        )
+        self.train_variance_losses = torch.cat(
+            (
+                self.train_variance_losses,
+                variance_loss.detach().to("cpu").view(1),
+            )
         )
         self.train_batchsizes = torch.cat(
             (self.train_batchsizes, torch.tensor(x.shape[0]).view(1))
@@ -235,6 +299,12 @@ class FvTClassifier(pl.LightningModule):
         )
         self.val_total_weights += w.sum()
 
+        preds = torch.sigmoid(y_logits[:, 1] - y_logits[:, 0])
+
+        self.val_preds = torch.cat((self.val_preds, preds.to("cpu")))
+        self.val_labels = torch.cat((self.val_labels, y.to("cpu")))
+        self.val_weights = torch.cat((self.val_weights, w.to("cpu")))
+
         return loss
 
     def on_train_epoch_end(self):
@@ -250,9 +320,12 @@ class FvTClassifier(pl.LightningModule):
             torch.sum(self.train_ce_losses * self.train_batchsizes)
             / self.train_total_weights
         )
-
+        avg_variance_loss = torch.sum(
+            self.train_variance_losses * self.train_batchsizes
+        ) / torch.sum(self.train_batchsizes)
         self.log("train_loss", avg_loss, on_epoch=True, prog_bar=True)
         self.log("train_ce_loss", avg_ce_loss, on_epoch=True, prog_bar=True)
+        self.log("train_variance_loss", avg_variance_loss, on_epoch=True, prog_bar=True)
         self.log(
             "train_cal_loss",
             avg_cal_loss,
@@ -264,6 +337,7 @@ class FvTClassifier(pl.LightningModule):
         self.train_cal_losses = torch.tensor([])
         self.train_ce_losses = torch.tensor([])
         self.train_cheating_losses = torch.tensor([])
+        self.train_variance_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
         self.train_total_weights = 0.0
 
@@ -280,6 +354,27 @@ class FvTClassifier(pl.LightningModule):
         avg_ce_loss = (
             torch.sum(self.val_ce_losses * self.val_batchsizes) / self.val_total_weights
         )
+        # calculate variance loss for validation set
+        reweights = self.val_preds / (1 - self.val_preds)
+        reweights = torch.where(
+            self.val_labels == 1, 1, -self.val_preds / (1 - self.val_preds)
+        )
+        reweights = reweights * self.val_weights
+
+        nbins = int(1 / self.calibration_h)
+        bins = torch.linspace(0, 1, nbins + 1).to(self.val_preds.device)
+        bin_idx = torch.bucketize(self.val_preds, bins)
+        bin_idx = torch.clip(bin_idx, 1, nbins) - 1
+
+        bin_losses = torch.zeros(nbins).to(self.val_preds.device)
+        for bin_i in range(nbins):
+            bin_mask = bin_idx == bin_i
+            bin_weights = reweights[bin_mask]
+            bin_losses[bin_i] = torch.mean(bin_weights) ** 2
+
+        avg_variance_loss = torch.mean(bin_losses)
+        avg_loss = avg_loss + self.variance_beta * avg_variance_loss
+
         self.log(
             "val_loss",
             avg_loss,
@@ -298,15 +393,24 @@ class FvTClassifier(pl.LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+        self.log(
+            "val_variance_loss",
+            avg_variance_loss,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
         if avg_loss < self.best_val_loss:
             self.best_val_loss = avg_loss
         self.val_losses = torch.tensor([])
         self.val_cal_losses = torch.tensor([])
         self.val_ce_losses = torch.tensor([])
-        self.val_cheating_losses = torch.tensor([])
+        self.val_variance_losses = torch.tensor([])
         self.val_batchsizes = torch.tensor([])
         self.val_total_weights = 0.0
+        self.val_preds = torch.tensor([])
+        self.val_labels = torch.tensor([])
+        self.val_weights = torch.tensor([])
 
         self.nan_check()
 
@@ -378,12 +482,19 @@ class FvTClassifier(pl.LightningModule):
             logger=logger,
         )
 
+        num_samples = len(train_dataset)
+        weights = torch.ones(num_samples)  # You can customize the weights if needed
+        sampler = WeightedRandomSampler(weights, num_samples, replacement=True)
+
         torch.autograd.set_detect_anomaly(True)
 
         trainer.fit(
             self,
+            # DataLoader(
+            #     train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+            # ),
             DataLoader(
-                train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
+                train_dataset, batch_size=batch_size, sampler=sampler, num_workers=4
             ),
             DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
