@@ -1,18 +1,13 @@
 from __future__ import annotations
 import pathlib
-import random
-import string
 import pickle
-from typing import Iterable
 
 import numpy as np
-import pandas as pd
-import torch
-from torch.utils.data import TensorDataset
 import tqdm
 
 from dataset import SCDatasetInfo
-from training_info import TrainingInfoV2, create_hash
+from training_info import TrainingInfoV2
+from utils import create_hash
 
 # get current directory of the file
 TST_SAVE_DIR = pathlib.Path(__file__).parent / "data/tst_info"
@@ -86,15 +81,16 @@ class TSTInfo:
     @staticmethod
     def update_metadata():
         with open(TSTInfo.META_DIR, "wb") as f:
-            hashes, hparams = TSTInfo.find(
-                {}, return_hparams=True, from_metadata=False)
+            hashes, hparams = TSTInfo.find({}, return_hparams=True, from_metadata=False)
             pickle.dump(dict(zip(hashes, hparams)), f)
 
     @staticmethod
-    def find(hparam_filter: dict[str, any],
-             return_hparams=False,
-             sort_by: list[str] = [],
-             from_metadata=True) -> list[str]:
+    def find(
+        hparam_filter: dict[str, any],
+        return_hparams=False,
+        sort_by: list[str] = [],
+        from_metadata=True,
+    ) -> list[str]:
 
         def is_match(hparam: dict[str, any]) -> bool:
             for key, value in hparam_filter.items():
@@ -125,11 +121,11 @@ class TSTInfo:
         # sort by the given keys
         if len(sort_by) > 0 and len(hashes) > 0:
             for hp in hparams:
-                assert all([key in hp for key in sort_by]
-                           ), f"sort_by keys {sort_by} not in hparams {hp}"
+                assert all(
+                    [key in hp for key in sort_by]
+                ), f"sort_by keys {sort_by} not in hparams {hp}"
 
-            argsort = np.lexsort(tuple([hp[key] for hp in hparams]
-                                 for key in sort_by))
+            argsort = np.lexsort(tuple([hp[key] for hp in hparams] for key in sort_by))
             hashes = [hashes[i] for i in argsort]
             hparams = [hparams[i] for i in argsort]
 

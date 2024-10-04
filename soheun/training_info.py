@@ -1,7 +1,5 @@
 from __future__ import annotations
 import pathlib
-import random
-import string
 import pickle
 from typing import Iterable
 
@@ -10,37 +8,15 @@ import pandas as pd
 import torch
 from torch.utils.data import TensorDataset
 import tqdm
-import time
 
 from dataset import DatasetInfo, SCDatasetInfo, split_scdinfo
+from utils import create_hash
 
 # get current directory of the file
 TINFO_SAVE_DIR = pathlib.Path(__file__).parent / "data/training_info"
 # check if TINFO_SAVE_DIR exists, if not, create it
 TINFO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 TINFOV2_META_DIR = pathlib.Path(__file__).parent / "data/metadata/training_info_v2.pkl"
-
-
-def create_hash(directory: pathlib.Path) -> str:
-    # create a new hash that is not already in the directory
-    # get current timestamp
-    files = directory.glob("*")
-    existing_hashes = [file.name for file in files]
-
-    def create_hash_with_timestamp():
-        timestamp = str(time.time())
-        random.seed(timestamp)
-        random_string = "".join(
-            random.choices(string.ascii_letters + string.digits, k=6)
-        )
-        return timestamp + random_string
-
-    hash_ = create_hash_with_timestamp()
-
-    while hash_ in existing_hashes:
-        hash_ = create_hash_with_timestamp()
-
-    return hash_
 
 
 class TrainingInfo:
