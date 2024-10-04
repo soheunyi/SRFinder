@@ -18,8 +18,7 @@ from dataset import DatasetInfo, SCDatasetInfo, split_scdinfo
 TINFO_SAVE_DIR = pathlib.Path(__file__).parent / "data/training_info"
 # check if TINFO_SAVE_DIR exists, if not, create it
 TINFO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-TINFOV2_META_DIR = pathlib.Path(__file__).parent / \
-    "data/metadata/training_info_v2.pkl"
+TINFOV2_META_DIR = pathlib.Path(__file__).parent / "data/metadata/training_info_v2.pkl"
 
 
 def create_hash(directory: pathlib.Path) -> str:
@@ -30,8 +29,10 @@ def create_hash(directory: pathlib.Path) -> str:
 
     def create_hash_with_timestamp():
         timestamp = str(time.time())
-        random_string = "".join(random.choices(
-            string.ascii_letters + string.digits, k=12))
+        random.seed(timestamp)
+        random_string = "".join(
+            random.choices(string.ascii_letters + string.digits, k=6)
+        )
         return timestamp + random_string
 
     hash_ = create_hash_with_timestamp()
@@ -128,7 +129,7 @@ class TrainingInfoV2:
         self.scdinfo = scdinfo
         self._hash = create_hash(TrainingInfoV2.SAVE_DIR)
         self._aux_info = {}
-        
+
     def fetch_train_val_scdinfo(self) -> tuple[SCDatasetInfo, SCDatasetInfo]:
         """
         Return the training and validation scdinfo.
@@ -158,8 +159,7 @@ class TrainingInfoV2:
                 "batch_size" in self.hparams
             ), "batch_size must be in hparams if fit_batch_size is True"
             batch_size = self.hparams["batch_size"]
-            df_train = df_train.iloc[: (
-                len(df_train) // batch_size) * batch_size]
+            df_train = df_train.iloc[: (len(df_train) // batch_size) * batch_size]
             df_val = df_val.iloc[: (len(df_val) // batch_size) * batch_size]
 
         return df_train, df_val
@@ -228,14 +228,17 @@ class TrainingInfoV2:
     def update_metadata():
         with open(TrainingInfoV2.META_DIR, "wb") as f:
             hashes, hparams = TrainingInfoV2.find(
-                {}, return_hparams=True, from_metadata=False)
+                {}, return_hparams=True, from_metadata=False
+            )
             pickle.dump(dict(zip(hashes, hparams)), f)
 
     @staticmethod
-    def find(hparam_filter: dict[str, any],
-             return_hparams=False,
-             sort_by: list[str] = [],
-             from_metadata=True) -> list[str]:
+    def find(
+        hparam_filter: dict[str, any],
+        return_hparams=False,
+        sort_by: list[str] = [],
+        from_metadata=True,
+    ) -> list[str]:
 
         def is_match(hparam: dict[str, any]) -> bool:
             for key, value in hparam_filter.items():
@@ -266,11 +269,11 @@ class TrainingInfoV2:
         # sort by the given keys
         if len(sort_by) > 0 and len(hashes) > 0:
             for hp in hparams:
-                assert all([key in hp for key in sort_by]
-                           ), f"sort_by keys {sort_by} not in hparams {hp}"
+                assert all(
+                    [key in hp for key in sort_by]
+                ), f"sort_by keys {sort_by} not in hparams {hp}"
 
-            argsort = np.lexsort(tuple([hp[key] for hp in hparams]
-                                 for key in sort_by))
+            argsort = np.lexsort(tuple([hp[key] for hp in hparams] for key in sort_by))
             hashes = [hashes[i] for i in argsort]
             hparams = [hparams[i] for i in argsort]
 

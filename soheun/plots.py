@@ -661,6 +661,7 @@ def plot_reweighted_samples(
     sigma[mask] = (hist_4b[mask] - hist_3b[mask]) / np.sqrt(
         hist_3b_sq[mask] + hist_4b_sq[mask]
     )
+    print(sigma)
     twin_ax = ax.twinx()
     twin_ax.plot(midpoints, sigma, "o", color="red", markersize=3)
     twin_ax.axhline(0, color="black", linestyle="--")
@@ -678,7 +679,7 @@ def plot_rewighted_samples_by_model(
     fvt_scores = pl_module.predict(events.X_torch).detach().cpu().numpy()[:, 1]
     ratio_4b = plot_kwargs.get("ratio_4b", 0.5)
     reweights = (fvt_scores / (1 - fvt_scores)) * ratio_4b / (1 - ratio_4b)
-    reweights = np.where(events.is_3b, reweights, 1)
+    reweights = np.where(events.is_4b, 1, reweights)
     fig, ax = plt.subplots(1, 1, figsize=plot_kwargs.get("figsize", (8, 6)))
     fig.suptitle(plot_kwargs.get("title", ""))
     bins = plot_kwargs.get("bins", 30)
