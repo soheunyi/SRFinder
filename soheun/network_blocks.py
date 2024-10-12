@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 
 class Lin_View(nn.Module):
@@ -163,9 +164,13 @@ class scaler(
         self.register_buffer(
             "m", torch.zeros((1, self.features, 1), dtype=torch.float).to(device)
         )
+        # For type hinting
+        self.m: Tensor
+
         self.register_buffer(
             "s", torch.ones((1, self.features, 1), dtype=torch.float).to(device)
         )
+        self.s: Tensor
 
     def forward(self, x, mask=None, debug=False):
         x = x - self.m
@@ -179,80 +184,125 @@ class GhostBatchNorm1d(
     # I've replaced the running mean and std rules with Adam-like updates.
     def __init__(
         self,
-        features,
-        ghost_batch_size=32,
-        number_of_ghost_batches=32,
-        nAveraging=1,
-        eta=0.9,
-        bias=True,
+        features: int,
+        ghost_batch_size: int = 32,
+        number_of_ghost_batches: int = 32,
+        nAveraging: int = 1,
+        eta: float = 0.9,
+        bias: bool = True,
     ):
         super().__init__()
         self.features = features
+
+        # Declare buffers with type hints
         self.register_buffer("gbs", torch.tensor(ghost_batch_size, dtype=torch.long))
+        self.gbs: Tensor  # Type hint for Pylance
+
         self.register_buffer(
             "ngb", torch.tensor(number_of_ghost_batches * nAveraging, dtype=torch.long)
         )
+        self.ngb: Tensor
+
         self.register_buffer(
             "bessel_correction",
             torch.tensor(
                 ghost_batch_size / (ghost_batch_size - 1.0), dtype=torch.float
             ),
         )
-        self.gamma = nn.Parameter(torch.ones(self.features))
-        self.bias = nn.Parameter(torch.zeros(self.features))
-        self.bias.requires_grad = bias
+        self.bessel_correction: Tensor
 
         self.register_buffer("eta", torch.tensor(eta, dtype=torch.float))
+        self.eta: Tensor
+
         self.register_buffer("m", torch.zeros((1, self.features, 1), dtype=torch.float))
+        self.m: Tensor
+
         self.register_buffer("s", torch.ones((1, self.features, 1), dtype=torch.float))
+        self.s: Tensor
+
         self.register_buffer(
             "m_biased", torch.zeros((1, self.features, 1), dtype=torch.float)
         )
+        self.m_biased: Tensor
+
         self.register_buffer(
             "s_biased", torch.zeros((1, self.features, 1), dtype=torch.float)
         )
+        self.s_biased: Tensor
 
         # use Adam style updates for running mean and standard deviation https://arxiv.org/pdf/1412.6980.pdf
         self.register_buffer("t", torch.tensor(0, dtype=torch.float))
+        self.t: Tensor
+
         self.register_buffer("alpha", torch.tensor(0.001, dtype=torch.float))
+        self.alpha: Tensor
+
         self.register_buffer("beta1", torch.tensor(0.9, dtype=torch.float))
+        self.beta1: Tensor
+
         self.register_buffer("beta2", torch.tensor(0.999, dtype=torch.float))
+        self.beta2: Tensor
+
         self.register_buffer("eps", torch.tensor(1e-5, dtype=torch.float))
+        self.eps: Tensor
+
         self.register_buffer(
             "m_biased_first_moment",
             torch.zeros((1, self.features, 1), dtype=torch.float),
         )
+        self.m_biased_first_moment: Tensor
+
         self.register_buffer(
             "s_biased_first_moment",
             torch.zeros((1, self.features, 1), dtype=torch.float),
         )
+        self.s_biased_first_moment: Tensor
+
         self.register_buffer(
             "m_biased_second_moment",
             torch.zeros((1, self.features, 1), dtype=torch.float),
         )
+        self.m_biased_second_moment: Tensor
+
         self.register_buffer(
             "s_biased_second_moment",
             torch.zeros((1, self.features, 1), dtype=torch.float),
         )
+        self.s_biased_second_moment: Tensor
+
         self.register_buffer(
             "m_first_moment", torch.zeros((1, self.features, 1), dtype=torch.float)
         )
+        self.m_first_moment: Tensor
+
         self.register_buffer(
             "s_first_moment", torch.zeros((1, self.features, 1), dtype=torch.float)
         )
+        self.s_first_moment: Tensor
+
         self.register_buffer(
             "m_second_moment", torch.zeros((1, self.features, 1), dtype=torch.float)
         )
+        self.m_second_moment: Tensor
+
         self.register_buffer(
             "s_second_moment", torch.zeros((1, self.features, 1), dtype=torch.float)
         )
+        self.s_second_moment: Tensor
 
-    def forward(self, x, mask=None, debug=False):
+        self.gamma = nn.Parameter(torch.ones(self.features))
+        self.bias = nn.Parameter(torch.zeros(self.features))
+        self.bias.requires_grad = bias
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None, debug: bool = False):
         if self.training:
             batch_size = x.shape[0]
             pixels = x.shape[2]
             # if self.ngb: # if number of ghost batches is specified, compute corresponding ghost batch size
+
             self.gbs = batch_size // self.ngb
+            # self.ngb = batch_size // self.gbs
+
             # self.register_buffer('gbs', torch.tensor(batch_size//16, dtype=torch.long))
             # else: # ghost batch size is specified, compute corresponding number of ghost batches
             # self.ngb = batch_size // self.gbs
@@ -263,11 +313,14 @@ class GhostBatchNorm1d(
 
             # TODO: Problematic!!!!!!!!!!!!!! What if the number of ghost batches is not a factor of the batch size?
             # The last batch need not be the same size as the others.
+            # print("x.shape", x.shape)
             x = (
                 x.transpose(1, 2)
                 .contiguous()
                 .view(self.ngb, self.gbs * pixels, self.features, 1)
             )
+            # print("x.shape", x.shape)
+            # raise ValueError("stop here")
 
             if mask is None:
                 gbm = x.mean(dim=1, keepdim=True) if self.bias.requires_grad else 0
@@ -336,6 +389,29 @@ class GhostBatchNorm1d(
             # Simplest possible method
             self.m = self.eta * self.m + (1 - self.eta) * bm
             self.s = self.eta * self.s + (1 - self.eta) * bs
+
+            ###########################################################################
+            #################### How Introduced GBN is Computed #######################
+            ###########################################################################
+
+            # weights = self.eta ** torch.arange(
+            #     self.ngb, dtype=self.m.dtype, device=self.m.device
+            # )
+            # weights = weights.view(self.ngb, 1, 1, 1)
+
+            # self.m = (
+            #     self.eta**self.ngb * self.m
+            #     + (1 - self.eta) * torch.sum(weights * gbm[:, 0:1, :, :], dim=0)
+            #     if self.bias.requires_grad
+            #     else self.m
+            # )
+            # self.s = self.eta**self.ngb * self.s + (1 - self.eta) * torch.sum(
+            #     weights * gbs[:, 0:1, :, :], dim=0
+            # )
+
+            ###########################################################################
+            ###########################################################################
+            ###########################################################################
 
             # # Simplest method + bias correction
             # self.m_biased = self.eta*self.m_biased + (1-self.eta)*bm

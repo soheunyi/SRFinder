@@ -661,7 +661,7 @@ def plot_reweighted_samples(
     sigma[mask] = (hist_4b[mask] - hist_3b[mask]) / np.sqrt(
         hist_3b_sq[mask] + hist_4b_sq[mask]
     )
-    print(sigma)
+    # print(sigma)
     twin_ax = ax.twinx()
     twin_ax.plot(midpoints, sigma, "o", color="red", markersize=3)
     twin_ax.axhline(0, color="black", linestyle="--")
@@ -672,7 +672,11 @@ def plot_reweighted_samples(
 
 
 def plot_rewighted_samples_by_model(
-    pl_module: pl.LightningModule, events: EventsData, **plot_kwargs
+    pl_module: pl.LightningModule,
+    events: EventsData,
+    ax=None,
+    x_values=None,
+    **plot_kwargs,
 ):
     pl_module.eval()
     pl_module.to("cuda")
@@ -680,19 +684,23 @@ def plot_rewighted_samples_by_model(
     ratio_4b = plot_kwargs.get("ratio_4b", 0.5)
     reweights = (fvt_scores / (1 - fvt_scores)) * ratio_4b / (1 - ratio_4b)
     reweights = np.where(events.is_4b, 1, reweights)
-    fig, ax = plt.subplots(1, 1, figsize=plot_kwargs.get("figsize", (8, 6)))
-    fig.suptitle(plot_kwargs.get("title", ""))
+    if x_values is None:
+        x_values = fvt_scores
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=plot_kwargs.get("figsize", (8, 6)))
+        fig.suptitle(plot_kwargs.get("title", ""))
     bins = plot_kwargs.get("bins", 30)
     plot_reweighted_samples(
         events,
-        fvt_scores,
+        x_values,
         reweights,
         ax=ax,
         bins=bins,
         mode="uniform",
     )
-    plt.show()
-    plt.close("all")
+    if ax is None:
+        plt.show()
+        plt.close("all")
 
 
 def plot_rewighted_samples_by_model_v2(

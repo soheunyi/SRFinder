@@ -202,3 +202,39 @@ def get_ancillary_features(J: torch.Tensor):
     )
 
     return augmented_jet_features, dijet_ancillary_features, quadjet_ancillary_features
+
+
+def get_dRclose(J: torch.Tensor):
+    nj_features = 4
+    J = J.view(-1, nj_features, 4)
+    jet0, jet1, jet2, jet3 = J[:, :, 0:1], J[:, :, 1:2], J[:, :, 2:3], J[:, :, 3:4]
+
+    dijet01, dijet23, dijet02, dijet13, dijet03, dijet12 = jets_to_dijets(
+        jet0, jet1, jet2, jet3
+    )
+
+    m01, m23, m02, m13, m03, m12 = (
+        dijet01[:, 3:4, :],
+        dijet02[:, 3:4, :],
+        dijet03[:, 3:4, :],
+        dijet12[:, 3:4, :],
+        dijet13[:, 3:4, :],
+        dijet23[:, 3:4, :],
+    )
+
+    m01_23 = (m01 - m23).abs()
+    m02_13 = (m02 - m13).abs()
+    m03_12 = (m03 - m12).abs()
+
+    dR01 = deltaR(jet0, jet1)
+    dR02 = deltaR(jet0, jet2)
+    dR03 = deltaR(jet0, jet3)
+    dR12 = deltaR(jet1, jet2)
+    dR13 = deltaR(jet1, jet3)
+    dR23 = deltaR(jet2, jet3)
+
+    idx_min = torch.argmin(torch.stack([m01_23, m02_13, m03_12], dim=1), dim=1)
+    dRclose = torch.gather(torch.stack([dR01, dR02, dR03], dim=1), 1, idx_min)
+    dRother = torch.gather(torch.stack([dR12, dR13, dR23], dim=1), 1, idx_min)
+
+    return dRclose, dRother

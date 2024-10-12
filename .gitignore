@@ -13,3 +13,5 @@ tst_info/
 checkpoints/
 tb_logs/
 slurm-*.out
+metadata/
+tmp/

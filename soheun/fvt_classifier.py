@@ -6,16 +6,58 @@ import tqdm
 from fvt_encoder import FvTEncoder
 import pytorch_lightning as pl
 from torch.nn import functional as F
-import torch.nn as nn
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 from torch import optim
-from pytorch_lightning.callbacks import ModelCheckpoint
-from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import EarlyStopping, TQDMProgressBar, Callback
+from pytorch_lightning.callbacks import (
+    ModelCheckpoint,
+    EarlyStopping,
+    TQDMProgressBar,
+    Callback,
+)
+from pytorch_lightning.loggers import TensorBoardLogger
 import pathlib
 
 from utils import require_keys
 from network_blocks import conv1d
+
+
+class FvTClassifierDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        train_dataset,
+        val_dataset,
+        batch_size,
+        num_workers=4,
+        batch_size_milestones=[],
+        batch_size_multiplier=2,
+    ):
+        super().__init__()
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.batch_size_multiplier = batch_size_multiplier
+        self.batch_size_milestones = batch_size_milestones
+
+    def train_dataloader(self):
+        if self.trainer.current_epoch in self.batch_size_milestones:
+            self.batch_size *= self.batch_size_multiplier
+            print(f"Batch size updated to: {self.batch_size}")
+
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
 
 def kernel(
@@ -63,9 +105,6 @@ class FvTClassifier(pl.LightningModule):
         device: str = (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ),
-        optimizer_config: dict = {},
-        lr_scheduler_config: dict = {},
-        early_stop_patience: None | int = None,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -75,11 +114,10 @@ class FvTClassifier(pl.LightningModule):
         self.dim_q = dim_quadjet_features
 
         self.num_classes = num_classes
-        self.early_stop_patience = early_stop_patience
         self.run_name = run_name
 
-        self.optimizer_config = optimizer_config
-        self.lr_scheduler_config = lr_scheduler_config
+        self.optimizer_config = None
+        self.lr_scheduler_config = None
 
         self.train_losses = torch.tensor([])
         self.train_batchsizes = torch.tensor([])
@@ -178,6 +216,12 @@ class FvTClassifier(pl.LightningModule):
 
         return loss
 
+    def on_train_epoch_start(self):
+        self.log("step", self.trainer.current_epoch, on_epoch=True)
+
+    def on_validation_epoch_start(self):
+        self.log("step", self.trainer.current_epoch, on_epoch=True)
+
     def on_train_epoch_end(self):
         avg_loss = (
             torch.sum(self.train_losses * self.train_batchsizes)
@@ -245,6 +289,11 @@ class FvTClassifier(pl.LightningModule):
             if not torch.isnan(avg_loss)
             else 0
         )
+        last_lr = (
+            self.trainer.lr_scheduler_configs[0].scheduler.get_last_lr()[-1]
+            if self.lr_scheduler_config["type"] != "none"
+            else self.optimizer_config["lr"]
+        )
 
         self.log(
             "val_loss",
@@ -270,19 +319,25 @@ class FvTClassifier(pl.LightningModule):
             prog_bar=True,
         )
         self.log(
-            "last_lr",
-            self.trainer.lr_scheduler_configs[0].scheduler.get_last_lr()[-1],
+            "lr",
+            last_lr,
             on_epoch=True,
             prog_bar=True,
         )
-
-        self.update_history(
-            {
-                "val_loss": avg_loss,
-                "val_sigma_sq": avg_sigma_sq,
-                "lr": self.trainer.lr_scheduler_configs[0].scheduler.get_last_lr()[-1],
-            }
+        self.log(
+            "batch_size",
+            self.datamodule.batch_size,
+            on_epoch=True,
         )
+
+        tb_logs = {
+            "val_loss": avg_loss,
+            "val_sigma_sq": avg_sigma_sq,
+            "lr": last_lr,
+            "batch_size": self.datamodule.batch_size,
+        }
+
+        self.update_history(tb_logs)
 
         if avg_loss < self.best_val_loss:
             self.best_val_loss = avg_loss
@@ -310,17 +365,30 @@ class FvTClassifier(pl.LightningModule):
                     break
 
     def configure_optimizers(self):
+        assert self.optimizer_config is not None
+        assert self.lr_scheduler_config is not None
+
         require_keys(self.optimizer_config, ["type", "lr"])
-        require_keys(
-            self.lr_scheduler_config,
-            ["type", "factor", "threshold", "patience", "cooldown", "min_lr"],
-        )
+        require_keys(self.lr_scheduler_config, ["type"])
+
+        if self.lr_scheduler_config["type"] == "ReduceLROnPlateau":
+            require_keys(
+                self.lr_scheduler_config,
+                ["factor", "threshold", "patience", "cooldown", "min_lr"],
+            )
+
         if self.optimizer_config["type"] == "Adam":
             optimizer = optim.Adam(self.parameters(), lr=self.optimizer_config["lr"])
+        elif self.optimizer_config["type"] == "SGD":
+            optimizer = optim.SGD(self.parameters(), lr=self.optimizer_config["lr"])
         else:
             raise ValueError(f"Invalid optimizer type: {self.optimizer_config['type']}")
 
-        if self.lr_scheduler_config["type"] == "ReduceLROnPlateau":
+        return_dict = {"optimizer": optimizer, "monitor": "val_loss"}
+
+        if self.lr_scheduler_config["type"] == "none":
+            pass
+        elif self.lr_scheduler_config["type"] == "ReduceLROnPlateau":
             lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer,
                 "min",
@@ -330,30 +398,39 @@ class FvTClassifier(pl.LightningModule):
                 cooldown=self.lr_scheduler_config["cooldown"],
                 min_lr=self.lr_scheduler_config["min_lr"],
             )
+            return_dict["lr_scheduler"] = lr_scheduler
         else:
             raise ValueError(
                 f"Invalid lr scheduler type: {self.lr_scheduler_config['type']}"
             )
 
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": lr_scheduler,
-                "monitor": "val_loss",
-            },
-        }
+        return return_dict
 
     def fit(
         self,
         train_dataset,
         val_dataset,
-        batch_size,
         max_epochs=50,
         train_seed: int = None,
         save_checkpoint: bool = True,
         callbacks: list[Callback] = [],
         tb_log_dir: str = "tmp",
+        optimizer_config: dict = {},
+        lr_scheduler_config: dict = {},
+        early_stop_patience: None | int = None,
+        dataloader_config: dict = {},
     ):
+        assert "batch_size" in dataloader_config
+
+        self.optimizer_config = optimizer_config
+        self.lr_scheduler_config = lr_scheduler_config
+        self.early_stop_patience = early_stop_patience
+
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+
+        self.dataloader_config = dataloader_config
+
         if train_seed is not None:
             pl.seed_everything(train_seed)
 
@@ -364,7 +441,9 @@ class FvTClassifier(pl.LightningModule):
         logger = TensorBoardLogger(tb_log_dir, name=self.run_name)
 
         progress_bar = TQDMProgressBar(
-            refresh_rate=max(1, (len(train_dataset) // batch_size) // 10)
+            refresh_rate=max(
+                1, (len(train_dataset) // dataloader_config["batch_size"]) // 10
+            )
         )
         callbacks = callbacks + [progress_bar]
 
@@ -418,23 +497,26 @@ class FvTClassifier(pl.LightningModule):
             max_epochs=max_epochs,
             callbacks=callbacks,
             logger=logger,
+            reload_dataloaders_every_n_epochs=1,
         )
 
         torch.autograd.set_detect_anomaly(True)
 
-        trainer.fit(
-            self,
-            DataLoader(
-                train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
-            ),
-            DataLoader(
-                val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
-            ),
+        self.datamodule = FvTClassifierDataModule(
+            train_dataset,
+            val_dataset,
+            dataloader_config["batch_size"],
+            num_workers=4,
+            batch_size_milestones=dataloader_config.get("batch_size_milestones", []),
+            batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
         )
+        trainer.fit(self, datamodule=self.datamodule)
 
     def predict(self, x: torch.Tensor, do_tqdm=False):
+        self.eval()
+        batch_size = min(2**14, x.shape[0])
         with torch.no_grad():
-            x_dataloader = DataLoader(x, batch_size=1024, shuffle=False)
+            x_dataloader = DataLoader(x, batch_size=batch_size, shuffle=False)
             y_pred = torch.tensor([])
             if do_tqdm:
                 x_dataloader = tqdm.tqdm(x_dataloader)
@@ -456,7 +538,9 @@ class FvTClassifier(pl.LightningModule):
         self, x: torch.Tensor, do_tqdm=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
-            x_dataloader = DataLoader(x, batch_size=1024, shuffle=False)
+            x_dataloader = DataLoader(
+                x, batch_size=min(2**14, x.shape[0]), shuffle=False
+            )
 
             x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
             q_repr = torch.tensor([])
