@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import pathlib
+import pickle
 from typing import Iterable
 import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader, TensorDataset
+import tqdm
+
+from utils import require_keys, create_hash
 
 
 class DatasetInfo:
@@ -19,8 +23,7 @@ class DatasetInfo:
         assert max(file_idx) + 1 <= len(files)
         # check if the file exists
         assert all([file.exists() for file in files])
-        assert all([len(v) == len(inner_idx)
-                   for v in overwrite_features.values()])
+        assert all([len(v) == len(inner_idx) for v in overwrite_features.values()])
 
         self.files = files
         self.file_idx = file_idx
@@ -116,8 +119,7 @@ class SCDatasetInfo:
         """
         assert len(scdinfos) > 0
         assert all(
-            [len(scdinfo.files) == len(scdinfos[0].files)
-             for scdinfo in scdinfos]
+            [len(scdinfo.files) == len(scdinfos[0].files) for scdinfo in scdinfos]
         )
         assert all(
             [
@@ -204,14 +206,12 @@ class SCDatasetInfo:
         if idx.dtype == bool:
             idx = np.where(idx)[0]
         file_seps = np.cumsum([0] + self.get_file_lengths())
-        file_original_lengths = [nrow for nrow,
-                                 _ in self.get_original_file_shapes()]
+        file_original_lengths = [nrow for nrow, _ in self.get_original_file_shapes()]
 
         new_inner_idxs = []
 
         for inner_idx, start, end, file_original_length in zip(
-            self.inner_idxs, file_seps[:-
-                                       1], file_seps[1:], file_original_lengths
+            self.inner_idxs, file_seps[:-1], file_seps[1:], file_original_lengths
         ):
             new_inner_idx = np.full(file_original_length, False)
             current_idx = idx[(start <= idx) & (idx < end)]
@@ -291,8 +291,7 @@ def generate_tt_dataset(
     ]
     file_idx = np.concatenate(file_idxs)
     inner_idx = np.concatenate(inner_idxs)
-    overwrite_features = {
-        "signal": df["signal"].values, "weight": df["weight"].values}
+    overwrite_features = {"signal": df["signal"].values, "weight": df["weight"].values}
 
     # includes all test and train data
     dinfo = DatasetInfo(files, file_idx, inner_idx, overwrite_features)
@@ -412,3 +411,154 @@ def split_scdinfo(
     scdinfo_2 = scdinfo[idx_2]
 
     return scdinfo_1, scdinfo_2
+
+
+def split_scdinfo_multiple(
+    scdinfo: SCDatasetInfo,
+    fracs: list[float],
+    seed: int,
+) -> list[SCDatasetInfo]:
+    """
+    Splits SCDatasetInfo into multiple SCDatasetInfo objects.
+    """
+
+    assert all([0 < frac < 1 for frac in fracs]), "fracs must be between 0 and 1"
+    assert np.isclose(sum(fracs), 1), f"sum of fracs is {sum(fracs)}, not 1"
+
+    n_total = len(scdinfo)
+    frac_cumsum = np.cumsum(fracs)
+    idxs = [int(frac * n_total) for frac in frac_cumsum[:-1]]
+    idxs = [0] + idxs + [n_total]
+
+    assert len(idxs) == len(fracs) + 1
+    assert idxs[-1] == n_total
+
+    np.random.seed(seed)
+    random_idx = np.random.permutation(n_total)
+
+    scdinfos = []
+    for i in range(len(fracs)):
+        scdinfos.append(scdinfo[random_idx[idxs[i] : idxs[i + 1]]])
+
+    return scdinfos
+
+
+class MotherSamples:
+    SAVE_DIR = pathlib.Path(__file__).parent / "data/mother_samples"
+    META_DIR = pathlib.Path(__file__).parent / "data/metadata/mother_samples.pkl"
+
+    def __init__(self, scdinfo: SCDatasetInfo, hash: str, hparams: dict):
+        self._scdinfo = scdinfo
+        self._hash = hash
+        self._hparams = hparams
+
+    @property
+    def scdinfo(self):
+        return self._scdinfo
+
+    @property
+    def hash(self):
+        return self._hash
+
+    @property
+    def hparams(self):
+        return self._hparams
+
+    @staticmethod
+    def from_hparams(hparams: dict) -> MotherSamples:
+        require_keys(
+            hparams, ["n_3b", "ratio_4b", "signal_ratio", "signal_filename", "seed"]
+        )
+        scdinfo, _ = generate_mother_dataset(
+            hparams["n_3b"],
+            hparams["ratio_4b"],
+            hparams["signal_ratio"],
+            hparams["signal_filename"],
+            hparams["seed"],
+        )
+        name = create_hash(MotherSamples.SAVE_DIR)
+
+        return MotherSamples(scdinfo, name, hparams)
+
+    def save(self, verbose=True):
+        if verbose:
+            print(f"Saving Mother Samples: {self.hash}")
+        with open(MotherSamples.SAVE_DIR / self.hash, "wb") as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(hash: str) -> MotherSamples:
+        with open(MotherSamples.SAVE_DIR / hash, "rb") as f:
+            return pickle.load(f)
+
+    @staticmethod
+    def load_metadata() -> dict[str, dict]:
+        with open(MotherSamples.META_DIR, "rb") as f:
+            return pickle.load(f)
+
+    @staticmethod
+    def update_metadata():
+        with open(MotherSamples.META_DIR, "wb") as f:
+            hashes, hparams = MotherSamples.find(
+                {}, return_hparams=True, from_metadata=False
+            )
+            pickle.dump(dict(zip(hashes, hparams)), f)
+
+    @staticmethod
+    def find(
+        hparam_filter: dict[str, any],
+        return_hparams=False,
+        sort_by: list[str] = [],
+        from_metadata=True,
+    ) -> list[str]:
+
+        def is_match(hparam: dict[str, any]) -> bool:
+            for key, value in hparam_filter.items():
+                if callable(value):
+                    if not value(hparam.get(key)):
+                        return False
+                elif hparam.get(key) != value:
+                    return False
+            return True
+
+        hash_hparams = []
+        if from_metadata:
+            all_hash_hparams = MotherSamples.load_metadata()
+            for hash_, hparams in all_hash_hparams.items():
+                if is_match(hparams):
+                    hash_hparams.append((hash_, hparams))
+        else:
+            for file in tqdm.tqdm(MotherSamples.SAVE_DIR.glob("*")):
+                tinfo = MotherSamples.load(file)
+                if is_match(tinfo.hparams):
+                    hash_hparams.append((tinfo.hash, tinfo.hparams))
+
+        if len(hash_hparams) == 0:
+            hashes, hparams = [], []
+        else:
+            hashes, hparams = zip(*hash_hparams)
+
+        # sort by the given keys
+        if len(sort_by) > 0 and len(hashes) > 0:
+            for hp in hparams:
+                assert all(
+                    [key in hp for key in sort_by]
+                ), f"sort_by keys {sort_by} not in hparams {hp}"
+
+            argsort = np.lexsort(tuple([hp[key] for hp in hparams] for key in sort_by))
+            hashes = [hashes[i] for i in argsort]
+            hparams = [hparams[i] for i in argsort]
+
+        if return_hparams:
+            return hashes, hparams
+        else:
+            return hashes
+
+    def __repr__(self) -> str:
+        return f"MotherSamples(hash={self.hash}, hparams={self.hparams})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    def __len__(self) -> int:
+        return len(self.scdinfo)

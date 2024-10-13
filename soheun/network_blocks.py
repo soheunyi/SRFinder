@@ -571,84 +571,84 @@ class linear(nn.Module):
         return self.module(x)
 
 
-class layerOrganizer:
-    def __init__(self):
-        self.layers = collections.OrderedDict()
-        self.nTrainableParameters = 0
+# class layerOrganizer:
+#     def __init__(self):
+#         self.layers = collections.OrderedDict()
+#         self.nTrainableParameters = 0
 
-    def addLayer(self, newLayer, inputLayers=None, startIndex=1):
-        if inputLayers:
-            # [layer.index for layer in inputLayers]
-            inputIndicies = inputLayers
-            newLayer.index = max(inputIndicies) + 1
-        else:
-            newLayer.index = startIndex
+#     def addLayer(self, newLayer, inputLayers=None, startIndex=1):
+#         if inputLayers:
+#             # [layer.index for layer in inputLayers]
+#             inputIndicies = inputLayers
+#             newLayer.index = max(inputIndicies) + 1
+#         else:
+#             newLayer.index = startIndex
 
-        try:
-            self.layers[newLayer.index].append(newLayer)
-        except (KeyError, AttributeError):
-            self.layers[newLayer.index] = [newLayer]
+#         try:
+#             self.layers[newLayer.index].append(newLayer)
+#         except (KeyError, AttributeError):
+#             self.layers[newLayer.index] = [newLayer]
 
-    def countTrainableParameters(self):
-        self.nTrainableParameters = 0
-        for index in self.layers:
-            for layer in self.layers[index]:
-                for param in layer.parameters():
-                    self.nTrainableParameters += (
-                        param.numel() if param.requires_grad else 0
-                    )
+#     def countTrainableParameters(self):
+#         self.nTrainableParameters = 0
+#         for index in self.layers:
+#             for layer in self.layers[index]:
+#                 for param in layer.parameters():
+#                     self.nTrainableParameters += (
+#                         param.numel() if param.requires_grad else 0
+#                     )
 
-    def setLayerRequiresGrad(self, index, requires_grad=True):
-        self.countTrainableParameters()
-        print("Change trainable parameters from", self.nTrainableParameters, end=" ")
-        try:  # treat index as list of indices
-            for i in index:
-                for layer in self.layers[i]:
-                    for param in layer.parameters():
-                        param.requires_grad = requires_grad
-        except TypeError:  # index is just an int
-            for layer in self.layers[index]:
-                for param in layer.parameters():
-                    param.requires_grad = requires_grad
-        self.countTrainableParameters()
-        print("to", self.nTrainableParameters)
+#     def setLayerRequiresGrad(self, index, requires_grad=True):
+#         self.countTrainableParameters()
+#         print("Change trainable parameters from", self.nTrainableParameters, end=" ")
+#         try:  # treat index as list of indices
+#             for i in index:
+#                 for layer in self.layers[i]:
+#                     for param in layer.parameters():
+#                         param.requires_grad = requires_grad
+#         except TypeError:  # index is just an int
+#             for layer in self.layers[index]:
+#                 for param in layer.parameters():
+#                     param.requires_grad = requires_grad
+#         self.countTrainableParameters()
+#         print("to", self.nTrainableParameters)
 
-    def initLayer(self, index):
-        try:  # treat index as list of indices
-            print("Rerandomize layer indicies", index)
-            for i in index:
-                for layer in self.layers[i]:
-                    layer.randomize()
-        except TypeError:  # index is just an int
-            print("Rerandomize layer index", index)
-            for layer in self.layers[index]:
-                layer.randomize()
+#     def initLayer(self, index):
+#         try:  # treat index as list of indices
+#             print("Rerandomize layer indicies", index)
+#             for i in index:
+#                 for layer in self.layers[i]:
+#                     layer.randomize()
+#         except TypeError:  # index is just an int
+#             print("Rerandomize layer index", index)
+#             for layer in self.layers[index]:
+#                 layer.randomize()
 
-    def computeStats(self):
-        for index in self.layers:
-            for layer in self.layers[index]:
-                layer.gradStats.compute()
+#     def computeStats(self):
+#         for index in self.layers:
+#             for layer in self.layers[index]:
+#                 layer.gradStats.compute()
 
-    def resetStats(self):
-        for index in self.layers:
-            for layer in self.layers[index]:
-                layer.gradStats.reset()
+#     def resetStats(self):
+#         for index in self.layers:
+#             for layer in self.layers[index]:
+#                 layer.gradStats.reset()
 
-    def print(self):
-        for index in self.layers:
-            print("----- Layer %2d -----" % (index))
-            for layer in self.layers[index]:
-                print("|", layer.name.ljust(40), end="")
-            print("")
-            for layer in self.layers[index]:
-                if layer.gradStats:
-                    print("|", layer.gradStats.summary.ljust(40), end="")
-                else:
-                    print("|", " " * 40, end="")
-            print("")
-            # for layer in self.layers[index]:
-            #     print('|',str(layer.module).ljust(45), end=' ')
-            # print('|')
+#     def print(self):
+#         for index in self.layers:
+#             print("----- Layer %2d -----" % (index))
+#             for layer in self.layers[index]:
+#                 print("|", layer.name.ljust(40), end="")
+#             print("")
+#             for layer in self.layers[index]:
+#                 if layer.gradStats:
+#                     print("|", layer.gradStats.summary.ljust(40), end="")
+#                 else:
+#                     print("|", " " * 40, end="")
+#             print("")
+#             # for layer in self.layers[index]:
+#             #     print('|',str(layer.module).ljust(45), end=' ')
+#             # print('|')
 
 
 class MultiHeadAttention(
@@ -735,15 +735,6 @@ class MultiHeadAttention(
         )
 
         self.negativeInfinity = torch.tensor(-1e9, dtype=torch.float).to("cpu")
-
-        if layers:
-            layers.addLayer(self.q_linear, inputLayers)
-            layers.addLayer(self.k_linear, inputLayers)
-            layers.addLayer(self.v_linear, inputLayers)
-            layers.addLayer(
-                self.o_linear,
-                [self.q_linear.index, self.v_linear.index, self.k_linear.index],
-            )
 
     def attention(self, q, k, v, mask, debug=False):
 
@@ -1046,55 +1037,46 @@ class DijetResNetBlock(nn.Module):
         device=(
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ),
-        layers: layerOrganizer = None,
-        inputLayers=None,
         nAveraging=4,
+        depth=1,
     ):
         super().__init__()
         self.dim_d = dim_d
         self.device = device
+        self.depth = depth
 
-        self.reinforce1 = DijetReinforceLayer(
-            self.dim_d, batchNorm=True, nAveraging=nAveraging
-        )
-        self.convJ = conv1d(
-            self.dim_d,
-            self.dim_d,
-            1,
-            name="jet convolution",
-            batchNorm=True,
-            nAveraging=nAveraging,
-        )
-        self.reinforce2 = DijetReinforceLayer(
-            self.dim_d, batchNorm=False, nAveraging=nAveraging
+        self.reinforce_layers = nn.ModuleList(
+            [
+                DijetReinforceLayer(
+                    dim_d, batchNorm=(i < self.depth), nAveraging=nAveraging
+                )
+                for i in range(self.depth + 1)
+            ]
         )
 
-        layers.addLayer(self.reinforce1.conv, inputLayers)
-        layers.addLayer(self.convJ, [inputLayers[0]])
-        layers.addLayer(
-            self.reinforce2.conv, [self.convJ.index, self.reinforce1.conv.index]
+        self.convJ_layers = nn.ModuleList(
+            [
+                conv1d(self.dim_d, self.dim_d, 1, batchNorm=True, nAveraging=nAveraging)
+                for _ in range(self.depth)
+            ]
         )
-
-        self.outputLayer = self.reinforce2.conv.index
-
-        self.MultijetAttention = None
 
     def forward(self, j: torch.Tensor, d: torch.Tensor):
+        for i in range(self.depth):
+            d0 = d.clone()
+            d = self.reinforce_layers[i](j, d)
+            d = d + d0
+            d = NonLU(d, self.training)
+
+            j0 = j.clone()
+            j = self.convJ_layers[i](j)
+            j = j + j0
+            j = NonLU(j, self.training)
 
         d0 = d.clone()
-        d = self.reinforce1(j, d)
-        d = NonLU(d, self.training)
+        d = self.reinforce_layers[-1](j, d)
         d = d + d0
-
-        j0 = j.clone()
-        j = self.convJ(j)
-        j = NonLU(j, self.training)
-        j = j + j0
-
-        d0 = d.clone()
-        d = self.reinforce2(j, d)
         d = NonLU(d, self.training)
-        d = d + d0
 
         return d
 
@@ -1159,50 +1141,94 @@ class QuadjetResNetBlock(nn.Module):
         device=(
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ),
-        layers: layerOrganizer = None,
-        inputLayers=None,
+        depth=1,
         nAveraging=4,
     ):
         super().__init__()
         self.dim_q = dim_q
         self.device = device
+        self.depth = depth
 
-        self.reinforce1 = QuadjetReinforceLayer(
-            self.dim_q, batchNorm=True, nAveraging=nAveraging
+        self.reinforce_layers = nn.ModuleList(
+            [
+                QuadjetReinforceLayer(
+                    self.dim_q, batchNorm=(i < self.depth), nAveraging=nAveraging
+                )
+                for i in range(self.depth + 1)
+            ]
         )
-        self.convD = conv1d(
-            self.dim_q,
-            self.dim_q,
-            1,
-            name="dijet convolution",
-            batchNorm=True,
-            nAveraging=nAveraging,
-        )
-        self.reinforce2 = QuadjetReinforceLayer(
-            self.dim_q, batchNorm=False, nAveraging=nAveraging
-        )
-
-        layers.addLayer(self.reinforce1.conv, inputLayers)
-        layers.addLayer(self.convD, [inputLayers[0]])
-        layers.addLayer(
-            self.reinforce2.conv, [self.convD.index, self.reinforce1.conv.index]
+        self.convD_layers = nn.ModuleList(
+            [
+                conv1d(
+                    self.dim_q,
+                    self.dim_q,
+                    1,
+                    name="quadjet convolution",
+                    batchNorm=True,
+                    nAveraging=nAveraging,
+                )
+                for _ in range(self.depth)
+            ]
         )
 
     def forward(self, d: torch.Tensor, q: torch.Tensor):
+        for i in range(self.depth):
+            q0 = q.clone()
+            q = self.reinforce_layers[i](d, q)
+            q = q + q0
+            q = NonLU(q, self.training)
+
+            d0 = d.clone()
+            d = self.convD_layers[i](d)
+            d = d + d0
+            d = NonLU(d, self.training)
 
         q0 = q.clone()
-        q = self.reinforce1(d, q)
-        q = NonLU(q, self.training)
+        q = self.reinforce_layers[-1](d, q)
         q = q + q0
-
-        d0 = d.clone()
-        d = self.convD(d)
-        d = NonLU(d, self.training)
-        d = d + d0
-
-        q0 = q.clone()
-        q = self.reinforce2(d, q)
         q = NonLU(q, self.training)
-        q = q + q0
 
         return q
+
+
+class ResNetBlock(nn.Module):
+    def __init__(self, dim_in, dim_out, depth=1):
+        super().__init__()
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+        self.depth = depth
+
+        self.layers = nn.ModuleList(
+            [conv1d(dim_in, dim_in, 1, batchNorm=True) for _ in range(depth - 1)]
+        )
+        self.layers.append(conv1d(dim_in, dim_out, 1, batchNorm=True))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for i, layer in enumerate(self.layers):
+            x0 = x.clone()
+            x = layer(x)
+            if i < len(self.layers) - 1:
+                x = x + x0
+                x = NonLU(x, self.training)
+        return x
+
+
+class AttentionClassifier(nn.Module):
+    def __init__(self, dim_q, num_classes, depth=1):
+        super().__init__()
+        self.dim_q = dim_q
+        self.num_classes = num_classes
+        self.depth = depth
+
+        self.select_q = ResNetBlock(self.dim_q, 1, self.depth)
+        self.out = ResNetBlock(self.dim_q, self.num_classes, self.depth)
+
+    def forward(self, q: torch.Tensor) -> torch.Tensor:
+        n = q.shape[0]
+        q_score = self.select_q(q)
+        q_score = F.softmax(q_score, dim=-1)
+        event = torch.matmul(q, q_score.transpose(1, 2))
+        event = event.view(n, self.dim_q, 1)
+        event = self.out(event)
+        event = event.view(n, self.num_classes)
+        return event

@@ -17,7 +17,7 @@ experiment_name = "counting_test_v2"
 signal_filename = "HH4b_picoAOD.h5"
 ratio_4b = 0.5
 
-seeds = [1, 2, 3]
+seeds = [0, 1, 2]
 
 features = [
     "sym_Jet0_pt",
@@ -80,6 +80,17 @@ for tstinfo_hash in hashes:
             "min_lr": 1e-3,
             "lr_factor": 0.5,
             "lr_patience": 10,
+            "depth": {"encoder": 4, "decoder": 4},
+        },
+        {
+            "batch_schedule": True,
+            "batch_milestones": (1, 3, 6, 10, 15),
+            "init_lr": 1e-2,
+            "lr_schedule": True,
+            "min_lr": 1e-3,
+            "lr_factor": 0.5,
+            "lr_patience": 10,
+            "depth": {"encoder": 4, "decoder": 1},
         },
         {
             "batch_schedule": True,
@@ -89,34 +100,8 @@ for tstinfo_hash in hashes:
             "min_lr": 2e-4,
             "lr_factor": 0.5,
             "lr_patience": 10,
+            "depth": {"encoder": 4, "decoder": 1},
         },
-        {
-            "batch_schedule": True,
-            "batch_milestones": (1, 3, 6, 10, 15),
-            "init_lr": 1e-2,
-            "lr_schedule": True,
-            "min_lr": 1e-3,
-            "lr_factor": 0.5,
-            "lr_patience": 3,
-        },
-        # {
-        #     "batch_schedule": False,
-        #     "batch_milestones": None,
-        #     "init_lr": 1e-2,
-        #     "lr_schedule": True,
-        #     "min_lr": 1e-3,
-        #     "lr_factor": 0.5,
-        #     "lr_patience": 10,
-        # },
-        # {
-        #     "batch_schedule": True,
-        #     "batch_milestones": (1, 3, 6, 10, 15),
-        #     "init_lr": 1e-2,
-        #     "lr_schedule": False,
-        #     "min_lr": None,
-        #     "lr_factor": None,
-        #     "lr_patience": None,
-        # },
     ]
 
     for config in configs:
@@ -127,7 +112,7 @@ for tstinfo_hash in hashes:
         min_lr = config["min_lr"]
         lr_factor = config["lr_factor"]
         lr_patience = config["lr_patience"]
-        run_name = f"bs={batch_schedule}_bs_milestones={batch_milestones}_init_lr={init_lr}_lrs={lr_schedule}_min_lr={min_lr}_lr_factor={lr_factor}_lr_patience={lr_patience}_LGBN"
+        run_name = f"bs={batch_schedule}_bs_milestones={batch_milestones}_init_lr={init_lr}_lrs={lr_schedule}_min_lr={min_lr}_lr_factor={lr_factor}_lr_patience={lr_patience}"
 
         # IMPORTANT: For reproducibility, weight initialization is fixed
         pl.seed_everything(seed)
@@ -138,6 +123,7 @@ for tstinfo_hash in hashes:
             dim_quadjet_features=base_fvt_tinfo.hparams["dim_quadjet_features"],
             run_name=f"{run_name}_seed={seed}_timestamp={timestamp}",
             device=device,
+            depth={"encoder": 4, "decoder": 1},
         )
 
         if lr_schedule:
@@ -170,5 +156,5 @@ for tstinfo_hash in hashes:
             optimizer_config={"type": "Adam", "lr": init_lr},
             lr_scheduler_config=lr_scheduler_config,
             dataloader_config=dataloader_config,
-            tb_log_dir="training_ablation",
+            tb_log_dir="training_ablation_2",
         )

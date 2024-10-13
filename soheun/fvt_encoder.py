@@ -6,7 +6,6 @@ from network_blocks import (
     NonLU,
     conv1d,
     DijetResNetBlock,
-    layerOrganizer,
     QuadjetResNetBlock,
     scaler,
 )
@@ -53,7 +52,6 @@ class FvTEncoder(nn.Module):
         )
 
         self.nR = 1
-        self.layers = layerOrganizer()
         self.canJetScaler = scaler(self.dim_j, device)
 
         self.othJetScaler = None
@@ -84,17 +82,13 @@ class FvTEncoder(nn.Module):
             batchNorm=False,
         )
 
-        self.layers.addLayer(self.jetEmbed)
-        self.layers.addLayer(self.dijetEmbed1)
-
         # Stride=3 Kernel=3 reinforce dijet features, in parallel update jet features for next reinforce layer
         # |1|2|1,2|3|4|3,4|1|3|1,3|2|4|2,4|1|4|1,4|2|3|2,3|
         #     |1,2|   |3,4|   |1,3|   |2,4|   |1,4|   |2,3|
         self.DijetResNetBlock = DijetResNetBlock(
             self.dim_d,
             device=self.device,
-            layers=self.layers,
-            inputLayers=[self.jetEmbed.index, self.dijetEmbed1.index],
+            depth=depth,
             nAveraging=1,
         )
 
@@ -115,57 +109,32 @@ class FvTEncoder(nn.Module):
             batchNorm=False,
         )
 
-        self.layers.addLayer(self.dijetEmbed2, [self.DijetResNetBlock.outputLayer])
-        self.layers.addLayer(self.quadjetEmbed, startIndex=self.dijetEmbed2.index)
-
         # Stride=3 Kernel=3 reinforce quadjet features, in parallel update dijet features for next reinforce layer
         # |1,2|3,4|1,2,3,4|1,3|2,4|1,3,2,4|1,4|2,3|1,4,2,3|
         #         |1,2,3,4|       |1,3,2,4|       |1,4,2,3|
         self.QuadjetResNetBlock = QuadjetResNetBlock(
             self.dim_q,
             device=self.device,
-            layers=self.layers,
-            inputLayers=[self.dijetEmbed2.index, self.quadjetEmbed.index],
+            depth=depth,
             nAveraging=1,
         )
 
-        self.event_conv_1 = conv1d(
-            self.dim_q,
-            self.dim_q,
-            1,
-            name="event convolution 1",
-            batchNorm=True,
-        )
-        self.event_conv_2 = conv1d(
-            self.dim_q,
-            self.dim_q,
-            1,
-            name="event convolution 2",
-            batchNorm=True,
-        )
-        self.event_conv_3 = conv1d(
-            self.dim_q,
-            self.dim_q,
-            1,
-            name="event convolution 3",
-            batchNorm=True,
-        )
-        self.event_conv_4 = conv1d(
-            self.dim_q,
-            self.dim_q,
-            1,
-            name="event convolution 4",
-            batchNorm=False,
-        )
+        self.depth = depth
 
-        self.layers.addLayer(
-            self.event_conv_1, [self.QuadjetResNetBlock.reinforce2.conv.index]
-        )
-        self.layers.addLayer(self.event_conv_2, [self.event_conv_1.index])
+        # Create event_conv layers based on depth
+        self.event_conv_layers = nn.ModuleList()
+        for i in range(self.depth):
+            self.event_conv_layers.append(
+                conv1d(
+                    self.dim_q,
+                    self.dim_q,
+                    1,
+                    name=f"event convolution {i+1}",
+                    batchNorm=(i < self.depth - 1),  # No batch norm for the last layer
+                )
+            )
 
-    def get_quadjet_pixels(
-        self, j: torch.Tensor, mask, d: torch.Tensor, q: torch.Tensor
-    ):
+    def get_quadjet_pixels(self, j: torch.Tensor, d: torch.Tensor, q: torch.Tensor):
         #
         # Build up dijet pixels with jet pixels and dijet ancillary features
         #
@@ -184,7 +153,7 @@ class FvTEncoder(nn.Module):
 
         return q
 
-    def forward(self, j) -> torch.Tensor:
+    def forward(self, j: torch.Tensor) -> torch.Tensor:
         n = j.shape[0]
         j = j.view(n, self.dim_j, 4)
 
@@ -216,26 +185,14 @@ class FvTEncoder(nn.Module):
         d = self.dijetEmbed1(d)
         q = self.quadjetEmbed(q)
 
-        # do the same data prep for the other jets if we are using them
-        mask = None
-
         # compute the quadjet pixels and average them over the symmetry transformations
-        q = self.get_quadjet_pixels(j, mask, d, q)
+        q = self.get_quadjet_pixels(j, d, q)
 
-        # Everything from here on out has no dependence on eta/phi flips and minimal dependence on phi rotations
-
-        q0 = q.clone()
-        q = self.event_conv_1(q)
-        q = NonLU(q, self.training)
-        q = self.event_conv_2(q)
-        q = NonLU(q, self.training)
-        q = q + q0
-
-        q0 = q.clone()
-        q = self.event_conv_3(q)
-        q = NonLU(q, self.training)
-        q = self.event_conv_4(q)
-        q = NonLU(q, self.training)
-        q = q + q0
+        # Apply ResNet structure based on depth
+        for i in range(self.depth):
+            q0 = q.clone()
+            q = self.event_conv_layers[i](q)
+            q = q + q0
+            q = NonLU(q, self.training)
 
         return q

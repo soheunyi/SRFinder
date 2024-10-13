@@ -18,7 +18,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import pathlib
 
 from utils import require_keys
-from network_blocks import conv1d
+from network_blocks import AttentionClassifier, conv1d
 
 
 class FvTClassifierDataModule(pl.LightningDataModule):
@@ -105,6 +105,10 @@ class FvTClassifier(pl.LightningModule):
         device: str = (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ),
+        depth: dict = {
+            "encoder": 4,
+            "decoder": 1,
+        },
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -115,6 +119,8 @@ class FvTClassifier(pl.LightningModule):
 
         self.num_classes = num_classes
         self.run_name = run_name
+        require_keys(depth, ["encoder", "decoder"])
+        self.depth = depth
 
         self.optimizer_config = None
         self.lr_scheduler_config = None
@@ -138,35 +144,23 @@ class FvTClassifier(pl.LightningModule):
             dim_dijet_features=dim_dijet_features,
             dim_quadjet_features=dim_quadjet_features,
             device=device,
+            depth=depth["encoder"],
         )
 
-        self.select_q = conv1d(
-            dim_quadjet_features, 1, 1, name="quadjet selector", batchNorm=True
-        )
-
-        self.out = conv1d(
-            dim_quadjet_features, num_classes, 1, name="out", batchNorm=True
+        self.attention_classifier = AttentionClassifier(
+            dim_quadjet_features, num_classes, depth["decoder"]
         )
         self.to(device)
 
     def forward(self, x: torch.Tensor):
         n = x.shape[0]
         q = self.encoder(x)
-        q_score = self.select_q(q)
-        q_score = F.softmax(q_score, dim=-1)
-        event = torch.matmul(q, q_score.transpose(1, 2))
-        event = event.view(n, self.dim_q, 1)
-
-        # project the final event-level pixel into the class score space
-        class_score = self.out(event)
-        class_score = class_score.view(n, self.num_classes)
+        class_score = self.attention_classifier(q)
 
         if torch.isnan(class_score).any():
             print("NaN found in forward")
             print("x", x)
             print("q", q)
-            print("q_score", q_score)
-            print("event", event)
             print("class_score", class_score)
 
             raise ValueError("NaN found in forward")
