@@ -12,31 +12,53 @@ from fvt_classifier import FvTClassifier
 from plots import hist_events_by_labels
 from tst_info import TSTInfo
 
+from data_modules import FvTDataModule
+
 
 features = [
-    "sym_Jet0_pt", "sym_Jet1_pt", "sym_Jet2_pt", "sym_Jet3_pt",
-    "sym_Jet0_eta", "sym_Jet1_eta", "sym_Jet2_eta", "sym_Jet3_eta",
-    "sym_Jet0_phi", "sym_Jet1_phi", "sym_Jet2_phi", "sym_Jet3_phi",
-    "sym_Jet0_m", "sym_Jet1_m", "sym_Jet2_m", "sym_Jet3_m",
+    "sym_Jet0_pt",
+    "sym_Jet1_pt",
+    "sym_Jet2_pt",
+    "sym_Jet3_pt",
+    "sym_Jet0_eta",
+    "sym_Jet1_eta",
+    "sym_Jet2_eta",
+    "sym_Jet3_eta",
+    "sym_Jet0_phi",
+    "sym_Jet1_phi",
+    "sym_Jet2_phi",
+    "sym_Jet3_phi",
+    "sym_Jet0_m",
+    "sym_Jet1_m",
+    "sym_Jet2_m",
+    "sym_Jet3_m",
 ]
 
 
-def get_histograms(events_original: EventsData, values: np.ndarray, bins,
-                   reweights: np.ndarray = 1):
+def get_histograms(
+    events_original: EventsData, values: np.ndarray, bins, reweights: np.ndarray = 1
+):
     is_3b = events_original.is_3b
     is_bg4b = events_original.is_bg4b
     is_signal = events_original.is_signal
 
     hist_3b, _ = np.histogram(
-        values[is_3b], bins=bins, weights=events_original.weights[is_3b])
+        values[is_3b], bins=bins, weights=events_original.weights[is_3b]
+    )
     hist_bg4b, _ = np.histogram(
-        values[is_bg4b], bins=bins, weights=events_original.weights[is_bg4b])
+        values[is_bg4b], bins=bins, weights=events_original.weights[is_bg4b]
+    )
     hist_signal, _ = np.histogram(
-        values[is_signal], bins=bins, weights=events_original.weights[is_signal])
-    hist_3b_rw, _ = np.histogram(values[is_3b], bins=bins, weights=(
-        events_original.weights * reweights)[is_3b])
-    hist_3b_rw_sq, _ = np.histogram(values[is_3b], bins=bins, weights=(
-        events_original.weights * reweights**2)[is_3b])
+        values[is_signal], bins=bins, weights=events_original.weights[is_signal]
+    )
+    hist_3b_rw, _ = np.histogram(
+        values[is_3b], bins=bins, weights=(events_original.weights * reweights)[is_3b]
+    )
+    hist_3b_rw_sq, _ = np.histogram(
+        values[is_3b],
+        bins=bins,
+        weights=(events_original.weights * reweights**2)[is_3b],
+    )
 
     hist_4b = hist_bg4b + hist_signal
     hist_all = hist_3b + hist_4b
@@ -61,8 +83,11 @@ def get_histogram_info(events_original: EventsData, values, bins, reweights, bia
         bins = np.quantile(values, q)
 
     if bias is not None:
-        hist_bias, _ = np.histogram(values[events_original.is_3b],
-                                    bins=bins, weights=(events_original.weights * bias)[events_original.is_3b])
+        hist_bias, _ = np.histogram(
+            values[events_original.is_3b],
+            bins=bins,
+            weights=(events_original.weights * bias)[events_original.is_3b],
+        )
 
     histograms = get_histograms(events_original, values, bins, reweights)
     hist_bg4b = histograms["bg4b"]
@@ -74,31 +99,33 @@ def get_histogram_info(events_original: EventsData, values, bins, reweights, bia
     is_sampled = std_est > 0
 
     if bias is not None:
-        sigma = (hist_4b - (hist_3b_rw - hist_bias)
-                 )[is_sampled] / std_est[is_sampled]
+        sigma = (hist_4b - (hist_3b_rw - hist_bias))[is_sampled] / std_est[is_sampled]
     else:
         sigma = (hist_4b - hist_3b_rw)[is_sampled] / std_est[is_sampled]
 
     sigma_avg = np.sqrt(np.mean(sigma**2))
 
     if bias is not None:
-        sigma_bg4b = (hist_bg4b - (hist_3b_rw - hist_bias)
-                      )[is_sampled] / std_est[is_sampled]
+        sigma_bg4b = (hist_bg4b - (hist_3b_rw - hist_bias))[is_sampled] / std_est[
+            is_sampled
+        ]
     else:
         sigma_bg4b = (hist_bg4b - hist_3b_rw)[is_sampled] / std_est[is_sampled]
 
     sigma_avg_bg4b = np.sqrt(np.mean(sigma_bg4b**2))
     df = np.sum(is_sampled)
 
-    histograms.update({
-        "bias": hist_bias,
-        "std_est": std_est,
-        "sigma": sigma,
-        "sigma_avg": sigma_avg,
-        "sigma_bg4b": sigma_bg4b,
-        "sigma_avg_bg4b": sigma_avg_bg4b,
-        "df": df,
-    })
+    histograms.update(
+        {
+            "bias": hist_bias,
+            "std_est": std_est,
+            "sigma": sigma,
+            "sigma_avg": sigma_avg,
+            "sigma_bg4b": sigma_bg4b,
+            "sigma_avg_bg4b": sigma_avg_bg4b,
+            "df": df,
+        }
+    )
 
     return histograms
 
@@ -137,24 +164,28 @@ if __name__ == "__main__":
         experiment_name = tstinfo.hparams["experiment_name"]
 
         if tst_results_summary_df.shape[0] > 0:
-            if ((tst_results_summary_df["signal_ratio"] == signal_ratio) & (tst_results_summary_df["seed"] == seed)).any():
+            if (
+                (tst_results_summary_df["signal_ratio"] == signal_ratio)
+                & (tst_results_summary_df["seed"] == seed)
+            ).any():
                 continue
 
         initialize_with_fvt = True
 
         scdinfo_tst = tstinfo.scdinfo_tst
-        events_tst = events_from_scdinfo(
-            scdinfo_tst, features, signal_filename)
+        events_tst = events_from_scdinfo(scdinfo_tst, features, signal_filename)
 
         base_fvt_hash = tstinfo.base_fvt_tinfo_hash
         fvt_model = FvTClassifier.load_from_checkpoint(
-            f"./data/checkpoints/{base_fvt_hash}_best.ckpt")
+            f"./data/checkpoints/{base_fvt_hash}_best.ckpt"
+        )
         fvt_model.to(device)
         fvt_model.freeze()
 
         CR_fvt_hash = tstinfo.CR_fvt_tinfo_hash
         CR_model = FvTClassifier.load_from_checkpoint(
-            f"./data/checkpoints/{CR_fvt_hash}_best.ckpt")
+            f"./data/checkpoints/{CR_fvt_hash}_best.ckpt"
+        )
         CR_model.to(device)
         CR_model.freeze()
 
@@ -168,14 +199,21 @@ if __name__ == "__main__":
 
         for rw_method in ["CR", "base"]:
             if rw_method == "CR":
-                probs_4b_est = CR_model.predict(
-                    events_tst.X_torch, do_tqdm=do_tqdm).detach().cpu().numpy()[:, 1]
+                probs_4b_est = (
+                    CR_model.predict(events_tst.X_torch, do_tqdm=do_tqdm)
+                    .detach()
+                    .cpu()
+                    .numpy()[:, 1]
+                )
             else:
-                probs_4b_est = fvt_model.predict(
-                    events_tst.X_torch, do_tqdm=do_tqdm).detach().cpu().numpy()[:, 1]
+                probs_4b_est = (
+                    fvt_model.predict(events_tst.X_torch, do_tqdm=do_tqdm)
+                    .detach()
+                    .cpu()
+                    .numpy()[:, 1]
+                )
 
-            reweights = ratio_4b * probs_4b_est / \
-                ((1 - ratio_4b) * (1 - probs_4b_est))
+            reweights = ratio_4b * probs_4b_est / ((1 - ratio_4b) * (1 - probs_4b_est))
             bias_3b_rw = np.zeros_like(probs_4b_est)
 
             events_SR = events_tst[in_SR]
@@ -186,7 +224,12 @@ if __name__ == "__main__":
             events_tst_rw = events_tst.clone()
             # include bias
             events_tst_rw.reweight(
-                np.where(events_tst_rw.is_4b, events_tst_rw.weights, events_tst_rw.weights * (reweights - bias_3b_rw)))
+                np.where(
+                    events_tst_rw.is_4b,
+                    events_tst_rw.weights,
+                    events_tst_rw.weights * (reweights - bias_3b_rw),
+                )
+            )
             events_SR_rw = events_tst_rw[in_SR]
             events_CR_rw = events_tst_rw[in_CR]
 
@@ -203,39 +246,46 @@ if __name__ == "__main__":
             ax.set_title("CR")
             ax.legend()
 
-            histograms = get_histograms(
-                events_CR, SR_stats_CR, bins, reweights[in_CR])
+            histograms = get_histograms(events_CR, SR_stats_CR, bins, reweights[in_CR])
             hist_3b_rw = histograms["3b_rw"]
             hist_3b_rw_sq = histograms["3b_rw_sq"]
             hist_bg4b = histograms["bg4b"]
-            hist_bias_3b_rw, _ = np.histogram(SR_stats_CR[events_CR.is_3b], bins=bins,
-                                              weights=(events_CR.weights * bias_3b_rw[in_CR])[events_CR.is_3b])
+            hist_bias_3b_rw, _ = np.histogram(
+                SR_stats_CR[events_CR.is_3b],
+                bins=bins,
+                weights=(events_CR.weights * bias_3b_rw[in_CR])[events_CR.is_3b],
+            )
 
             # debiasing
             hist_3b_rw = hist_3b_rw - hist_bias_3b_rw
 
             ax = fig.add_subplot(gs[1])
             midpoints = (bins[1:] + bins[:-1]) / 2
-            err = np.sqrt(hist_bg4b / hist_3b_rw**2 +
-                          hist_3b_rw_sq * (hist_bg4b / hist_3b_rw**2)**2)
-            ax.errorbar(midpoints, hist_bg4b / hist_3b_rw, yerr=err,
-                        label="bg4b / 3b", fmt="o", markersize=3)
+            err = np.sqrt(
+                hist_bg4b / hist_3b_rw**2
+                + hist_3b_rw_sq * (hist_bg4b / hist_3b_rw**2) ** 2
+            )
+            ax.errorbar(
+                midpoints,
+                hist_bg4b / hist_3b_rw,
+                yerr=err,
+                label="bg4b / 3b",
+                fmt="o",
+                markersize=3,
+            )
             ax.hlines(1, bins[0], bins[-1], color="black", linestyle="--")
             ax.set_xlim((bins[0], bins[-1]))
             ax.set_ylim((0.75, 1.25))
             ax.set_title("CR bg4b / 3b")
             ymin, ymax = ax.get_ylim()
-            ax.vlines(bins, ymin, ymax, color="black",
-                      linestyle="--", alpha=0.5)
+            ax.vlines(bins, ymin, ymax, color="black", linestyle="--", alpha=0.5)
 
             ax2 = ax.twinx()
-            sigma = (hist_bg4b - hist_3b_rw) / \
-                np.sqrt(hist_bg4b + hist_3b_rw_sq)
+            sigma = (hist_bg4b - hist_3b_rw) / np.sqrt(hist_bg4b + hist_3b_rw_sq)
             ax2.plot(midpoints, sigma, "o-", label="sigma", color="red")
             ax2.set_ylim((-4, 4))
             ax2.set_ylabel("sigma")
-            ax2.set_title("CR sigma avg: {:.2f}".format(
-                np.sqrt(np.mean(sigma**2))))
+            ax2.set_title("CR sigma avg: {:.2f}".format(np.sqrt(np.mean(sigma**2))))
 
             q = np.linspace(0, 1, 10)
             bins = np.quantile(SR_stats_SR, q)
@@ -246,39 +296,46 @@ if __name__ == "__main__":
             ax.set_title("SR")
             ax.legend()
 
-            histograms = get_histograms(
-                events_SR, SR_stats_SR, bins, reweights[in_SR])
+            histograms = get_histograms(events_SR, SR_stats_SR, bins, reweights[in_SR])
             hist_3b_rw = histograms["3b_rw"]
             hist_3b_rw_sq = histograms["3b_rw_sq"]
             hist_bg4b = histograms["bg4b"]
-            hist_bias_3b_rw, _ = np.histogram(SR_stats_SR[events_SR.is_3b], bins=bins,
-                                              weights=(events_SR.weights * bias_3b_rw[in_SR])[events_SR.is_3b])
+            hist_bias_3b_rw, _ = np.histogram(
+                SR_stats_SR[events_SR.is_3b],
+                bins=bins,
+                weights=(events_SR.weights * bias_3b_rw[in_SR])[events_SR.is_3b],
+            )
 
             # debiasing
             hist_3b_rw = hist_3b_rw - hist_bias_3b_rw
 
             ax = fig.add_subplot(gs[3])
             midpoints = (bins[1:] + bins[:-1]) / 2
-            err = np.sqrt(hist_bg4b / hist_3b_rw**2 +
-                          hist_3b_rw_sq * (hist_bg4b / hist_3b_rw**2)**2)
-            ax.errorbar(midpoints, hist_bg4b / hist_3b_rw, yerr=err,
-                        label="bg4b / 3b", fmt="o", markersize=3)
+            err = np.sqrt(
+                hist_bg4b / hist_3b_rw**2
+                + hist_3b_rw_sq * (hist_bg4b / hist_3b_rw**2) ** 2
+            )
+            ax.errorbar(
+                midpoints,
+                hist_bg4b / hist_3b_rw,
+                yerr=err,
+                label="bg4b / 3b",
+                fmt="o",
+                markersize=3,
+            )
             ax.hlines(1, bins[0], bins[-1], color="black", linestyle="--")
             ax.set_xlim((bins[0], bins[-1]))
             ax.set_ylim((0.75, 1.25))
             ax.set_title("SR bg4b / 3b")
             ymin, ymax = ax.get_ylim()
-            ax.vlines(bins, ymin, ymax, color="black",
-                      linestyle="--", alpha=0.5)
+            ax.vlines(bins, ymin, ymax, color="black", linestyle="--", alpha=0.5)
 
             ax2 = ax.twinx()
-            sigma = (hist_bg4b - hist_3b_rw) / \
-                np.sqrt(hist_bg4b + hist_3b_rw_sq)
+            sigma = (hist_bg4b - hist_3b_rw) / np.sqrt(hist_bg4b + hist_3b_rw_sq)
             ax2.plot(midpoints, sigma, "o-", label="sigma", color="red")
             ax2.set_ylim((-4, 4))
             ax2.set_ylabel("sigma")
-            ax2.set_title("SR sigma avg: {:.2f}".format(
-                np.sqrt(np.mean(sigma**2))))
+            ax2.set_title("SR sigma avg: {:.2f}".format(np.sqrt(np.mean(sigma**2))))
 
             plt.tight_layout()
             # plt.show()
@@ -299,17 +356,25 @@ if __name__ == "__main__":
                 bins_SR = np.quantile(SR_stats_SR, q)
                 bins_CR = np.quantile(SR_stats_CR, q)
 
-                hist_events_by_labels(
-                    events_SR_rw, SR_stats_SR, bins=bins_SR, ax=ax)
-                hist_events_by_labels(
-                    events_CR_rw, SR_stats_CR, bins=bins_CR, ax=ax2)
+                hist_events_by_labels(events_SR_rw, SR_stats_SR, bins=bins_SR, ax=ax)
+                hist_events_by_labels(events_CR_rw, SR_stats_CR, bins=bins_CR, ax=ax2)
                 ax.legend()
                 ax2.legend()
 
                 hist_info_SR = get_histogram_info(
-                    events_SR, SR_stats_SR, nbin, reweights=reweights[in_SR], bias=bias_3b_rw[in_SR])
+                    events_SR,
+                    SR_stats_SR,
+                    nbin,
+                    reweights=reweights[in_SR],
+                    bias=bias_3b_rw[in_SR],
+                )
                 hist_info_CR = get_histogram_info(
-                    events_CR, SR_stats_CR, nbin, reweights=reweights[in_CR], bias=bias_3b_rw[in_CR])
+                    events_CR,
+                    SR_stats_CR,
+                    nbin,
+                    reweights=reweights[in_CR],
+                    bias=bias_3b_rw[in_CR],
+                )
 
                 ax.set_title(f"SR Sigma avg: {hist_info_SR['sigma_avg']:.2f}")
                 ax2.set_title(f"CR Sigma avg: {hist_info_CR['sigma_avg']:.2f}")
@@ -330,9 +395,10 @@ if __name__ == "__main__":
 
                 tst_results_summary.append(tst_result)
                 tst_results_summary_df = pd.concat(
-                    [tst_results_summary_df, pd.DataFrame([tst_result])])
+                    [tst_results_summary_df, pd.DataFrame([tst_result])]
+                )
 
             # plt.show()
-            plt.close('all')
+            plt.close("all")
 
             tst_results_summary_df.to_csv(df_name, index=False, sep="\t")

@@ -18,46 +18,8 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import pathlib
 
 from utils import require_keys
-from network_blocks import AttentionClassifier, conv1d
-
-
-class FvTClassifierDataModule(pl.LightningDataModule):
-    def __init__(
-        self,
-        train_dataset,
-        val_dataset,
-        batch_size,
-        num_workers=4,
-        batch_size_milestones=[],
-        batch_size_multiplier=2,
-    ):
-        super().__init__()
-        self.train_dataset = train_dataset
-        self.val_dataset = val_dataset
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.batch_size_multiplier = batch_size_multiplier
-        self.batch_size_milestones = batch_size_milestones
-
-    def train_dataloader(self):
-        if self.trainer.current_epoch in self.batch_size_milestones:
-            self.batch_size *= self.batch_size_multiplier
-            print(f"Batch size updated to: {self.batch_size}")
-
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-        )
+from attention_classifier import AttentionClassifier
+from data_modules import FvTDataModule
 
 
 def kernel(
@@ -153,7 +115,6 @@ class FvTClassifier(pl.LightningModule):
         self.to(device)
 
     def forward(self, x: torch.Tensor):
-        n = x.shape[0]
         q = self.encoder(x)
         class_score = self.attention_classifier(q)
 
@@ -185,7 +146,7 @@ class FvTClassifier(pl.LightningModule):
         self.train_batchsizes = torch.cat(
             (self.train_batchsizes, torch.tensor(x.shape[0]).view(1))
         )
-        self.train_total_weights += w.sum()
+        self.train_total_weights += w.sum().item()
 
         return loss
 
@@ -200,7 +161,7 @@ class FvTClassifier(pl.LightningModule):
         self.val_batchsizes = torch.cat(
             (self.val_batchsizes, torch.tensor(x.shape[0]).view(1))
         )
-        self.val_total_weights += w.sum()
+        self.val_total_weights += w.sum().item()
 
         preds = torch.sigmoid(y_logits[:, 1] - y_logits[:, 0])
 
@@ -452,40 +413,40 @@ class FvTClassifier(pl.LightningModule):
             callbacks.append(early_stop_callback)
 
         if save_checkpoint:
-            # raise error if checkpoint file exists
-            checkpoint_path = pathlib.Path(
-                f"./data/checkpoints/{self.run_name}_best.ckpt"
-            )
-            if checkpoint_path.exists():
-                raise FileExistsError(f"{checkpoint_path} already exists")
-
-            checkpoint_callback = ModelCheckpoint(
-                dirpath="./data/checkpoints/",
-                filename=f"{self.run_name}_best",
-                save_top_k=1,
-                monitor="val_loss",
-                mode="min",
-            )
-            callbacks.append(checkpoint_callback)
+            delete_existing_checkpoints = False
+            checkpoint_dir = pathlib.Path(f"./data/checkpoints/")
         else:
-            print("Temporary checkpoint callback")
+            delete_existing_checkpoints = True
+            checkpoint_dir = pathlib.Path(f"./data/tmp/checkpoints/")
 
-            tmp_checkpoint_path = pathlib.Path(
-                f"./data/tmp/checkpoints/{self.run_name}_best.ckpt"
-            )
-            # delete tmp checkpoint if it exists
-            if tmp_checkpoint_path.exists():
-                print(f"Deleting existing tmp checkpoint: {tmp_checkpoint_path}")
-                os.remove(tmp_checkpoint_path)
+        for mode in ["best", "last"]:
+            ckpt_path = checkpoint_dir / f"{self.run_name}_{mode}.ckpt"
+            if ckpt_path.exists():
+                if delete_existing_checkpoints:
+                    print(f"Deleting existing checkpoint: {ckpt_path}")
+                    os.remove(ckpt_path)
+                else:
+                    raise FileExistsError(f"{ckpt_path} already exists")
 
-            tmp_checkpoint_callback = ModelCheckpoint(
-                dirpath="./data/tmp/checkpoints/",
-                filename=f"{self.run_name}_best",
-                save_top_k=1,
-                monitor="val_loss",
-                mode="min",
-            )
-            callbacks.append(tmp_checkpoint_callback)
+            filename = f"{self.run_name}_{mode}"
+            if mode == "best":
+                ckpt_callback = ModelCheckpoint(
+                    dirpath=checkpoint_dir,
+                    filename=filename,
+                    monitor="val_loss",
+                    mode="min",
+                    save_top_k=1,
+                )
+                callbacks.append(ckpt_callback)
+            elif mode == "last":
+                ckpt_callback = ModelCheckpoint(
+                    dirpath=checkpoint_dir,
+                    filename=filename,
+                    save_last=True,
+                )
+                callbacks.append(ckpt_callback)
+            else:
+                raise ValueError(f"Invalid checkpoint mode: {mode}")
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,
@@ -496,7 +457,7 @@ class FvTClassifier(pl.LightningModule):
 
         torch.autograd.set_detect_anomaly(True)
 
-        self.datamodule = FvTClassifierDataModule(
+        self.datamodule = FvTDataModule(
             train_dataset,
             val_dataset,
             dataloader_config["batch_size"],
@@ -506,50 +467,46 @@ class FvTClassifier(pl.LightningModule):
         )
         trainer.fit(self, datamodule=self.datamodule)
 
+    @torch.no_grad()
     def predict(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
         batch_size = min(2**14, x.shape[0])
-        with torch.no_grad():
-            x_dataloader = DataLoader(x, batch_size=batch_size, shuffle=False)
-            y_pred = torch.tensor([])
-            if do_tqdm:
-                x_dataloader = tqdm.tqdm(x_dataloader)
-            for batch in x_dataloader:
-                batch = batch.to(self.device)
-                logit = self(batch)
-                pred = F.softmax(logit, dim=-1)
-                if torch.isnan(pred).any():
-                    print("NaN found in prediction")
-                    print(pred)
-                    print(logit)
-                    raise ValueError("NaN found in prediction")
+        x_dataloader = DataLoader(x, batch_size=batch_size, shuffle=False)
+        y_pred = torch.tensor([])
+        if do_tqdm:
+            x_dataloader = tqdm.tqdm(x_dataloader)
+        for batch in x_dataloader:
+            batch = batch.to(self.device)
+            logit = self(batch)
+            pred = F.softmax(logit, dim=-1)
+            if torch.isnan(pred).any():
+                print("NaN found in prediction")
+                print(pred)
+                print(logit)
+                raise ValueError("NaN found in prediction")
 
-                y_pred = torch.cat((y_pred, pred.to("cpu")), dim=0)
+            y_pred = torch.cat((y_pred, pred.to("cpu")), dim=0)
 
         return y_pred
 
+    @torch.no_grad()
     def representations(
         self, x: torch.Tensor, do_tqdm=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        with torch.no_grad():
-            x_dataloader = DataLoader(
-                x, batch_size=min(2**14, x.shape[0]), shuffle=False
-            )
+        x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
 
-            x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
-            q_repr = torch.tensor([])
-            view_scores = torch.tensor([])
+        x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
+        q_repr = torch.tensor([])
+        view_scores = torch.tensor([])
 
-            for batch in x_dataloader:
-                batch = batch.to(self.device)
-                q = self.encoder(batch)
-                q_repr = torch.cat((q_repr, q.to("cpu")), dim=0)
+        for batch in x_dataloader:
+            batch = batch.to(self.device)
+            q = self.encoder(batch)
+            q_repr = torch.cat((q_repr, q.to("cpu")), dim=0)
 
-                view_scores_batch = self.select_q(q)
-                view_scores_batch = F.softmax(view_scores_batch, dim=-1)
-                view_scores = torch.cat(
-                    (view_scores, view_scores_batch.to("cpu")), dim=0
-                )
+            view_scores_batch = self.attention_classifier.select_q(q)
+            view_scores_batch = F.softmax(view_scores_batch, dim=-1)
+            view_scores = torch.cat((view_scores, view_scores_batch.to("cpu")), dim=0)
 
         return q_repr, view_scores
 

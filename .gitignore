@@ -16,3 +16,4 @@ slurm-*.out
 metadata/
 mother_samples/
 tmp/
+TrainingInfo/

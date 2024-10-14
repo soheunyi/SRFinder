@@ -6,7 +6,6 @@ import numpy as np
 import tqdm
 
 from dataset import SCDatasetInfo
-from training_info import TrainingInfoV2
 from utils import create_hash
 
 # get current directory of the file
@@ -27,8 +26,8 @@ class TSTInfo:
         SR_stats: np.ndarray,
         SR_cut: float,
         CR_cut: float,
-        base_fvt_tinfo_hash: TrainingInfoV2,
-        CR_fvt_tinfo_hash: TrainingInfoV2,
+        base_fvt_tinfo_hash: str,
+        CR_fvt_tinfo_hash: str,
     ):
         """
         Save the hparams, for two sample test.

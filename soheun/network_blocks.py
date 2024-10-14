@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+import pytorch_lightning as pl
 
 
 class Lin_View(nn.Module):
@@ -1211,24 +1212,3 @@ class ResNetBlock(nn.Module):
                 x = x + x0
                 x = NonLU(x, self.training)
         return x
-
-
-class AttentionClassifier(nn.Module):
-    def __init__(self, dim_q, num_classes, depth=1):
-        super().__init__()
-        self.dim_q = dim_q
-        self.num_classes = num_classes
-        self.depth = depth
-
-        self.select_q = ResNetBlock(self.dim_q, 1, self.depth)
-        self.out = ResNetBlock(self.dim_q, self.num_classes, self.depth)
-
-    def forward(self, q: torch.Tensor) -> torch.Tensor:
-        n = q.shape[0]
-        q_score = self.select_q(q)
-        q_score = F.softmax(q_score, dim=-1)
-        event = torch.matmul(q, q_score.transpose(1, 2))
-        event = event.view(n, self.dim_q, 1)
-        event = self.out(event)
-        event = event.view(n, self.num_classes)
-        return event

@@ -10,10 +10,11 @@ def edit_config(
     seed,
     signal_ratio,
 ):
-    config["seed"] = seed
     config["base_fvt"]["data_seed"] = seed
     config["base_fvt"]["train_seed"] = seed
-    config["signal_ratio"] = signal_ratio
+    config["base_fvt"]["model_seed"] = seed
+    config["dataset"]["seed"] = seed
+    config["dataset"]["signal_ratio"] = signal_ratio
 
     return config
 

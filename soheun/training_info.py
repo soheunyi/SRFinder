@@ -9,90 +9,27 @@ import torch
 from torch.utils.data import TensorDataset
 import tqdm
 
-from dataset import DatasetInfo, SCDatasetInfo, split_scdinfo
+from dataset import SCDatasetInfo, split_scdinfo_multiple, MotherSamples
 from utils import create_hash
 
-# get current directory of the file
-TINFO_SAVE_DIR = pathlib.Path(__file__).parent / "data/training_info"
-# check if TINFO_SAVE_DIR exists, if not, create it
+from fvt_classifier import FvTClassifier
+from attention_classifier import AttentionClassifier
+
+TINFO_SAVE_DIR = pathlib.Path(__file__).parent / "data/TrainingInfo"
 TINFO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-TINFOV2_META_DIR = pathlib.Path(__file__).parent / "data/metadata/training_info_v2.pkl"
+TINFO_META_DIR = pathlib.Path(__file__).parent / "data/metadata/TrainingInfo.pkl"
 
 
 class TrainingInfo:
     SAVE_DIR = TINFO_SAVE_DIR
+    META_DIR = TINFO_META_DIR
 
-    def __init__(self, hparams: dict, dinfo_train: DatasetInfo, dinfo_val: DatasetInfo):
-        self._hparams = hparams
-        self.dinfo_train = dinfo_train
-        self.dinfo_val = dinfo_val
-        self._hash = create_hash(TrainingInfo.SAVE_DIR)
-        self._aux_info = {}
-
-    @property
-    def hparams(self):
-        return self._hparams
-
-    @property
-    def hash(self):
-        return self._hash
-
-    @property
-    def aux_info(self):
-        return self._aux_info
-
-    def update_aux_info(self, key: str, value):
-        self._aux_info[key] = value
-
-    def save(self):
-        with open(TrainingInfo.SAVE_DIR / self.hash, "wb") as f:
-            pickle.dump(self, f)
-
-    def get_training_data(self):
-        return self.dinfo_train.fetch_data(), self.dinfo_val.fetch_data()
-
-    @staticmethod
-    def load(hash: str) -> TrainingInfo:
-        with open(TrainingInfo.SAVE_DIR / hash, "rb") as f:
-            return pickle.load(f)
-
-    @staticmethod
-    def get_existing_hparams():
-        _, hparams = TrainingInfo.find({}, return_hparams=True)
-        return hparams
-
-    @staticmethod
-    def find(hparam_filter: dict, return_hparams=False):
-        hashes = []
-        for file in tqdm.tqdm(TrainingInfo.SAVE_DIR.glob("*")):
-            tinfo = TrainingInfo.load(file)
-            is_match = True
-            for key, value in hparam_filter.items():
-                if callable(value):
-                    if not value(tinfo.hparams.get(key)):
-                        is_match = False
-                        break
-                elif tinfo.hparams.get(key) != value:
-                    is_match = False
-                    break
-            if is_match:
-                if return_hparams:
-                    hashes.append((tinfo.hash, tinfo.hparams))
-                else:
-                    hashes.append(tinfo.hash)
-
-        if return_hparams:
-            hashes, hparams = zip(*hashes)
-            return hashes, hparams
-        else:
-            return hashes
-
-
-class TrainingInfoV2:
-    SAVE_DIR = TINFO_SAVE_DIR
-    META_DIR = TINFOV2_META_DIR
-
-    def __init__(self, hparams: dict, scdinfo: SCDatasetInfo):
+    def __init__(
+        self,
+        hparams: dict,
+        ms_hash: str,
+        ms_idx: np.ndarray[bool],
+    ):
         """
         Save the hparams, scdinfo, and seed for training models.
         hparams must include val_ratio, data_seed (for reproducing train/val data),
@@ -100,17 +37,46 @@ class TrainingInfoV2:
         self._hparams = hparams
         assert "data_seed" in hparams
         assert "val_ratio" in hparams
+        assert "model" in hparams
+
         self.data_seed = hparams["data_seed"]
         self.val_ratio = hparams["val_ratio"]
-        self.scdinfo = scdinfo
-        self._hash = create_hash(TrainingInfoV2.SAVE_DIR)
+        self.model = hparams["model"]
+
+        self._ms_hash = ms_hash
+        self._ms_idx = ms_idx
+
+        self._hash = create_hash(TrainingInfo.SAVE_DIR)
         self._aux_info = {}
+
+    def load_trained_model(self, mode: str) -> torch.nn.Module:
+        assert self.model in ["FvTClassifier", "AttentionClassifier"]
+        assert mode in ["best", "last"]
+
+        ckpt_dir = pathlib.Path(__file__).parent / "data/checkpoints"
+        name = f"{self._hash}_{mode}.ckpt"
+
+        if self.model == "FvTClassifier":
+            return FvTClassifier.load_from_checkpoint(ckpt_dir / name)
+        elif self.model == "AttentionClassifier":
+            return AttentionClassifier.load_from_checkpoint(ckpt_dir / name)
+        else:
+            raise ValueError(f"Model {self.model} not found")
+
+    @property
+    def scdinfo(self) -> SCDatasetInfo:
+        mother_samples = MotherSamples.load(self._ms_hash)
+        return mother_samples.scdinfo[self._ms_idx]
 
     def fetch_train_val_scdinfo(self) -> tuple[SCDatasetInfo, SCDatasetInfo]:
         """
         Return the training and validation scdinfo.
         """
-        return split_scdinfo(self.scdinfo, 1 - self.val_ratio, self.data_seed)
+
+        scdinfo_train, scdinfo_val = split_scdinfo_multiple(
+            self.scdinfo, [1 - self.val_ratio, self.val_ratio], self.data_seed
+        )
+        return scdinfo_train, scdinfo_val
 
     def fetch_train_val_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -129,14 +95,12 @@ class TrainingInfoV2:
             drop=True
         )
 
-        fit_batch_size = self.hparams.get("fit_batch_size", False)
-        if fit_batch_size:
-            assert (
-                "batch_size" in self.hparams
-            ), "batch_size must be in hparams if fit_batch_size is True"
-            batch_size = self.hparams["batch_size"]
-            df_train = df_train.iloc[: (len(df_train) // batch_size) * batch_size]
-            df_val = df_val.iloc[: (len(df_val) // batch_size) * batch_size]
+        fit_batch_size = self.hparams.get("fit_batch_size", 0)
+        if fit_batch_size > 0:
+            df_train = df_train.iloc[
+                : (len(df_train) // fit_batch_size) * fit_batch_size
+            ]
+            df_val = df_val.iloc[: (len(df_val) // fit_batch_size) * fit_batch_size]
 
         return df_train, df_val
 
@@ -182,28 +146,28 @@ class TrainingInfoV2:
 
     def save(self):
         print(f"Saving Training Info: {self.hash}")
-        with open(TrainingInfoV2.SAVE_DIR / self.hash, "wb") as f:
+        with open(TrainingInfo.SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 
     @staticmethod
-    def load(hash: str) -> TrainingInfoV2:
-        with open(TrainingInfoV2.SAVE_DIR / hash, "rb") as f:
+    def load(hash: str) -> TrainingInfo:
+        with open(TrainingInfo.SAVE_DIR / hash, "rb") as f:
             return pickle.load(f)
 
     @staticmethod
     def get_existing_hparams():
-        _, hparams = TrainingInfoV2.find({}, return_hparams=True)
+        _, hparams = TrainingInfo.find({}, return_hparams=True)
         return hparams
 
     @staticmethod
     def load_metadata() -> dict[str, dict]:
-        with open(TrainingInfoV2.META_DIR, "rb") as f:
+        with open(TrainingInfo.META_DIR, "rb") as f:
             return pickle.load(f)
 
     @staticmethod
     def update_metadata():
-        with open(TrainingInfoV2.META_DIR, "wb") as f:
-            hashes, hparams = TrainingInfoV2.find(
+        with open(TrainingInfo.META_DIR, "wb") as f:
+            hashes, hparams = TrainingInfo.find(
                 {}, return_hparams=True, from_metadata=False
             )
             pickle.dump(dict(zip(hashes, hparams)), f)
@@ -227,13 +191,13 @@ class TrainingInfoV2:
 
         hash_hparams = []
         if from_metadata:
-            all_hash_hparams = TrainingInfoV2.load_metadata()
+            all_hash_hparams = TrainingInfo.load_metadata()
             for hash_, hparams in all_hash_hparams.items():
                 if is_match(hparams):
                     hash_hparams.append((hash_, hparams))
         else:
-            for file in tqdm.tqdm(TrainingInfoV2.SAVE_DIR.glob("*")):
-                tinfo = TrainingInfoV2.load(file)
+            for file in tqdm.tqdm(TrainingInfo.SAVE_DIR.glob("*")):
+                tinfo = TrainingInfo.load(file)
                 if is_match(tinfo.hparams):
                     hash_hparams.append((tinfo.hash, tinfo.hparams))
 
