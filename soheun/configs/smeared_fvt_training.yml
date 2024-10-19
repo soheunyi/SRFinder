@@ -1,0 +1,37 @@
+experiment_name: smeared_fvt_training
+dataset:
+  signal_filename: HH4b_picoAOD.h5
+  signal_ratio: 0.0
+  n_3b: 100_0000
+  ratio_4b: 0.5
+  seed: 0
+smearing:
+  noise_scale: 1.0
+  seed: 0
+  hard_cutoff: False
+  scale_mode: std
+smeared_fvt:
+  model: AttentionClassifier
+  depth: 8
+  fit_batch_size: 1024
+  model_seed: 0
+  train_seed: 0 
+  data_seed: 0
+  max_epochs: 30
+  val_ratio: 0.33
+  early_stop_patience: null
+  optimizer:
+    type: Adam
+    lr: 0.01
+  lr_scheduler:
+    type: ReduceLROnPlateau
+    factor: 0.25
+    threshold: 0.0001
+    patience: 3
+    cooldown: 1
+    min_lr: 0.0002
+  dataloader:
+    batch_size: 1024
+    batch_size_multiplier: 2
+    batch_size_milestones: [1, 3, 6, 10, 15]
+  encoder_mode: best

@@ -117,7 +117,8 @@ def routine(config: dict):
         "ratio_4b": config["ratio_4b"],
         "signal_filename": config["signal_filename"],
         "seed": config["seed"],
-        "experiment_name": lambda x: x in ["counting_test_v1", "counting_test_high_4b_in_CR"],
+        "experiment_name": lambda x: x
+        in ["counting_test_v1", "counting_test_high_4b_in_CR"],
     }
     hashes = TSTInfo.find(hparam_filter)
     # assert len(hashes) == 1
@@ -137,10 +138,10 @@ def routine(config: dict):
     is_4b = events_tst.is_4b[SR_stats_argsort]
     cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
 
-    w_4b_SR_ratio = np.clip(
-        SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
+    w_4b_SR_ratio = np.clip(SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
     w_4b_CR_ratio = np.clip(
-        SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
+        SRCR_hparams["4b_in_CR"] + SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX
+    )
 
     SR_cut, CR_cut = None, None
     for i in range(1, len(cumul_4b_ratio)):
@@ -197,11 +198,9 @@ def routine(config: dict):
     CR_fvt_model.eval()
 
     cond_prob_4b_est = (
-        CR_fvt_model.predict(events_tst_SR.X_torch)[
-            :, 1].detach().cpu().numpy()
+        CR_fvt_model.predict(events_tst_SR.X_torch)[:, 1].detach().cpu().numpy()
     )
-    reweights = ratio_4b * cond_prob_4b_est / \
-        ((1 - ratio_4b) * (1 - cond_prob_4b_est))
+    reweights = ratio_4b * cond_prob_4b_est / ((1 - ratio_4b) * (1 - cond_prob_4b_est))
     events_tst_SR.reweight(
         np.where(
             events_tst_SR.is_4b,

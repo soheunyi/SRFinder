@@ -1,3 +1,4 @@
+import os
 import pathlib
 import torch
 import torch.nn.functional as F
@@ -27,6 +28,8 @@ class AttentionClassifier(pl.LightningModule):
         self.num_classes = num_classes
         self.depth = depth
         self.run_name = run_name
+
+        self.save_hyperparameters()
 
         self.select_q = ResNetBlock(self.dim_q, 1, self.depth)
         self.out = ResNetBlock(self.dim_q, self.num_classes, self.depth)
@@ -226,6 +229,49 @@ class AttentionClassifier(pl.LightningModule):
         tb_log_dir = pathlib.Path(f"./tb_logs/{tb_log_dir}")
         tb_log_dir.mkdir(parents=True, exist_ok=True)
         logger = TensorBoardLogger(tb_log_dir, name=self.run_name)
+
+        progress_bar = TQDMProgressBar(
+            refresh_rate=max(
+                1, (len(train_dataset) // dataloader_config["batch_size"]) // 10
+            )
+        )
+        callbacks = callbacks + [progress_bar]
+
+        if save_checkpoint:
+            delete_existing_checkpoints = False
+            checkpoint_dir = pathlib.Path(f"./data/checkpoints/")
+        else:
+            delete_existing_checkpoints = True
+            checkpoint_dir = pathlib.Path(f"./data/tmp/checkpoints/")
+
+        for mode in ["best", "last"]:
+            ckpt_path = checkpoint_dir / f"{self.run_name}_{mode}.ckpt"
+            if ckpt_path.exists():
+                if delete_existing_checkpoints:
+                    print(f"Deleting existing checkpoint: {ckpt_path}")
+                    os.remove(ckpt_path)
+                else:
+                    raise FileExistsError(f"{ckpt_path} already exists")
+
+            filename = f"{self.run_name}_{mode}"
+            if mode == "best":
+                ckpt_callback = ModelCheckpoint(
+                    dirpath=checkpoint_dir,
+                    filename=filename,
+                    monitor="val_loss",
+                    mode="min",
+                    save_top_k=1,
+                )
+                callbacks.append(ckpt_callback)
+            elif mode == "last":
+                ckpt_callback = ModelCheckpoint(
+                    dirpath=checkpoint_dir,
+                    filename=filename,
+                    save_last=True,
+                )
+                callbacks.append(ckpt_callback)
+            else:
+                raise ValueError(f"Invalid checkpoint mode: {mode}")
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,

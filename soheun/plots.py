@@ -597,8 +597,26 @@ def plot_reweighted_samples(
     ax: plt.Axes,
     **plot_kwargs,
 ):
-    assert len(events) == len(hist_values) == len(reweights)
+    is_4b = events.is_4b
+    weights = events.weights
+    plot_reweighted_samples_raw(
+        is_4b, weights, hist_values, reweights, ax, **plot_kwargs
+    )
+
+
+def plot_reweighted_samples_raw(
+    is_4b: np.ndarray,
+    weights: np.ndarray,
+    hist_values: np.ndarray,
+    reweights: np.ndarray,
+    ax: plt.Axes,
+    **plot_kwargs,
+):
+    assert len(is_4b) == len(weights) == len(hist_values) == len(reweights)
     assert ax is not None
+
+    if is_4b.dtype != np.bool_:
+        is_4b = is_4b.astype(np.bool_)
 
     bins = plot_kwargs.get("bins", 20)
     mode = plot_kwargs.get("mode", "uniform")
@@ -613,27 +631,27 @@ def plot_reweighted_samples(
         else:
             raise ValueError(f"Invalid mode: {mode}")
 
-    rw = reweights * events.weights
-    rw_sq = reweights**2 * events.weights
+    rw = reweights * weights
+    rw_sq = reweights**2 * weights
     hist_3b, _ = np.histogram(
-        hist_values[events.is_3b],
+        hist_values[~is_4b],
         bins=bins,
-        weights=rw[events.is_3b],
+        weights=rw[~is_4b],
     )
     hist_3b_sq, _ = np.histogram(
-        hist_values[events.is_3b],
+        hist_values[~is_4b],
         bins=bins,
-        weights=rw_sq[events.is_3b],
+        weights=rw_sq[~is_4b],
     )
     hist_4b, _ = np.histogram(
-        hist_values[events.is_4b],
+        hist_values[is_4b],
         bins=bins,
-        weights=rw[events.is_4b],
+        weights=rw[is_4b],
     )
     hist_4b_sq, _ = np.histogram(
-        hist_values[events.is_4b],
+        hist_values[is_4b],
         bins=bins,
-        weights=rw_sq[events.is_4b],
+        weights=rw_sq[is_4b],
     )
 
     midpoints = (bins[:-1] + bins[1:]) / 2
@@ -672,20 +690,15 @@ def plot_reweighted_samples(
 
 
 def plot_rewighted_samples_by_model(
-    pl_module: pl.LightningModule,
     events: EventsData,
+    x_values: np.ndarray,
+    fvt_scores: np.ndarray,
     ax=None,
-    x_values=None,
     **plot_kwargs,
 ):
-    pl_module.eval()
-    pl_module.to("cuda")
-    fvt_scores = pl_module.predict(events.X_torch).detach().cpu().numpy()[:, 1]
     ratio_4b = plot_kwargs.get("ratio_4b", 0.5)
     reweights = (fvt_scores / (1 - fvt_scores)) * ratio_4b / (1 - ratio_4b)
     reweights = np.where(events.is_4b, 1, reweights)
-    if x_values is None:
-        x_values = fvt_scores
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=plot_kwargs.get("figsize", (8, 6)))
         fig.suptitle(plot_kwargs.get("title", ""))

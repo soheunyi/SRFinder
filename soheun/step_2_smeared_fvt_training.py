@@ -7,8 +7,7 @@ import click
 import yaml
 
 
-from fvt_classifier import FvTClassifier
-from dataset import MotherSamples
+from attention_classifier import AttentionClassifier
 from training_info import TrainingInfo
 from utils import require_keys
 
@@ -36,7 +35,8 @@ def routine(config: dict):
         [
             "experiment_name",
             "dataset",
-            "base_fvt",
+            "smearing",
+            "smeared_fvt",
         ],
     )
     require_keys(
@@ -47,15 +47,21 @@ def routine(config: dict):
             "n_3b",
             "ratio_4b",
             "seed",
-            "base_fvt_train_ratio",
         ],
     )
     require_keys(
-        config["base_fvt"],
+        config["smearing"],
+        [
+            "noise_scale",
+            "seed",
+            "hard_cutoff",
+            "scale_mode",
+        ],
+    )
+    require_keys(
+        config["smeared_fvt"],
         [
             "model",
-            "dim_dijet_features",
-            "dim_quadjet_features",
             "depth",
             "fit_batch_size",
             "model_seed",
@@ -67,15 +73,16 @@ def routine(config: dict):
             "optimizer",
             "lr_scheduler",
             "dataloader",
+            "encoder_mode",
         ],
     )
-    require_keys(config["base_fvt"]["optimizer"], ["type", "lr"])
+    require_keys(config["smeared_fvt"]["optimizer"], ["type", "lr"])
     require_keys(
-        config["base_fvt"]["lr_scheduler"],
+        config["smeared_fvt"]["lr_scheduler"],
         ["type", "factor", "threshold", "patience", "cooldown", "min_lr"],
     )
     require_keys(
-        config["base_fvt"]["dataloader"],
+        config["smeared_fvt"]["dataloader"],
         ["batch_size", "batch_size_multiplier", "batch_size_milestones"],
     )
 
@@ -84,11 +91,11 @@ def routine(config: dict):
     ratio_4b = config["dataset"]["ratio_4b"]
     signal_filename = config["dataset"]["signal_filename"]
     seed = config["dataset"]["seed"]
-    base_fvt_train_ratio = config["dataset"]["base_fvt_train_ratio"]
 
-    base_fvt_hparams = deepcopy(config["base_fvt"])
-    base_fvt_hparams["experiment_name"] = config["experiment_name"]
-    base_fvt_hparams["dataset"] = config["dataset"]
+    smeared_fvt_hparams = deepcopy(config["smeared_fvt"])
+    smeared_fvt_hparams["experiment_name"] = config["experiment_name"]
+    smeared_fvt_hparams["dataset"] = config["dataset"]
+    smeared_fvt_hparams["smearing"] = config["smearing"]
 
     # Define features
     features = [
@@ -110,66 +117,67 @@ def routine(config: dict):
         "sym_Jet3_m",
     ]
 
-    # Unchangeable configurations
-    dim_input_jet_features = 4
-    num_classes = 2
+    # 1. Find and load encoder
+    hashes = TrainingInfo.find(
+        {
+            "dataset": lambda x: (
+                x["n_3b"] == n_3b
+                and x["ratio_4b"] == ratio_4b
+                and x["signal_ratio"] == signal_ratio
+                and x["signal_filename"] == signal_filename
+                and x["seed"] == seed
+            ),
+        }
+    )
+    assert len(hashes) == 1, "Number of training info must be one"
+    base_fvt_tinfo = TrainingInfo.load(hashes[0])
+    smeared_fvt_hparams["encoder_hash"] = base_fvt_tinfo.hash
 
-    # 1. Find and load the mother dataset
-    ms_hparams = {
-        "n_3b": n_3b,
-        "ratio_4b": ratio_4b,
-        "signal_ratio": signal_ratio,
-        "signal_filename": signal_filename,
-        "seed": seed,
-    }
-    hashes = MotherSamples.find(ms_hparams)
-    assert len(hashes) == 1, "Number of mother samples must be one"
-    ms_hash = hashes[0]
-    mother_samples = MotherSamples.load(ms_hash)
-
-    # 2. Split the mother dataset into train and test
-    # Train -- validation split will be done by TrainingInfoV2
-
-    ms_len = len(mother_samples.scdinfo)
-    ms_idx = np.zeros(ms_len, dtype=bool)
-    ms_idx[: int(ms_len * base_fvt_train_ratio)] = True
-    np.random.seed(seed)
-    np.random.shuffle(ms_idx)
-
-    base_fvt_tinfo = TrainingInfo(base_fvt_hparams, ms_hash=ms_hash, ms_idx=ms_idx)
-    print("Base FvT Training Hash: ", base_fvt_tinfo.hash)
-
-    base_fvt_train_dset, base_fvt_val_dset = (
-        base_fvt_tinfo.fetch_train_val_tensor_datasets(features, "fourTag", "weight")
+    # Shares the same training + val samples
+    smeared_fvt_tinfo = TrainingInfo(
+        smeared_fvt_hparams,
+        ms_hash=base_fvt_tinfo.ms_hash,
+        ms_idx=base_fvt_tinfo.ms_idx,
     )
 
-    model_seed = base_fvt_hparams["model_seed"]
-    pl.seed_everything(model_seed)
-    base_fvt_model = FvTClassifier(
-        num_classes,
-        dim_input_jet_features,
-        base_fvt_hparams["dim_dijet_features"],
-        base_fvt_hparams["dim_quadjet_features"],
-        run_name=base_fvt_tinfo.hash,
-        device=torch.device("cuda:0"),
-        depth=base_fvt_hparams["depth"],
+    smeared_fvt_train_dset, smeared_fvt_val_dset = (
+        smeared_fvt_tinfo.fetch_train_val_smeared_features(
+            features,
+            label="fourTag",
+            weight="weight",
+            label_dtype=torch.long,
+        )
+    )
+    dim_q = smeared_fvt_train_dset.tensors[0].shape[1]
+    print(f"dim_q: {dim_q}")
+    print(f"Shape of smeared_fvt_train_dset: {smeared_fvt_train_dset.tensors[0].shape}")
+    pl.seed_everything(smeared_fvt_hparams["model_seed"])
+    smeared_fvt_model = AttentionClassifier(
+        dim_q=dim_q,
+        num_classes=2,
+        run_name=smeared_fvt_tinfo.hash,
+        depth=smeared_fvt_hparams["depth"],
     )
 
-    base_fvt_model.fit(
-        base_fvt_train_dset,
-        base_fvt_val_dset,
-        max_epochs=base_fvt_hparams["max_epochs"],
-        train_seed=base_fvt_hparams["train_seed"],
+    smeared_fvt_model.fit(
+        smeared_fvt_train_dset,
+        smeared_fvt_val_dset,
+        max_epochs=smeared_fvt_hparams["max_epochs"],
+        train_seed=smeared_fvt_hparams["train_seed"],
         save_checkpoint=True,
         callbacks=[],
         tb_log_dir="_".join([config["experiment_name"], str(signal_ratio)]),
-        optimizer_config=base_fvt_hparams["optimizer"],
-        lr_scheduler_config=base_fvt_hparams["lr_scheduler"],
-        early_stop_patience=base_fvt_hparams["early_stop_patience"],
-        dataloader_config=base_fvt_hparams["dataloader"],
+        optimizer_config=smeared_fvt_hparams["optimizer"],
+        lr_scheduler_config=smeared_fvt_hparams["lr_scheduler"],
+        early_stop_patience=smeared_fvt_hparams["early_stop_patience"],
+        dataloader_config=smeared_fvt_hparams["dataloader"],
     )
 
-    base_fvt_tinfo.save()
+    smeared_fvt_tinfo.update_aux_info(
+        description=f"Step 2: smeared_FvT_based_on_{smeared_fvt_tinfo.hparams['encoder_hash']}",
+        step=2,
+    )
+    smeared_fvt_tinfo.save()
     TrainingInfo.update_metadata()
 
 

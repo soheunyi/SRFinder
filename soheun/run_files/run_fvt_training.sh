@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition phil_condo
+#SBATCH --partition statds
 #SBATCH --ntasks 1
 
 # number of CPUs and amount of memory you need:
@@ -18,15 +18,19 @@
 
 ## Choose one:
 
-CONFIG_FILENAME="better_fvt_training.yml"
-RUN_FILENAME="run_fvt_training.py"
 CONDA_ENV_NAME="coffea_torch"
+
+# CONFIG_FILENAME="smeared_fvt_training.yml"
+# RUN_FILENAME="run_step_2_smeared_fvt_training.py"
+CONFIG_FILENAME="better_fvt_training.yml"
+RUN_FILENAME="run_step_1_base_fvt_training.py"
+
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 
-SEED_START=10
-SEED_END=20
-SIGNAL_RATIO=0.0
+SEED_START=50
+SEED_END=60
+SIGNAL_RATIO=0.02
 
 # to run a Python script in a Conda environment called ENV
 cd ..
