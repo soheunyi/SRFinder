@@ -122,7 +122,10 @@ def routine(config: dict):
         "signal_filename": signal_filename,
         "seed": seed,
     }
-    hashes = MotherSamples.find(ms_hparams)
+    hashes = MotherSamples.find(ms_hparams, from_metadata=False)
+    if len(hashes) == 0:
+        MotherSamples.from_hparams(ms_hparams).save()
+        hashes = MotherSamples.find(ms_hparams, from_metadata=False)
     assert len(hashes) == 1, "Number of mother samples must be one"
     ms_hash = hashes[0]
     mother_samples = MotherSamples.load(ms_hash)

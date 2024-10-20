@@ -37,6 +37,7 @@ def routine(config: dict):
             "dataset",
             "smearing",
             "smeared_fvt",
+            "base_experiment_name",
         ],
     )
     require_keys(
@@ -73,7 +74,6 @@ def routine(config: dict):
             "optimizer",
             "lr_scheduler",
             "dataloader",
-            "encoder_mode",
         ],
     )
     require_keys(config["smeared_fvt"]["optimizer"], ["type", "lr"])
@@ -127,6 +127,9 @@ def routine(config: dict):
                 and x["signal_filename"] == signal_filename
                 and x["seed"] == seed
             ),
+            "aux_info_step": 1,
+            "model": "FvTClassifier",
+            "experiment_name": config["base_experiment_name"],
         }
     )
     assert len(hashes) == 1, "Number of training info must be one"

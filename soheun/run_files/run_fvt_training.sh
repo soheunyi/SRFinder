@@ -10,7 +10,7 @@
 #SBATCH --gres=gpu:1
 
 # maximum time limit for task (up to 48 hours, 48:00:00)
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 
 # email you when job is finished:
 #SBATCH --mail-user=no.reply@gmail.com
@@ -20,17 +20,26 @@
 
 CONDA_ENV_NAME="coffea_torch"
 
-# CONFIG_FILENAME="smeared_fvt_training.yml"
-# RUN_FILENAME="run_step_2_smeared_fvt_training.py"
-CONFIG_FILENAME="better_fvt_training.yml"
-RUN_FILENAME="run_step_1_base_fvt_training.py"
+# # To run Step 1:
+# CONFIG_FILENAME="better_fvt_training.yml"
+# CONFIG_FILENAME="better_fvt_training_small.yml"
+# RUN_FILENAME="run_step_1_base_fvt_training.py"
 
+# # To run Step 2:
+CONFIG_FILENAME="smeared_fvt_training_small.yml"
+RUN_FILENAME="run_step_2_smeared_fvt_training.py"
+
+# # To run Step 3:
+# CONFIG_FILENAME="CR_fvt_training_repr.yml"
+# CONFIG_FILENAME="CR_fvt_training_original_features.yml"
+# CONFIG_FILENAME="CR_fvt_training_schedulefree.yml"
+# RUN_FILENAME="run_step_3_define_CR_and_train_fvt.py"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 
-SEED_START=50
-SEED_END=60
-SIGNAL_RATIO=0.02
+SEED_START=0
+SEED_END=10
+SIGNAL_RATIO=0.0
 
 # to run a Python script in a Conda environment called ENV
 cd ..

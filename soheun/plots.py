@@ -599,20 +599,17 @@ def plot_reweighted_samples(
 ):
     is_4b = events.is_4b
     weights = events.weights
-    plot_reweighted_samples_raw(
-        is_4b, weights, hist_values, reweights, ax, **plot_kwargs
-    )
+    plot_samples_raw(is_4b, reweights * weights, hist_values, ax, **plot_kwargs)
 
 
-def plot_reweighted_samples_raw(
+def plot_samples_raw(
     is_4b: np.ndarray,
     weights: np.ndarray,
     hist_values: np.ndarray,
-    reweights: np.ndarray,
     ax: plt.Axes,
     **plot_kwargs,
 ):
-    assert len(is_4b) == len(weights) == len(hist_values) == len(reweights)
+    assert len(is_4b) == len(weights) == len(hist_values)
     assert ax is not None
 
     if is_4b.dtype != np.bool_:
@@ -631,8 +628,8 @@ def plot_reweighted_samples_raw(
         else:
             raise ValueError(f"Invalid mode: {mode}")
 
-    rw = reweights * weights
-    rw_sq = reweights**2 * weights
+    rw = weights
+    rw_sq = weights**2
     hist_3b, _ = np.histogram(
         hist_values[~is_4b],
         bins=bins,

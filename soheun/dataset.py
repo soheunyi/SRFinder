@@ -165,6 +165,27 @@ class SCDatasetInfo:
 
         return df
 
+    def fetch_data_with_loaded_df(
+        self, raw_df_list: list[pd.DataFrame]
+    ) -> pd.DataFrame:
+        assert len(raw_df_list) == len(self.files)
+        assert all(
+            [
+                len(df_raw) == len(inner_idx)
+                for df_raw, inner_idx in zip(raw_df_list, self.inner_idxs)
+            ]
+        )
+        df_list = []
+        for df_raw, inner_idx in zip(raw_df_list, self.inner_idxs):
+            if np.sum(inner_idx) == 0:
+                continue
+
+            df_list.append(df_raw[inner_idx])
+
+        df = pd.concat(df_list).reset_index(drop=True)
+
+        return df
+
     def to_dataset_info(
         self, overwrite_features: dict[str, np.ndarray] = {}
     ) -> DatasetInfo:

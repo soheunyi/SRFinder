@@ -2,6 +2,7 @@
 
 
 import torch
+import tqdm
 
 
 def PtEtaPhiM_to_E(Pt, Eta, _Phi, m):
@@ -26,8 +27,7 @@ def get_M01(
         + 2
         * (
             E0 * E1
-            - Pt0 * Pt1 * (torch.cos(Phi0 - Phi1) +
-                           torch.sinh(Eta0) * torch.sinh(Eta1))
+            - Pt0 * Pt1 * (torch.cos(Phi0 - Phi1) + torch.sinh(Eta0) * torch.sinh(Eta1))
         )
     ) ** 0.5
 
@@ -160,8 +160,7 @@ def get_ancillary_features(J: torch.Tensor):
     # J is a tensor of shape (batch, 4 * 4)
     nj_features = 4
     J = J.view(-1, nj_features, 4)
-    jet0, jet1, jet2, jet3 = J[:, :, 0:1], J[:,
-                                             :, 1:2], J[:, :, 2:3], J[:, :, 3:4]
+    jet0, jet1, jet2, jet3 = J[:, :, 0:1], J[:, :, 1:2], J[:, :, 2:3], J[:, :, 3:4]
 
     # augmented jet features
     augmented_jet_features = torch.cat(
@@ -235,3 +234,65 @@ def get_m4j(X):
     dijet1 = LorentzSum(jet10, jet11, dim=2)
     quadjet = LorentzSum(dijet0, dijet1, dim=2)
     return quadjet[:, 3].cpu().numpy()
+
+
+@torch.no_grad()
+def get_dijet_ms(J: torch.Tensor):
+    nj_features = 4
+
+    J = J.view(-1, nj_features, 4)
+    jet0, jet1, jet2, jet3 = J[:, :, 0:1], J[:, :, 1:2], J[:, :, 2:3], J[:, :, 3:4]
+
+    dijet01, dijet23, dijet02, dijet13, dijet03, dijet12 = jets_to_dijets(
+        jet0, jet1, jet2, jet3
+    )
+
+    m01, m23, m02, m13, m03, m12 = (
+        dijet01[:, 3:4, :],
+        dijet23[:, 3:4, :],
+        dijet02[:, 3:4, :],
+        dijet13[:, 3:4, :],
+        dijet03[:, 3:4, :],
+        dijet12[:, 3:4, :],
+    )
+
+    return m01, m23, m02, m13, m03, m12
+
+
+@torch.no_grad()
+def get_closest_dijet_masses(J: torch.Tensor, n_chunks=1, do_tqdm=False):
+    dm_0 = torch.tensor([], device=J.device)
+    dm_1 = torch.tensor([], device=J.device)
+    chunk_size = J.shape[0] // n_chunks
+    for i in tqdm.tqdm(range(n_chunks), disable=not do_tqdm):
+        J_part = J[i * chunk_size : (i + 1) * chunk_size]
+        m01, m23, m02, m13, m03, m12 = get_dijet_ms(J_part)
+        m01, m23, m02, m13, m03, m12 = (
+            m01.reshape(-1),
+            m23.reshape(-1),
+            m02.reshape(-1),
+            m13.reshape(-1),
+            m03.reshape(-1),
+            m12.reshape(-1),
+        )
+        m_diff_v1 = torch.abs(m01 - m23)
+        m_diff_v2 = torch.abs(m02 - m13)
+        m_diff_v3 = torch.abs(m03 - m12)
+
+        m_closest_idx = torch.argmin(
+            torch.stack([m_diff_v1, m_diff_v2, m_diff_v3], dim=1), dim=1
+        )
+
+        dm_0_new = torch.zeros(J_part.shape[0], device=J.device)
+        dm_1_new = torch.zeros(J_part.shape[0], device=J.device)
+
+        dm_0_new[m_closest_idx == 0] = m01[m_closest_idx == 0]
+        dm_1_new[m_closest_idx == 0] = m23[m_closest_idx == 0]
+        dm_0_new[m_closest_idx == 1] = m02[m_closest_idx == 1]
+        dm_1_new[m_closest_idx == 1] = m13[m_closest_idx == 1]
+        dm_0_new[m_closest_idx == 2] = m03[m_closest_idx == 2]
+        dm_1_new[m_closest_idx == 2] = m12[m_closest_idx == 2]
+
+        dm_0 = torch.cat([dm_0, dm_0_new])
+        dm_1 = torch.cat([dm_1, dm_1_new])
+    return dm_0, dm_1

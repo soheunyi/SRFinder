@@ -2,6 +2,7 @@ from __future__ import annotations
 from copy import deepcopy
 import pathlib
 import pickle
+import time
 from typing import Iterable
 
 import numpy as np
@@ -54,7 +55,7 @@ class TrainingInfo:
         self._ms_hash = ms_hash
         self._ms_idx = ms_idx
 
-        self._hash = create_hash(TrainingInfo.SAVE_DIR)
+        self._hash = create_hash(self.SAVE_DIR)
         self._aux_info = {}
 
     def load_trained_model(self, mode: str) -> torch.nn.Module:
@@ -78,7 +79,7 @@ class TrainingInfo:
     @property
     def base_fvt_model(self) -> FvTClassifier:
         require_keys(self.hparams, ["encoder_hash", "encoder_mode"])
-        encoder_tinfo = TrainingInfo.load(self.hparams["encoder_hash"])
+        encoder_tinfo = self.load(self.hparams["encoder_hash"])
         base_fvt_model = encoder_tinfo.load_trained_model(self.hparams["encoder_mode"])
         base_fvt_model.eval()
         return base_fvt_model
@@ -253,34 +254,50 @@ class TrainingInfo:
 
     def save(self):
         print(f"Saving Training Info: {self.hash}")
-        with open(TrainingInfo.SAVE_DIR / self.hash, "wb") as f:
+        with open(self.SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 
-    @staticmethod
-    def load(hash: str) -> TrainingInfo:
-        with open(TrainingInfo.SAVE_DIR / hash, "rb") as f:
+    @classmethod
+    def load(cls, hash: str) -> TrainingInfo:
+        with open(cls.SAVE_DIR / hash, "rb") as f:
             return pickle.load(f)
 
-    @staticmethod
-    def get_existing_hparams():
-        _, hparams = TrainingInfo.find({}, return_hparams=True)
+    @classmethod
+    def get_existing_hparams(cls):
+        _, hparams = cls.find({}, return_hparams=True)
         return hparams
 
-    @staticmethod
-    def load_metadata() -> dict[str, dict]:
-        with open(TrainingInfo.META_DIR, "rb") as f:
-            return pickle.load(f)
+    @classmethod
+    def load_metadata(cls):
+        retry = 0
+        while retry < 5:
+            try:
+                with open(cls.META_DIR, "rb") as f:
+                    return pickle.load(f)
+            except (EOFError, pickle.UnpicklingError):
+                # Handle corrupted pickle file
+                print(
+                    f"Warning: Metadata file at {cls.META_DIR} appears to be corrupted. Retrying..."
+                )
+                retry += 1
+            except FileNotFoundError:
+                # Handle missing file
+                print(f"Warning: No metadata file found at {cls.META_DIR}. Retrying...")
+                retry += 1
+            # wait for 5 seconds
+            time.sleep(5)
+        print(f"Failed to load metadata file after {retry} retries.")
+        return {}
 
-    @staticmethod
-    def update_metadata():
-        with open(TrainingInfo.META_DIR, "wb") as f:
-            hashes, hparams = TrainingInfo.find(
-                {}, return_hparams=True, from_metadata=False
-            )
+    @classmethod
+    def update_metadata(cls):
+        with open(cls.META_DIR, "wb") as f:
+            hashes, hparams = cls.find({}, return_hparams=True, from_metadata=False)
             pickle.dump(dict(zip(hashes, hparams)), f)
 
-    @staticmethod
+    @classmethod
     def find(
+        cls,
         hparam_filter: dict[str, any],
         return_hparams=False,
         sort_by: list[str] = [],
@@ -298,13 +315,13 @@ class TrainingInfo:
 
         hash_hparams = []
         if from_metadata:
-            all_hash_hparams = TrainingInfo.load_metadata()
+            all_hash_hparams = cls.load_metadata()
             for hash_, hparams in all_hash_hparams.items():
                 if is_match(hparams):
                     hash_hparams.append((hash_, hparams))
         else:
-            for file in tqdm.tqdm(TrainingInfo.SAVE_DIR.glob("*")):
-                tinfo = TrainingInfo.load(file)
+            for file in tqdm.tqdm(cls.SAVE_DIR.glob("*")):
+                tinfo = cls.load(file)
                 if is_match(tinfo.hparams):
                     hash_hparams.append((tinfo.hash, tinfo.hparams))
 

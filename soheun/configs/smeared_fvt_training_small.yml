@@ -1,13 +1,13 @@
-experiment_name: smeared_fvt_training
-base_experiment_name: better_base_fvt_training
+experiment_name: smeared_fvt_training_small
+base_experiment_name: better_base_fvt_training_small
 dataset:
   signal_filename: HH4b_picoAOD.h5
   signal_ratio: 0.0
-  n_3b: 100_0000
+  n_3b: 100_000
   ratio_4b: 0.5
   seed: 0
 smearing:
-  noise_scale: 1.0
+  noise_scale: 3.0
   seed: 0
   hard_cutoff: False
   scale_mode: std
@@ -32,7 +32,7 @@ smeared_fvt:
     cooldown: 1
     min_lr: 0.0002
   dataloader:
-    batch_size: 1024
+    batch_size: 128
     batch_size_multiplier: 2
     batch_size_milestones: [1, 3, 6, 10, 15]
   encoder_mode: best

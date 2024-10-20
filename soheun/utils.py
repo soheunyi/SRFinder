@@ -4,6 +4,8 @@ import random
 import string
 import time
 
+import numpy as np
+
 
 def require_keys(config: dict, keys: list):
     for key in keys:
@@ -31,3 +33,21 @@ def create_hash(directory: pathlib.Path) -> str:
         hash_ = create_hash_with_timestamp()
 
     return hash_
+
+
+def get_quantiles_with_weights(
+    x_values: np.ndarray, weights: np.ndarray, quantiles: np.ndarray
+) -> np.ndarray:
+    assert len(x_values) == len(weights)
+    assert np.all(quantiles >= 0) and np.all(quantiles <= 1)
+    assert np.all(weights >= 0)
+    assert np.sum(weights) > 0
+
+    # normalize weights
+    weights = weights / np.sum(weights)
+    sorted_indices = np.argsort(x_values)
+    sorted_x_values = x_values[sorted_indices]
+    sorted_weights = weights[sorted_indices]
+
+    cumsum_weights = np.cumsum(sorted_weights)
+    return np.interp(quantiles, cumsum_weights, sorted_x_values)

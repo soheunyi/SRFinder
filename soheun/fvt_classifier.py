@@ -1,3 +1,4 @@
+import gc
 import os
 from typing import Literal
 import numpy as np
@@ -16,6 +17,7 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 import pathlib
+from schedulefree import AdamWScheduleFree
 
 from utils import require_keys
 from attention_classifier import AttentionClassifier
@@ -153,6 +155,9 @@ class FvTClassifier(pl.LightningModule):
     def validation_step(
         self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx
     ):
+        if self.optimizer_config["type"] == "AdamWScheduleFree":
+            self.trainer.optimizers[0].eval()
+
         x, y, w = batch
         x, y, w = x.to(self.device), y.to(self.device), w.to(self.device)
         y_logits = self(x)
@@ -173,9 +178,26 @@ class FvTClassifier(pl.LightningModule):
 
     def on_train_epoch_start(self):
         self.log("step", self.trainer.current_epoch, on_epoch=True)
+        if self.optimizer_config["type"] == "AdamWScheduleFree":
+            self.trainer.optimizers[0].train()
 
     def on_validation_epoch_start(self):
         self.log("step", self.trainer.current_epoch, on_epoch=True)
+        if self.optimizer_config["type"] == "AdamWScheduleFree":
+            self.trainer.optimizers[0].eval()
+            with torch.no_grad():
+                train_dataloader = self.trainer.train_dataloader
+                if train_dataloader is not None:
+                    for cnt, batch in enumerate(train_dataloader):
+                        x, y, w = batch
+                        x, y, w = (
+                            x.to(self.device),
+                            y.to(self.device),
+                            w.to(self.device),
+                        )
+                        self(x)
+                        if cnt > 50:
+                            break
 
     def on_train_epoch_end(self):
         avg_loss = (
@@ -226,7 +248,7 @@ class FvTClassifier(pl.LightningModule):
         bin_idx = torch.clip(bin_idx, 1, nbins) - 1
 
         w_rw = reweights * self.val_weights
-        w_rw_sq = reweights**2 * self.val_weights
+        w_rw_sq = reweights**2 * self.val_weights**2
 
         bin_losses = []
         for bin_i in range(nbins):
@@ -324,6 +346,8 @@ class FvTClassifier(pl.LightningModule):
         assert self.lr_scheduler_config is not None
 
         require_keys(self.optimizer_config, ["type", "lr"])
+        if self.optimizer_config["type"] == "AdamWScheduleFree":
+            require_keys(self.optimizer_config, ["warmup_steps"])
         require_keys(self.lr_scheduler_config, ["type"])
 
         if self.lr_scheduler_config["type"] == "ReduceLROnPlateau":
@@ -336,6 +360,12 @@ class FvTClassifier(pl.LightningModule):
             optimizer = optim.Adam(self.parameters(), lr=self.optimizer_config["lr"])
         elif self.optimizer_config["type"] == "SGD":
             optimizer = optim.SGD(self.parameters(), lr=self.optimizer_config["lr"])
+        elif self.optimizer_config["type"] == "AdamWScheduleFree":
+            optimizer = AdamWScheduleFree(
+                self.parameters(),
+                lr=self.optimizer_config["lr"],
+                warmup_steps=self.optimizer_config["warmup_steps"],
+            )
         else:
             raise ValueError(f"Invalid optimizer type: {self.optimizer_config['type']}")
 
@@ -475,6 +505,7 @@ class FvTClassifier(pl.LightningModule):
         y_pred = torch.tensor([])
         if do_tqdm:
             x_dataloader = tqdm.tqdm(x_dataloader)
+
         for batch in x_dataloader:
             batch = batch.to(self.device)
             logit = self(batch)
@@ -493,6 +524,7 @@ class FvTClassifier(pl.LightningModule):
     def representations(
         self, x: torch.Tensor, do_tqdm=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        self.eval()
         x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
@@ -509,6 +541,40 @@ class FvTClassifier(pl.LightningModule):
             view_scores = torch.cat((view_scores, view_scores_batch.to("cpu")), dim=0)
 
         return q_repr, view_scores
+
+    def q_repr(self, x: torch.Tensor, do_tqdm=False):
+        self.eval()
+        x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
+
+        x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
+        q_repr = torch.tensor([])
+
+        with torch.no_grad():
+            for batch in x_dataloader:
+                batch = batch.to(self.device)
+                q = self.encoder(batch)
+                q_repr = torch.cat((q_repr, q.to("cpu")), dim=0)
+
+        return q_repr
+
+    @torch.no_grad()
+    def predict_and_representations(self, x: torch.Tensor, do_tqdm=False):
+        self.eval()
+        x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
+
+        x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
+        y_pred = torch.tensor([])
+        q_repr = torch.tensor([])
+
+        for batch in x_dataloader:
+            batch = batch.to(self.device)
+            q = self.encoder(batch)
+            logit = self.attention_classifier(q)
+            pred = F.softmax(logit, dim=-1)
+            y_pred = torch.cat((y_pred, pred.to("cpu")), dim=0)
+            q_repr = torch.cat((q_repr, q.to("cpu")), dim=0)
+
+        return y_pred, q_repr
 
     def save(self, path):
         torch.save(self.state_dict(), path)
