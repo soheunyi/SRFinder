@@ -2,7 +2,6 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 import torch
-import tqdm
 
 from fvt_classifier import FvTClassifier
 from attention_classifier import AttentionClassifier
@@ -10,6 +9,7 @@ from dataset import MotherSamples, split_scdinfo
 from events_data import EventsData, events_from_scdinfo, get_is_signal
 from signal_region import get_SR_CR_cut
 from training_info import TrainingInfo
+from utils import get_quantiles_with_weights
 
 
 features = [
@@ -136,10 +136,10 @@ def get_histograms(
         bins=bins,
         weights=(events.weights * reweights)[events.is_3b],
     )[0]
-    hist_3b_x = np.histogram(
+    hist_3b_rw_x = np.histogram(
         x_values[events.is_3b],
         bins=bins,
-        weights=(events.weights * x_values)[events.is_3b],
+        weights=(events.weights * x_values * reweights)[events.is_3b],
     )[0]
     hist_3b_sq = np.histogram(
         x_values[events.is_3b],
@@ -154,7 +154,7 @@ def get_histograms(
     return {
         "3b": hist_3b,
         "3b_rw": hist_3b_rw,
-        "3b_x": hist_3b_x,
+        "3b_rw_x": hist_3b_rw_x,
         "3b_sq": hist_3b_sq,
         "4b": hist_4b,
         "4b_sq": hist_4b_sq,
@@ -165,12 +165,10 @@ def correct_systematic_error(
     CR_fvt_hash: str,
     nbins_list: list[int],
     bins_mode: str = "quantile",
-    correction_split_seed: int = 42,
-    correction_split_ratio: float = 0.2,
     intercept_min: float = -np.inf,
     intercept_max: float = np.inf,
-    slope_min: float = -np.inf,
-    slope_max: float = np.inf,
+    slope_min: float = 0.0,
+    slope_max: float = 0.0,
     raw_df_list: list[pd.DataFrame] = [],
 ):
     if len(raw_df_list) == 0:
@@ -222,6 +220,10 @@ def correct_systematic_error(
     SR_cut, _ = get_SR_CR_cut(
         SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]
     )
+
+    events_train_SR = events_train[SR_stats_train >= SR_cut]
+    SR_stats_train_SR = SR_stats_train[SR_stats_train >= SR_cut]
+
     SR_idx = SR_stats_tst >= SR_cut
     SR_stats_SR = SR_stats_tst[SR_idx]
     scdinfo_SR = tst_scdinfo[SR_idx]
@@ -237,33 +239,29 @@ def correct_systematic_error(
     reweights_SR = fvt_scores_SR / (1 - fvt_scores_SR)
     reweights_SR = np.where(events_SR.is_4b, 1, reweights_SR)
 
-    np.random.seed(correction_split_seed)
-    train_len = int(len(scdinfo_SR) * correction_split_ratio)
-    train_idx = np.array([True] * train_len + [False] * (len(scdinfo_SR) - train_len))
-    np.random.shuffle(train_idx)
+    fvt_scores_train_SR = (
+        CR_fvt_model.predict(events_train_SR.X_torch)[:, 1].detach().cpu().numpy()
+    )
+    reweights_train_SR = fvt_scores_train_SR / (1 - fvt_scores_train_SR)
+    reweights_train_SR = np.where(events_train_SR.is_4b, 1, reweights_train_SR)
 
     for nbins in nbins_list:
         if bins_mode == "quantile":
-            SR_bins = np.quantile(SR_stats_SR, np.linspace(0, 1, nbins + 1))
+            SR_bins = get_quantiles_with_weights(
+                SR_stats_train_SR[events_train_SR.is_3b],
+                (reweights_train_SR * events_train_SR.weights)[events_train_SR.is_3b],
+                np.linspace(0, 1, nbins + 1),
+            )
         elif bins_mode == "uniform":
-            SR_bins = np.linspace(np.min(SR_stats_SR), np.max(SR_stats_SR), nbins + 1)
+            SR_bins = np.linspace(
+                np.min(SR_stats_train_SR), np.max(SR_stats_train_SR), nbins + 1
+            )
 
-        hists_train = get_histograms(
-            events_SR[train_idx],
-            SR_stats_SR[train_idx],
-            SR_bins,
-            reweights_SR[train_idx],
-        )
-        hists_test = get_histograms(
-            events_SR[~train_idx],
-            SR_stats_SR[~train_idx],
-            SR_bins,
-            reweights_SR[~train_idx],
-        )
-        y = hists_train["4b"] - hists_train["3b_rw"]
-        X = np.stack([hists_train["3b"], hists_train["3b_x"]], axis=1)
-        V = np.diag(hists_train["3b_sq"] + hists_test["4b_sq"])
-        # V = np.diag(hists_train["4b"])
+        hists = get_histograms(events_SR, SR_stats_SR, SR_bins, reweights_SR)
+
+        y = hists["4b"] - hists["3b_rw"]
+        X = np.stack([hists["3b_rw"], hists["3b_rw_x"]], axis=1)
+        V = np.diag(hists["3b_sq"] + hists["4b_sq"])
 
         intercept, slope = constrained_linear_fit(
             X,
@@ -275,30 +273,24 @@ def correct_systematic_error(
             beta_1_max=slope_max if nbins > 1 else 0,
         )
         corrections[nbins].append((intercept, slope))
-        SR_stats_SR_test = SR_stats_SR[~train_idx]
-        test_is_3b = events_SR[~train_idx].is_3b
 
-        corrected_reweights = (
-            reweights_SR[~train_idx] + intercept + slope * SR_stats_SR_test
-        )
+        corrected_reweights = reweights_SR * (1 + intercept + slope * SR_stats_SR)
         corrected_weights = (
-            np.where(events_SR[~train_idx].is_4b, 1, corrected_reweights)
-            * events_SR[~train_idx].weights
+            np.where(events_SR.is_4b, 1, corrected_reweights) * events_SR.weights
         )
 
-        test_is_3b = events_SR[~train_idx].is_3b
         hist_3b_corrected = np.histogram(
-            SR_stats_SR_test[test_is_3b],
+            SR_stats_SR[events_SR.is_3b],
             bins=SR_bins,
-            weights=corrected_weights[test_is_3b],
+            weights=corrected_weights[events_SR.is_3b],
         )[0]
         hist_3b_corrected_sq = np.histogram(
-            SR_stats_SR_test[test_is_3b],
+            SR_stats_SR[events_SR.is_3b],
             bins=SR_bins,
-            weights=corrected_weights[test_is_3b] ** 2,
+            weights=corrected_weights[events_SR.is_3b] ** 2,
         )[0]
-        hists_test["3b_corrected"] = hist_3b_corrected
-        hists_test["3b_corrected_sq"] = hist_3b_corrected_sq
-        hist_corrected_dict[nbins] = deepcopy(hists_test)
+        hists["3b_corrected"] = hist_3b_corrected
+        hists["3b_corrected_sq"] = hist_3b_corrected_sq
+        hist_corrected_dict[nbins] = deepcopy(hists)
 
     return corrections, hist_corrected_dict
