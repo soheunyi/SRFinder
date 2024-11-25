@@ -1,4 +1,5 @@
 experiment_name: better_base_fvt_training
+step: 1
 dataset:
   signal_filename: HH4b_picoAOD.h5
   signal_ratio: 0.0

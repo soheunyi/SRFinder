@@ -43,6 +43,7 @@ def routine(config: dict):
             "dataset",
             "signal_region",
             "CR_fvt",
+            "previous_step_experiment_name",
         ],
     )
     require_keys(
@@ -155,9 +156,12 @@ def routine(config: dict):
                 and x["seed"] == seed
             ),
             "aux_info_step": 2,
+            "experiment_name": config["previous_step_experiment_name"],
         }
     )
-    assert len(hashes) == 1, "Number of training info must be one"
+    assert (
+        len(hashes) == 1
+    ), f"Number of training info must be one, there are {len(hashes)}"
     smeared_fvt_tinfo = TrainingInfo.load(hashes[0])
     CR_fvt_hparams["smeared_fvt_hash"] = smeared_fvt_tinfo.hash
     base_encoder_hash = smeared_fvt_tinfo.hparams["encoder_hash"]

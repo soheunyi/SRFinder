@@ -284,8 +284,8 @@ class TrainingInfo:
                 # Handle missing file
                 print(f"Warning: No metadata file found at {cls.META_DIR}. Retrying...")
                 retry += 1
-            # wait for 5 seconds
-            time.sleep(5)
+            # wait for 5 + Uniform(0, 1) seconds
+            time.sleep(5 + np.random.rand())
         print(f"Failed to load metadata file after {retry} retries.")
         return {}
 

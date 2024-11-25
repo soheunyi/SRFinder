@@ -465,8 +465,8 @@ def split_scdinfo_multiple(
 
 
 class MotherSamples:
-    SAVE_DIR = pathlib.Path(__file__).parent / "data/mother_samples"
-    META_DIR = pathlib.Path(__file__).parent / "data/metadata/mother_samples.pkl"
+    SAVE_DIR = pathlib.Path(__file__).parent / "data/MotherSamples"
+    META_DIR = pathlib.Path(__file__).parent / "data/metadata/MotherSamples.pkl"
 
     def __init__(self, scdinfo: SCDatasetInfo, hash: str, hparams: dict):
         self._scdinfo = scdinfo

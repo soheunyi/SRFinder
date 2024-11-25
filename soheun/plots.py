@@ -1,6 +1,7 @@
 # Drawing weighted histograms
 
 
+from typing import Literal
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
@@ -574,17 +575,31 @@ def hist_events_by_labels(
     )
 
 
-def plot_sr_stats(events: EventsData, sr_stats: np.ndarray, ax, label, **plot_kwargs):
-    assert len(events) == len(sr_stats)
-
+def get_weights_by_sr_stats(events: EventsData, sr_stats: np.ndarray):
     sr_stats_argsort = np.argsort(sr_stats)[::-1]
     weights = events.weights[sr_stats_argsort]
     is_signal = events.is_signal[sr_stats_argsort]
     is_4b = events.is_4b[sr_stats_argsort]
+    w_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
+    w_signal_ratio = np.cumsum(weights * is_signal) / np.sum(weights * is_signal)
+
+    return w_4b_ratio, w_signal_ratio
+
+
+def plot_sr_stats(
+    events: EventsData,
+    sr_stats: np.ndarray,
+    ax,
+    label,
+    **plot_kwargs,
+):
+    assert len(events) == len(sr_stats)
+
+    w_4b_ratio, w_signal_ratio = get_weights_by_sr_stats(events, sr_stats)
 
     ax.plot(
-        np.cumsum(weights * is_4b) / np.sum(weights * is_4b),
-        np.cumsum(weights * is_signal) / np.sum(weights * is_signal),
+        w_4b_ratio,
+        w_signal_ratio,
         label=label,
         **plot_kwargs,
     )
@@ -595,11 +610,21 @@ def plot_reweighted_samples(
     hist_values: np.ndarray,
     reweights: np.ndarray,
     ax: plt.Axes,
+    disable_twin_ax=False,
+    errorbar: Literal["3b", "4b", False] = "4b",
     **plot_kwargs,
 ):
     is_4b = events.is_4b
     weights = events.weights
-    plot_samples_raw(is_4b, reweights * weights, hist_values, ax, **plot_kwargs)
+    plot_samples_raw(
+        is_4b,
+        reweights * weights,
+        hist_values,
+        ax,
+        disable_twin_ax=disable_twin_ax,
+        errorbar=errorbar,
+        **plot_kwargs,
+    )
 
 
 def plot_samples_raw(
@@ -607,6 +632,8 @@ def plot_samples_raw(
     weights: np.ndarray,
     hist_values: np.ndarray,
     ax: plt.Axes,
+    disable_twin_ax=False,
+    errorbar: Literal["3b", "4b", False] = "4b",
     **plot_kwargs,
 ):
     assert len(is_4b) == len(weights) == len(hist_values)
@@ -655,19 +682,37 @@ def plot_samples_raw(
     ax.stairs(
         hist_3b,
         bins,
-        label="reweighted 3b",
+        label="Reweighted 3b",
         color=plt.get_cmap("tab10").colors[0],
     )
     ax.stairs(hist_4b, bins, label="4b", color=plt.get_cmap("tab10").colors[1])
-    ax.errorbar(
-        midpoints,
-        hist_4b,
-        yerr=np.sqrt(hist_3b_sq + hist_4b_sq),
-        color=plt.get_cmap("tab10").colors[1],
-        capsize=3,
-        fmt="o",
-        markersize=2,
-    )
+    if errorbar == "4b":
+        ax.errorbar(
+            midpoints,
+            hist_4b,
+            yerr=np.sqrt(hist_3b_sq + hist_4b_sq),
+            color=plt.get_cmap("tab10").colors[1],
+            capsize=3,
+            fmt="o",
+            markersize=2,
+            label="Std. of 4b",
+        )
+    elif errorbar == "3b":
+        ax.errorbar(
+            midpoints,
+            hist_3b,
+            yerr=np.sqrt(hist_3b_sq + hist_4b_sq),
+            color=plt.get_cmap("tab10").colors[0],
+            capsize=3,
+            fmt="o",
+            markersize=2,
+            label="Std. of reweighted 3b",
+        )
+    elif errorbar is False:
+        pass
+    else:
+        raise ValueError(f"Invalid errorbar: {errorbar}")
+
     ax.legend()
     ax.set_xlabel(plot_kwargs.get("xlabel", ""))
 
@@ -677,13 +722,14 @@ def plot_samples_raw(
         hist_3b_sq[mask] + hist_4b_sq[mask]
     )
     # print(sigma)
-    twin_ax = ax.twinx()
-    twin_ax.plot(midpoints, sigma, "o", color="red", markersize=3)
-    twin_ax.axhline(0, color="black", linestyle="--")
-    twin_ax.set_ylim(-4, 4)
-    twin_ax.set_ylabel("sigma")
-    # grid
-    twin_ax.grid(color="k", linestyle="--", linewidth=0.2, axis="both")
+    if not disable_twin_ax:
+        twin_ax = ax.twinx()
+        twin_ax.plot(midpoints, sigma, "o", color="red", markersize=3)
+        twin_ax.axhline(0, color="black", linestyle="--")
+        twin_ax.set_ylim(-4, 4)
+        twin_ax.set_ylabel("sigma")
+        # grid
+        twin_ax.grid(color="k", linestyle="--", linewidth=0.2, axis="both")
 
 
 def plot_rewighted_samples_by_model(
@@ -691,6 +737,8 @@ def plot_rewighted_samples_by_model(
     x_values: np.ndarray,
     fvt_scores: np.ndarray,
     ax=None,
+    disable_twin_ax=False,
+    errorbar: Literal["3b", "4b", False] = "4b",
     **plot_kwargs,
 ):
     ratio_4b = plot_kwargs.get("ratio_4b", 0.5)
@@ -707,6 +755,8 @@ def plot_rewighted_samples_by_model(
         ax=ax,
         bins=bins,
         mode="uniform",
+        disable_twin_ax=disable_twin_ax,
+        errorbar=errorbar,
     )
     if ax is None:
         plt.show()

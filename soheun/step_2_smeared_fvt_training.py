@@ -96,6 +96,7 @@ def routine(config: dict):
     smeared_fvt_hparams["experiment_name"] = config["experiment_name"]
     smeared_fvt_hparams["dataset"] = config["dataset"]
     smeared_fvt_hparams["smearing"] = config["smearing"]
+    smeared_fvt_hparams["step"] = 2
 
     # Define features
     features = [

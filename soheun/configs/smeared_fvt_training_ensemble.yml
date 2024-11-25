@@ -1,13 +1,14 @@
-experiment_name: smeared_fvt_training_noise_scale
+experiment_name: smeared_fvt_training_ensemble
 base_experiment_name: better_base_fvt_training
+step: 2
 dataset:
   signal_filename: HH4b_picoAOD.h5
-  signal_ratio: 0.0
+  signal_ratio: 0.02
   n_3b: 100_0000
   ratio_4b: 0.5
-  seed: 0
+  seed: 28
 smearing:
-  noise_scale: 5.0
+  noise_scale: 1.0
   seed: 0
   hard_cutoff: False
   scale_mode: std

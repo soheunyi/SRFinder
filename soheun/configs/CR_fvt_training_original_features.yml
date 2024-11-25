@@ -1,4 +1,6 @@
 experiment_name: CR_fvt_training_v2
+step: 3
+previous_step_experiment_name: smeared_fvt_training
 dataset:
   signal_filename: HH4b_picoAOD.h5
   signal_ratio: 0.0
