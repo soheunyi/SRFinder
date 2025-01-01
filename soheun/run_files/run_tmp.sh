@@ -8,10 +8,10 @@
 #SBATCH --mem-per-cpu 8G
 
 # number of GPUs you need
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:0
 
 # maximum time limit for task (up to 48 hours, 48:00:00)
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 
 # email you when job is finished:
 #SBATCH --mail-user=soheuny@andrew.cmu.edu
@@ -19,7 +19,7 @@
 
 ## Choose one:
 
-RUN_FILENAME="training_ablation.py"
+RUN_FILENAME="draw_sr_stats_plots.py"
 CONDA_ENV_NAME="coffea_torch"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"

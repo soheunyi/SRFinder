@@ -1,4 +1,5 @@
 from copy import deepcopy
+import logging
 import torch
 import pandas as pd
 import numpy as np
@@ -26,7 +27,7 @@ W_4B_CUT_MIN = 0.001
 W_4B_CUT_MAX = 0.999
 
 
-def routine(config: dict):
+def routine(config: dict, file_handler: logging.FileHandler | None = None):
     print("Experiment Configuration")
     print(config)
     print("Current Time: ", pd.Timestamp.now())
@@ -67,6 +68,7 @@ def routine(config: dict):
             "optimizer",
             "lr_scheduler",
             "dataloader",
+            "repr_norm",
         ],
     )
     require_keys(config["base_fvt"]["optimizer"], ["type", "lr"])
@@ -156,6 +158,7 @@ def routine(config: dict):
         run_name=base_fvt_tinfo.hash,
         device=torch.device("cuda:0"),
         depth=base_fvt_hparams["depth"],
+        repr_norm=base_fvt_hparams["repr_norm"],
     )
 
     base_fvt_model.fit(
@@ -170,6 +173,7 @@ def routine(config: dict):
         lr_scheduler_config=base_fvt_hparams["lr_scheduler"],
         early_stop_patience=base_fvt_hparams["early_stop_patience"],
         dataloader_config=base_fvt_hparams["dataloader"],
+        file_handler=file_handler,
     )
 
     base_fvt_tinfo.update_aux_info(description=f"Step 1: base_FvT", step=1)

@@ -549,12 +549,16 @@ def hist_events_by_labels(
     events: EventsData, values: np.ndarray, bins, ax, **hist_kwargs
 ):
     assert len(values) == len(events)
+    color_3b = hist_kwargs.pop("color_3b", plt.get_cmap("tab10").colors[0])
+    color_4b = hist_kwargs.pop("color_4b", plt.get_cmap("tab10").colors[1])
+    color_signal = hist_kwargs.pop("color_signal", plt.get_cmap("tab10").colors[2])
     ax.hist(
         values[events.is_3b],
         bins=bins,
         histtype="step",
         label="3b",
         weights=events.weights[events.is_3b],
+        color=color_3b,
         **hist_kwargs,
     )
     ax.hist(
@@ -563,6 +567,7 @@ def hist_events_by_labels(
         histtype="step",
         label="bg4b",
         weights=events.weights[events.is_bg4b],
+        color=color_4b,
         **hist_kwargs,
     )
     ax.hist(
@@ -571,6 +576,7 @@ def hist_events_by_labels(
         histtype="step",
         label="signal",
         weights=events.weights[events.is_signal],
+        color=color_signal,
         **hist_kwargs,
     )
 
@@ -612,6 +618,8 @@ def plot_reweighted_samples(
     ax: plt.Axes,
     disable_twin_ax=False,
     errorbar: Literal["3b", "4b", False] = "4b",
+    no_4b=False,
+    no_3b=False,
     **plot_kwargs,
 ):
     is_4b = events.is_4b
@@ -623,6 +631,8 @@ def plot_reweighted_samples(
         ax,
         disable_twin_ax=disable_twin_ax,
         errorbar=errorbar,
+        no_4b=no_4b,
+        no_3b=no_3b,
         **plot_kwargs,
     )
 
@@ -634,6 +644,8 @@ def plot_samples_raw(
     ax: plt.Axes,
     disable_twin_ax=False,
     errorbar: Literal["3b", "4b", False] = "4b",
+    no_4b=False,
+    no_3b=False,
     **plot_kwargs,
 ):
     assert len(is_4b) == len(weights) == len(hist_values)
@@ -679,13 +691,15 @@ def plot_samples_raw(
     )
 
     midpoints = (bins[:-1] + bins[1:]) / 2
-    ax.stairs(
-        hist_3b,
-        bins,
-        label="Reweighted 3b",
-        color=plt.get_cmap("tab10").colors[0],
-    )
-    ax.stairs(hist_4b, bins, label="4b", color=plt.get_cmap("tab10").colors[1])
+    if not no_3b:
+        ax.stairs(
+            hist_3b,
+            bins,
+            label="Reweighted 3b",
+            color=plt.get_cmap("tab10").colors[0],
+        )
+    if not no_4b:
+        ax.stairs(hist_4b, bins, label="4b", color=plt.get_cmap("tab10").colors[1])
     if errorbar == "4b":
         ax.errorbar(
             midpoints,
@@ -739,6 +753,8 @@ def plot_rewighted_samples_by_model(
     ax=None,
     disable_twin_ax=False,
     errorbar: Literal["3b", "4b", False] = "4b",
+    no_4b=False,
+    no_3b=False,
     **plot_kwargs,
 ):
     ratio_4b = plot_kwargs.get("ratio_4b", 0.5)
@@ -757,6 +773,8 @@ def plot_rewighted_samples_by_model(
         mode="uniform",
         disable_twin_ax=disable_twin_ax,
         errorbar=errorbar,
+        no_4b=no_4b,
+        no_3b=no_3b,
     )
     if ax is None:
         plt.show()

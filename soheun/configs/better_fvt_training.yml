@@ -11,6 +11,7 @@ base_fvt:
   model: FvTClassifier
   dim_dijet_features: 6
   dim_quadjet_features: 6 
+  repr_norm: False
   depth:
     encoder: 4
     decoder: 1

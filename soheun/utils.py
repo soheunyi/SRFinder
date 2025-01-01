@@ -51,3 +51,12 @@ def get_quantiles_with_weights(
 
     cumsum_weights = np.cumsum(sorted_weights)
     return np.interp(quantiles, cumsum_weights, sorted_x_values)
+
+
+def safe_dict(d: dict | None, key: str, default=None):
+    if isinstance(d, dict):
+        if key not in d:
+            d[key] = default
+        return d[key]
+    else:
+        return default

@@ -270,7 +270,7 @@ class TrainingInfo:
     @classmethod
     def load_metadata(cls):
         retry = 0
-        while retry < 5:
+        while retry < 6:
             try:
                 with open(cls.META_DIR, "rb") as f:
                     return pickle.load(f)
@@ -284,8 +284,8 @@ class TrainingInfo:
                 # Handle missing file
                 print(f"Warning: No metadata file found at {cls.META_DIR}. Retrying...")
                 retry += 1
-            # wait for 5 + Uniform(0, 1) seconds
-            time.sleep(5 + np.random.rand())
+            # wait for 10 + Uniform(0, 1) seconds
+            time.sleep(10 + np.random.rand())
         print(f"Failed to load metadata file after {retry} retries.")
         return {}
 
@@ -293,7 +293,16 @@ class TrainingInfo:
     def update_metadata(cls):
         with open(cls.META_DIR, "wb") as f:
             hashes, hparams = cls.find({}, return_hparams=True, from_metadata=False)
-            pickle.dump(dict(zip(hashes, hparams)), f)
+            # Do not save aux_info in metadata
+            hparams_cleaned = []
+            for hparam in hparams:
+                hparam_cleaned = {}
+                for key in hparam.keys():
+                    if re.match(r"^aux_info.*", key) and key != "aux_info_step":
+                        continue
+                    hparam_cleaned[key] = hparam[key]
+                hparams_cleaned.append(hparam_cleaned)
+            pickle.dump(dict(zip(hashes, hparams_cleaned)), f)
 
     @classmethod
     def find(

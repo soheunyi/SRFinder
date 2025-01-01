@@ -4,6 +4,7 @@ figures
 *.h5
 *.npy
 *.root
+*.log
 
 reducers/
 embeddings/

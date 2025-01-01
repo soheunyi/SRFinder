@@ -22,6 +22,7 @@ class FvTEncoder(nn.Module):
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ),
         depth: int = 1,
+        repr_norm: bool = False,
     ):
         """
         nj: number of jet
@@ -30,6 +31,8 @@ class FvTEncoder(nn.Module):
 
         self.input_dim = dim_input_jet_features * 4  # 4 features per jet
         self.output_dim = dim_quadjet_features
+
+        self.repr_norm = repr_norm
 
         self.device = device
         self.debug = False
@@ -194,5 +197,16 @@ class FvTEncoder(nn.Module):
             q = self.event_conv_layers[i](q)
             q = q + q0
             q = NonLU(q, self.training)
+
+        if self.repr_norm:
+            q = F.normalize(q, p=2, dim=1)
+
+        # if self.repr_norm == "layer_norm":
+        #     # Layer normalize the quadjet pixels
+        #     q = q.transpose(1, 2)
+        #     q = F.layer_norm(q, (q.size(2),))
+        #     q = q.transpose(1, 2)
+        # elif self.repr_norm == "l2":
+        #     q = F.normalize(q, p=2, dim=1)
 
         return q

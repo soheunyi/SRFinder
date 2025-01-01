@@ -1,4 +1,4 @@
-import gc
+import logging
 import os
 from typing import Literal
 import numpy as np
@@ -15,6 +15,7 @@ from pytorch_lightning.callbacks import (
     TQDMProgressBar,
     Callback,
 )
+from pl_loggers import FileHandlerLogger
 from pytorch_lightning.loggers import TensorBoardLogger
 import pathlib
 from schedulefree import AdamWScheduleFree
@@ -73,6 +74,7 @@ class FvTClassifier(pl.LightningModule):
             "encoder": 4,
             "decoder": 1,
         },
+        repr_norm: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -83,8 +85,11 @@ class FvTClassifier(pl.LightningModule):
 
         self.num_classes = num_classes
         self.run_name = run_name
+
         require_keys(depth, ["encoder", "decoder"])
         self.depth = depth
+
+        self.repr_norm = repr_norm
 
         self.optimizer_config = None
         self.lr_scheduler_config = None
@@ -109,6 +114,7 @@ class FvTClassifier(pl.LightningModule):
             dim_quadjet_features=dim_quadjet_features,
             device=device,
             depth=depth["encoder"],
+            repr_norm=repr_norm,
         )
 
         self.attention_classifier = AttentionClassifier(
@@ -212,6 +218,7 @@ class FvTClassifier(pl.LightningModule):
             if not torch.isnan(avg_loss)
             else 0
         )
+        self.log("epoch", self.trainer.current_epoch, on_epoch=True)
         self.log("train_loss", avg_loss, on_epoch=True)
         self.log(
             "train_loss_lower_digits",
@@ -271,7 +278,6 @@ class FvTClassifier(pl.LightningModule):
             if self.lr_scheduler_config["type"] != "none"
             else self.optimizer_config["lr"]
         )
-
         self.log(
             "val_loss",
             avg_loss.item(),
@@ -404,6 +410,7 @@ class FvTClassifier(pl.LightningModule):
         lr_scheduler_config: dict = {},
         early_stop_patience: None | int = None,
         dataloader_config: dict = {},
+        file_handler: logging.FileHandler | None = None,
     ):
         assert "batch_size" in dataloader_config
 
@@ -423,14 +430,17 @@ class FvTClassifier(pl.LightningModule):
 
         tb_log_dir = pathlib.Path(f"./tb_logs/{tb_log_dir}")
         tb_log_dir.mkdir(parents=True, exist_ok=True)
-        logger = TensorBoardLogger(tb_log_dir, name=self.run_name)
+        loggers = [TensorBoardLogger(tb_log_dir, name=self.run_name)]
+        if file_handler is not None:
+            file_logger = FileHandlerLogger(file_handler)
+            loggers.append(file_logger)
 
         progress_bar = TQDMProgressBar(
             refresh_rate=max(
                 1, (len(train_dataset) // dataloader_config["batch_size"]) // 10
             )
         )
-        callbacks = callbacks + [progress_bar]
+        # callbacks = callbacks + [progress_bar]
 
         if self.early_stop_patience is not None:
             early_stop_callback = EarlyStopping(
@@ -481,8 +491,9 @@ class FvTClassifier(pl.LightningModule):
         trainer = pl.Trainer(
             max_epochs=max_epochs,
             callbacks=callbacks,
-            logger=logger,
+            logger=loggers,
             reload_dataloaders_every_n_epochs=1,
+            enable_progress_bar=False,
         )
 
         torch.autograd.set_detect_anomaly(True)
@@ -491,7 +502,7 @@ class FvTClassifier(pl.LightningModule):
             train_dataset,
             val_dataset,
             dataloader_config["batch_size"],
-            num_workers=4,
+            num_workers=0,
             batch_size_milestones=dataloader_config.get("batch_size_milestones", []),
             batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
         )
@@ -500,7 +511,7 @@ class FvTClassifier(pl.LightningModule):
     @torch.no_grad()
     def predict(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
-        batch_size = min(2**14, x.shape[0])
+        batch_size = min(2**18, x.shape[0])
         x_dataloader = DataLoader(x, batch_size=batch_size, shuffle=False)
         y_pred = torch.tensor([])
         if do_tqdm:
@@ -525,7 +536,7 @@ class FvTClassifier(pl.LightningModule):
         self, x: torch.Tensor, do_tqdm=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(x, batch_size=min(2**18, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         q_repr = torch.tensor([])
@@ -544,7 +555,7 @@ class FvTClassifier(pl.LightningModule):
 
     def q_repr(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(x, batch_size=min(2**18, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         q_repr = torch.tensor([])
@@ -560,7 +571,7 @@ class FvTClassifier(pl.LightningModule):
     @torch.no_grad()
     def predict_and_representations(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**14, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(x, batch_size=min(2**18, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         y_pred = torch.tensor([])

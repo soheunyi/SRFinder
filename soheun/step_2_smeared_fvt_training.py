@@ -1,4 +1,5 @@
 from copy import deepcopy
+import logging
 import torch
 import pandas as pd
 import numpy as np
@@ -25,7 +26,7 @@ W_4B_CUT_MIN = 0.001
 W_4B_CUT_MAX = 0.999
 
 
-def routine(config: dict):
+def routine(config: dict, file_handler: logging.FileHandler | None = None):
     print("Experiment Configuration")
     print(config)
     print("Current Time: ", pd.Timestamp.now())
@@ -38,6 +39,7 @@ def routine(config: dict):
             "smearing",
             "smeared_fvt",
             "base_experiment_name",
+            "base_experiment_hash",
         ],
     )
     require_keys(
@@ -118,23 +120,20 @@ def routine(config: dict):
         "sym_Jet3_m",
     ]
 
-    # 1. Find and load encoder
-    hashes = TrainingInfo.find(
-        {
-            "dataset": lambda x: (
-                x["n_3b"] == n_3b
-                and x["ratio_4b"] == ratio_4b
-                and x["signal_ratio"] == signal_ratio
-                and x["signal_filename"] == signal_filename
-                and x["seed"] == seed
-            ),
-            "aux_info_step": 1,
-            "model": "FvTClassifier",
-            "experiment_name": config["base_experiment_name"],
-        }
-    )
-    assert len(hashes) == 1, "Number of training info must be one"
-    base_fvt_tinfo = TrainingInfo.load(hashes[0])
+    # 1. Load base experiment encoder and cross-check if conditions are met
+    if config["base_experiment_hash"] is None:
+        raise ValueError("base_experiment_hash is not set")
+    base_fvt_hash = config["base_experiment_hash"]
+    base_fvt_tinfo = TrainingInfo.load(base_fvt_hash)
+    assert base_fvt_tinfo.hparams["experiment_name"] == config["base_experiment_name"]
+    assert base_fvt_tinfo.hparams["model"] == "FvTClassifier"
+    assert base_fvt_tinfo.aux_info["step"] == 1
+    assert base_fvt_tinfo.hparams["dataset"]["n_3b"] == n_3b
+    assert base_fvt_tinfo.hparams["dataset"]["ratio_4b"] == ratio_4b
+    assert base_fvt_tinfo.hparams["dataset"]["signal_ratio"] == signal_ratio
+    assert base_fvt_tinfo.hparams["dataset"]["signal_filename"] == signal_filename
+    assert base_fvt_tinfo.hparams["dataset"]["seed"] == seed
+
     smeared_fvt_hparams["encoder_hash"] = base_fvt_tinfo.hash
 
     # Shares the same training + val samples
@@ -175,6 +174,7 @@ def routine(config: dict):
         lr_scheduler_config=smeared_fvt_hparams["lr_scheduler"],
         early_stop_patience=smeared_fvt_hparams["early_stop_patience"],
         dataloader_config=smeared_fvt_hparams["dataloader"],
+        file_handler=file_handler,
     )
 
     smeared_fvt_tinfo.update_aux_info(

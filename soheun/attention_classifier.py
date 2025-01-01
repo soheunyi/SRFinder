@@ -1,3 +1,5 @@
+from datetime import datetime
+import logging
 import os
 import pathlib
 import torch
@@ -18,6 +20,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import torch.optim as optim
 
 from data_modules import FvTDataModule
+from pl_loggers import FileHandlerLogger
 from utils import require_keys
 
 
@@ -148,6 +151,7 @@ class AttentionClassifier(pl.LightningModule):
             torch.sum(self.train_losses * self.train_batchsizes)
             / self.train_total_weights
         )
+        self.log("epoch", self.trainer.current_epoch, on_epoch=True)
         self.log("train_loss", avg_loss, on_epoch=True, prog_bar=True)
 
         self.train_losses = torch.tensor([])
@@ -211,6 +215,7 @@ class AttentionClassifier(pl.LightningModule):
         lr_scheduler_config: dict = {},
         early_stop_patience: None | int = None,
         dataloader_config: dict = {},
+        file_handler: logging.FileHandler = None,
     ):
         assert "batch_size" in dataloader_config
 
@@ -228,14 +233,17 @@ class AttentionClassifier(pl.LightningModule):
 
         tb_log_dir = pathlib.Path(f"./tb_logs/{tb_log_dir}")
         tb_log_dir.mkdir(parents=True, exist_ok=True)
-        logger = TensorBoardLogger(tb_log_dir, name=self.run_name)
+        loggers = [TensorBoardLogger(tb_log_dir, name=self.run_name)]
+        if file_handler is not None:
+            file_logger = FileHandlerLogger(file_handler)
+            loggers.append(file_logger)
 
         progress_bar = TQDMProgressBar(
             refresh_rate=max(
                 1, (len(train_dataset) // dataloader_config["batch_size"]) // 10
             )
         )
-        callbacks = callbacks + [progress_bar]
+        # callbacks = callbacks + [progress_bar]
 
         if save_checkpoint:
             delete_existing_checkpoints = False
@@ -276,8 +284,9 @@ class AttentionClassifier(pl.LightningModule):
         trainer = pl.Trainer(
             max_epochs=max_epochs,
             callbacks=callbacks,
-            logger=logger,
+            logger=loggers,
             reload_dataloaders_every_n_epochs=1,
+            enable_progress_bar=False,
         )
 
         torch.autograd.set_detect_anomaly(True)
@@ -286,16 +295,17 @@ class AttentionClassifier(pl.LightningModule):
             train_dataset,
             val_dataset,
             dataloader_config["batch_size"],
-            num_workers=4,
+            num_workers=0,
             batch_size_milestones=dataloader_config.get("batch_size_milestones", []),
             batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
         )
+
         trainer.fit(self, datamodule=self.datamodule)
 
     @torch.no_grad()
     def predict(self, q: torch.Tensor, do_tqdm: bool = False) -> torch.Tensor:
         self.eval()
-        batch_size = min(2**14, q.shape[0])
+        batch_size = min(2**18, q.shape[0])
         q_dataloader = DataLoader(q, batch_size=batch_size, shuffle=False)
 
         preds = []

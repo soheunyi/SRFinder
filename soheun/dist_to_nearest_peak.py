@@ -1,10 +1,8 @@
 import numpy as np
-import cudf
-from cuml.neighbors import NearestNeighbors
 import multiprocessing as mp
+from sklearn.neighbors import NearestNeighbors
 
 import tqdm
-
 from events_data import EventsData
 
 
@@ -17,6 +15,45 @@ def min_dist_fn(i, X_sorted):
         return np.inf
     else:
         return np.min(dist_func(X_sorted[i], X_sorted[:i]))
+
+
+def min_dist_to_others(
+    X: np.ndarray,
+    rho: np.ndarray,
+    weights: np.ndarray,
+    nbd_pct: float = 0.02,
+    seed: int = None,
+    n_workers: int = 4,
+):
+    assert len(weights) == len(X) == len(rho)
+    if seed is not None:
+        np.random.seed(seed)
+
+    n_points = len(X)
+    n_neighbors = int(n_points * nbd_pct)
+    model = NearestNeighbors(
+        n_neighbors=n_neighbors, algorithm="auto", metric="euclidean"
+    )
+    nbrs = model.fit(X)
+    distances, indices = nbrs.kneighbors(X)
+
+    min_dists = np.ones(n_points) * np.inf
+    rho_argsort = np.argsort(rho)[::-1]
+    X_sorted = X[rho_argsort]
+
+    with mp.Pool(n_workers) as pool:
+        tasks = [(i, X_sorted) for i in range(n_points)]
+        min_dists = np.array(
+            pool.starmap(
+                min_dist_fn,
+                tasks,
+            )
+        )
+
+    min_dists[rho_argsort] = min_dists.copy()
+    min_dists[np.isinf(min_dists)] = np.max(min_dists[~np.isinf(min_dists)])
+
+    return min_dists
 
 
 def dist_to_nearest_peak(
@@ -62,14 +99,11 @@ def dist_to_nearest_peak(
     X = X[random_idx]
 
     n_neighbors = int(n_points * nbd_pct)
-    X_cudf = cudf.DataFrame(X)
     model = NearestNeighbors(
         n_neighbors=n_neighbors, algorithm="auto", metric="euclidean"
     )
-    nbrs = model.fit(X_cudf)
-    distances, indices = nbrs.kneighbors(X_cudf)
-    distances = distances.to_numpy()
-    indices = indices.to_numpy()
+    nbrs = model.fit(X)
+    distances, indices = nbrs.kneighbors(X)
 
     rho = rho[random_idx]
 

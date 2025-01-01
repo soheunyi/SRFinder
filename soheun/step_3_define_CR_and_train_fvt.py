@@ -1,4 +1,5 @@
 from copy import deepcopy
+import logging
 import torch
 import pandas as pd
 import numpy as np
@@ -31,7 +32,7 @@ W_4B_CUT_MIN = 0.001
 W_4B_CUT_MAX = 0.999
 
 
-def routine(config: dict):
+def routine(config: dict, file_handler: logging.FileHandler | None = None):
     print("Experiment Configuration")
     print(config)
     print("Current Time: ", pd.Timestamp.now())
@@ -282,6 +283,7 @@ def routine(config: dict):
         lr_scheduler_config=CR_fvt_hparams["lr_scheduler"],
         early_stop_patience=CR_fvt_hparams["early_stop_patience"],
         dataloader_config=CR_fvt_hparams["dataloader"],
+        file_handler=file_handler,
     )
 
     CR_fvt_tinfo.update_aux_info(
