@@ -1,7 +1,36 @@
+import time
+from typing import Literal
 import numpy as np
-from events_data import EventsData
+import torch
+from dataset import MotherSamples
+from events_data import EventsData, events_from_scdinfo
 from fvt_classifier import FvTClassifier
 from attention_classifier import AttentionClassifier
+from training_info import TrainingInfo
+
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
+
+features = [
+    "sym_Jet0_pt",
+    "sym_Jet1_pt",
+    "sym_Jet2_pt",
+    "sym_Jet3_pt",
+    "sym_Jet0_eta",
+    "sym_Jet1_eta",
+    "sym_Jet2_eta",
+    "sym_Jet3_eta",
+    "sym_Jet0_phi",
+    "sym_Jet1_phi",
+    "sym_Jet2_phi",
+    "sym_Jet3_phi",
+    "sym_Jet0_m",
+    "sym_Jet1_m",
+    "sym_Jet2_m",
+    "sym_Jet3_m",
+]
 
 
 def get_DRs(
@@ -61,3 +90,130 @@ def get_SR_CR_cut(SR_stats: np.ndarray, events_train: EventsData, SRCR_hparams: 
         raise ValueError("SR and CR cuts are the same")
 
     return SR_cut, CR_cut
+
+
+def get_events(tinfo: TrainingInfo, signal_filename: str):
+    ms_hash = tinfo.ms_hash
+    ms_idx = tinfo.ms_idx
+    msamples = MotherSamples.load(ms_hash)
+    train_scdinfo = msamples.scdinfo[ms_idx]
+    tst_scdinfo = msamples.scdinfo[~ms_idx]
+    events_train = events_from_scdinfo(train_scdinfo, features, signal_filename)
+    events_tst = events_from_scdinfo(tst_scdinfo, features, signal_filename)
+    return events_train, events_tst
+
+
+def get_base_and_smeared_DRs(events_tst: EventsData, smeared_hash: str):
+    smeared_tinfo = TrainingInfo.load(smeared_hash)
+    smeared_fvt_model = smeared_tinfo.load_trained_model("best")
+    smeared_fvt_model.eval()
+    smeared_fvt_model.to(torch.device("cuda"))
+    smeared_fvt_model: AttentionClassifier
+
+    base_hash = smeared_tinfo.hparams["encoder_hash"]
+    base_tinfo = TrainingInfo.load(base_hash)
+    base_fvt_model = base_tinfo.load_trained_model("best")
+    base_fvt_model.eval()
+    base_fvt_model.to(torch.device("cuda"))
+    base_fvt_model: FvTClassifier
+
+    base_fvt_score, base_q_repr = base_fvt_model.predict_and_representations(
+        events_tst.X_torch
+    )
+    base_fvt_score = base_fvt_score[:, 1].cpu().numpy()
+    gamma_base = base_fvt_score / (1 - base_fvt_score)
+    base_q_repr = base_q_repr.cpu().numpy()
+
+    smeared_fvt_score = smeared_fvt_model.predict(base_q_repr)[:, 1].cpu().numpy()
+    gamma_smeared = smeared_fvt_score / (1 - smeared_fvt_score)
+
+    return gamma_base, gamma_smeared
+
+
+def compute_sr_stats(
+    hashes: list[str],
+    signal_filename: str,
+    ensemble_mode: Literal["mean", "max"] = "max",
+    stats_type: Literal["fvt", "smeared"] = "smeared",
+):
+    tinfo_0 = TrainingInfo.load(hashes[0])
+    # logger.info(f"Loading events for {tinfo_0.hash}")
+    events_train, events_tst = get_events(tinfo_0, signal_filename)
+    # logger.info(f"Loaded events for {tinfo_0.hash}")
+    tinfo_list: list[TrainingInfo] = []
+
+    for hash in hashes:
+        tinfo = TrainingInfo.load(hash)
+        assert tinfo.aux_info["step"] == 2, f"{hash}: Step is {tinfo.aux_info['step']}"
+        assert tinfo.ms_hash == tinfo_0.ms_hash, f"{hash}: MS hash is not matching"
+        assert np.all(tinfo.ms_idx == tinfo_0.ms_idx), f"{hash}: MS idx is not matching"
+        tinfo_list.append(tinfo)
+
+    sr_stats_tst_list = []
+    sr_stats_train_list = []
+
+    if stats_type == "smeared":
+        # logger.info(f"Processing {len(tinfo_list)} models")
+        for tinfo in tinfo_list:
+            # logger.info(f"Processing {tinfo.hash}")
+            if "SR_stats_train" in tinfo.aux_info:
+                # logger.info(f"SR stats for {tinfo.hash} already computed")
+                SR_stats_train = tinfo.aux_info["SR_stats_train"]
+            else:
+                # logger.info(f"Computing SR stats for {tinfo.hash}")
+                gamma_base, gamma_smeared = get_base_and_smeared_DRs(
+                    events_train, tinfo.hash
+                )
+                SR_stats_train = np.log(gamma_base / gamma_smeared)
+                tinfo.update_aux_info(SR_stats_train=SR_stats_train)
+                tinfo.save()
+
+            if "SR_stats_tst" in tinfo.aux_info:
+                # logger.info(f"SR stats for {tinfo.hash} already computed")
+                SR_stats_tst = tinfo.aux_info["SR_stats_tst"]
+            else:
+                # logger.info(f"Computing SR stats for {tinfo.hash}")
+                gamma_base, gamma_smeared = get_base_and_smeared_DRs(
+                    events_tst, tinfo.hash
+                )
+                SR_stats_tst = np.log(gamma_base / gamma_smeared)
+                tinfo.update_aux_info(SR_stats_tst=SR_stats_tst)
+                tinfo.save()
+
+            sr_stats_train_list.append(SR_stats_train)
+            sr_stats_tst_list.append(SR_stats_tst)
+
+    elif stats_type == "fvt":
+        # logger.info(f"Processing {len(tinfo_list)} models")
+        for tinfo in tinfo_list:
+            # logger.info(f"Processing {tinfo.hash}")
+            base_hash = tinfo.hparams["encoder_hash"]
+            base_tinfo = TrainingInfo.load(base_hash)
+            base_fvt_model = base_tinfo.load_trained_model("best")
+            base_fvt_model.eval()
+            base_fvt_model.to(torch.device("cuda"))
+            base_fvt_model: FvTClassifier
+
+            base_fvt_score_train = (
+                base_fvt_model.predict(events_train.X_torch)[:, 1].cpu().numpy()
+            )
+            sr_stats_train_list.append(base_fvt_score_train)
+
+            base_fvt_score_tst = (
+                base_fvt_model.predict(events_tst.X_torch)[:, 1].cpu().numpy()
+            )
+            sr_stats_tst_list.append(base_fvt_score_tst)
+
+    else:
+        raise ValueError(f"stats_type {stats_type} not supported")
+
+    if ensemble_mode == "mean":
+        sr_stats_train = np.mean(sr_stats_train_list, axis=0)
+        sr_stats_tst = np.mean(sr_stats_tst_list, axis=0)
+    elif ensemble_mode == "max":
+        sr_stats_train = np.max(sr_stats_train_list, axis=0)
+        sr_stats_tst = np.max(sr_stats_tst_list, axis=0)
+    else:
+        raise ValueError(f"ensemble_mode {ensemble_mode} not supported")
+
+    return sr_stats_train, sr_stats_tst

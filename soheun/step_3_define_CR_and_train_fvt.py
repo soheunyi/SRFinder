@@ -15,7 +15,7 @@ from events_data import EventsData, events_from_scdinfo
 from fvt_classifier import FvTClassifier
 from training_info import TrainingInfo
 from utils import require_keys
-from signal_region import get_DRs, get_SR_CR_cut
+from signal_region import get_SR_CR_cut, compute_sr_stats
 
 
 ###########################################################################################
@@ -59,7 +59,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     )
     require_keys(
         config["signal_region"],
-        ["4b_in_SR", "4b_in_CR"],
+        ["4b_in_SR", "4b_in_CR", "ensemble_mode", "stats_type", "SR_stats_hashes"],
     )
     require_keys(
         config["CR_fvt"],
@@ -147,81 +147,100 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     ]
 
     # 1. Find and load encoder & smeared FvT model
-    hashes = TrainingInfo.find(
-        {
-            "dataset": lambda x: (
-                x["n_3b"] == n_3b
-                and x["ratio_4b"] == ratio_4b
-                and x["signal_ratio"] == signal_ratio
-                and x["signal_filename"] == signal_filename
-                and x["seed"] == seed
-            ),
-            "aux_info_step": 2,
-            "experiment_name": config["previous_step_experiment_name"],
-        }
-    )
-    assert (
-        len(hashes) == 1
-    ), f"Number of training info must be one, there are {len(hashes)}"
-    smeared_fvt_tinfo = TrainingInfo.load(hashes[0])
-    CR_fvt_hparams["smeared_fvt_hash"] = smeared_fvt_tinfo.hash
-    base_encoder_hash = smeared_fvt_tinfo.hparams["encoder_hash"]
-    CR_fvt_hparams["encoder_hash"] = base_encoder_hash
+    # hashes = TrainingInfo.find(
+    #     {
+    #         "dataset": lambda x: (
+    #             x["n_3b"] == n_3b
+    #             and x["ratio_4b"] == ratio_4b
+    #             and x["signal_ratio"] == signal_ratio
+    #             and x["signal_filename"] == signal_filename
+    #             and x["seed"] == seed
+    #         ),
+    #         "aux_info_step": 2,
+    #         "experiment_name": config["previous_step_experiment_name"],
+    #     }
+    # )
+    # assert (
+    #     len(hashes) == 1
+    # ), f"Number of training info must be one, there are {len(hashes)}"
 
-    base_fvt_model = TrainingInfo.load(base_encoder_hash).load_trained_model(
-        # CR_fvt_hparams["encoder_mode"]
-        "best"
-    )
-    base_fvt_model: FvTClassifier
-    base_fvt_model.eval()
-    base_fvt_model.to(torch.device("cuda"))
+    # smeared_fvt_tinfo = TrainingInfo.load(hashes[0])
+    # CR_fvt_hparams["smeared_fvt_hash"] = smeared_fvt_tinfo.hash
+    # base_encoder_hash = smeared_fvt_tinfo.hparams["encoder_hash"]
+    # CR_fvt_hparams["encoder_hash"] = base_encoder_hash
 
-    smeared_fvt_model = smeared_fvt_tinfo.load_trained_model(
-        # CR_fvt_hparams["encoder_mode"]
-        "best"
-    )
-    smeared_fvt_model: AttentionClassifier
-    smeared_fvt_model.eval()
-    smeared_fvt_model.to(torch.device("cuda"))
+    SR_stats_hashes = config["signal_region"]["SR_stats_hashes"]
+    ensemble_mode = config["signal_region"]["ensemble_mode"]
+    stats_type = config["signal_region"]["stats_type"]
+
+    # base_fvt_model = TrainingInfo.load(base_encoder_hash).load_trained_model(
+    #     # CR_fvt_hparams["encoder_mode"]
+    #     "best"
+    # )
+    # base_fvt_model: FvTClassifier
+    # base_fvt_model.eval()
+    # base_fvt_model.to(torch.device("cuda"))
+
+    # smeared_fvt_model = smeared_fvt_tinfo.load_trained_model("best")
+    # smeared_fvt_model: AttentionClassifier
+    # smeared_fvt_model.eval()
+    # smeared_fvt_model.to(torch.device("cuda"))
 
     # Use the same mother samples and exclude ones used for training base & smeared FvT model
-    msamples = MotherSamples.load(smeared_fvt_tinfo.ms_hash)
+    tinfo_0 = TrainingInfo.load(SR_stats_hashes[0])
+    assert tinfo_0.aux_info["step"] == 2
+    for hash in SR_stats_hashes:
+        tinfo = TrainingInfo.load(hash)
+        assert tinfo.ms_hash == tinfo_0.ms_hash
+        assert np.all(tinfo.ms_idx == tinfo_0.ms_idx)
+        assert tinfo.aux_info["step"] == 2
+
+    msamples = MotherSamples.load(tinfo_0.ms_hash)
     events_train = events_from_scdinfo(
-        msamples.scdinfo[smeared_fvt_tinfo.ms_idx], features, signal_filename
+        msamples.scdinfo[tinfo_0.ms_idx], features, signal_filename
     )
-    events_tst = events_from_scdinfo(
-        msamples.scdinfo[~smeared_fvt_tinfo.ms_idx], features, signal_filename
+    # events_tst = events_from_scdinfo(
+    #     msamples.scdinfo[~tinfo_0.ms_idx], features, signal_filename
+    # )
+
+    # if ("SR_stats_train" not in smeared_fvt_tinfo.aux_info) or (
+    #     "SR_stats_tst" not in smeared_fvt_tinfo.aux_info
+    # ):
+    #     print("Calculating SR_stats_train and SR_stats_tst")
+    #     events_all = EventsData.merge([events_train, events_tst])
+    #     gamma_base_all, gamma_smeared_all, _ = get_DRs(
+    #         events_all, base_fvt_model, smeared_fvt_model, return_repr=True
+    #     )
+    #     SR_stats_all = np.log(gamma_base_all / gamma_smeared_all)
+
+    #     SR_stats_train = SR_stats_all[: len(events_train)]
+    #     SR_stats_tst = SR_stats_all[len(events_train) :]
+
+    #     smeared_fvt_tinfo.update_aux_info(
+    #         SR_stats_train=SR_stats_train,
+    #         SR_stats_tst=SR_stats_tst,
+    #     )
+    #     smeared_fvt_tinfo.save()
+    # else:
+    #     print("Using cached SR_stats_train and SR_stats_tst")
+    #     SR_stats_train = smeared_fvt_tinfo.aux_info["SR_stats_train"]
+    #     SR_stats_tst = smeared_fvt_tinfo.aux_info["SR_stats_tst"]
+
+    # tinfo_0 = TrainingInfo.load(SR_stats_hashes[0])
+
+    SR_stats_train, SR_stats_tst = compute_sr_stats(
+        SR_stats_hashes,
+        signal_filename,
+        ensemble_mode,
+        stats_type,
     )
-
-    if ("SR_stats_train" not in smeared_fvt_tinfo.aux_info) or (
-        "SR_stats_tst" not in smeared_fvt_tinfo.aux_info
-    ):
-        print("Calculating SR_stats_train and SR_stats_tst")
-        events_all = EventsData.merge([events_train, events_tst])
-        gamma_base_all, gamma_smeared_all, _ = get_DRs(
-            events_all, base_fvt_model, smeared_fvt_model, return_repr=True
-        )
-        SR_stats_all = np.log(gamma_base_all / gamma_smeared_all)
-
-        SR_stats_train = SR_stats_all[: len(events_train)]
-        SR_stats_tst = SR_stats_all[len(events_train) :]
-
-        smeared_fvt_tinfo.update_aux_info(
-            SR_stats_train=SR_stats_train,
-            SR_stats_tst=SR_stats_tst,
-        )
-        smeared_fvt_tinfo.save()
-    else:
-        print("Using cached SR_stats_train and SR_stats_tst")
-        SR_stats_train = smeared_fvt_tinfo.aux_info["SR_stats_train"]
-        SR_stats_tst = smeared_fvt_tinfo.aux_info["SR_stats_tst"]
 
     SR_cut, CR_cut = get_SR_CR_cut(
         SR_stats_train, events_train, config["signal_region"]
     )
     CR_idx = (SR_stats_tst >= CR_cut) & (SR_stats_tst < SR_cut)
 
-    tst_ms_idx = ~smeared_fvt_tinfo.ms_idx
+    tst_ms_idx = ~tinfo_0.ms_idx
     tst_ms_idx_int = tst_ms_idx.nonzero()[0]
     CR_ms_idx_int = tst_ms_idx_int[CR_idx]
     CR_ms_idx_bool = np.zeros_like(tst_ms_idx, dtype=bool)
@@ -229,7 +248,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
 
     CR_fvt_tinfo = TrainingInfo(
         CR_fvt_hparams,
-        ms_hash=smeared_fvt_tinfo.ms_hash,
+        ms_hash=tinfo_0.ms_hash,
         ms_idx=CR_ms_idx_bool,
     )
 
@@ -243,6 +262,10 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     pl.seed_everything(CR_fvt_hparams["model_seed"])
 
     if CR_fvt_hparams["model"] == "AttentionClassifier":
+        if len(SR_stats_hashes) > 1:
+            raise ValueError("AttentionClassifier does not support ensemble mode")
+        base_encoder_hash = tinfo_0.hparams["encoder_hash"]
+        base_fvt_model = TrainingInfo.load(base_encoder_hash).load_trained_model("best")
         q_repr_train = base_fvt_model.q_repr(CR_fvt_train_dset.tensors[0])
         q_repr_val = base_fvt_model.q_repr(CR_fvt_val_dset.tensors[0])
         CR_fvt_train = TensorDataset(
@@ -287,11 +310,11 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     )
 
     CR_fvt_tinfo.update_aux_info(
-        description=f"FvT on Control Region, based on base FvT={base_encoder_hash}, smeared FvT={smeared_fvt_tinfo.hash}",
+        description=f"FvT on Control Region",
         step=3,
     )
     CR_fvt_tinfo.save()
-    TrainingInfo.update_metadata()
+    # TrainingInfo.update_metadata()
 
 
 @click.command()

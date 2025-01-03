@@ -7,10 +7,10 @@
 #SBATCH --mem-per-cpu 8G
 
 # number of GPUs you need
-#SBATCH --gres=gpu:1	
+#SBATCH --gres=gpu:1
 
 # maximum time limit for task (up to 48 hours, 48:00:00)
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 
 # email you when job is finished:
 #SBATCH --mail-user=no.reply@gmail.com

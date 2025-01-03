@@ -82,7 +82,7 @@ def compute_sr_stats(
         tinfo = TrainingInfo.load(hash)
         assert tinfo.aux_info["step"] == 2
         assert tinfo.ms_hash == tinfo_0.ms_hash
-        assert tinfo.ms_idx == tinfo_0.ms_idx
+        assert np.all(tinfo.ms_idx == tinfo_0.ms_idx)
         tinfo_list.append(tinfo)
 
     sr_stats_tst_list = []

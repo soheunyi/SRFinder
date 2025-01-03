@@ -4,6 +4,8 @@ import pathlib
 import pickle
 import time
 from typing import Iterable
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -19,6 +21,13 @@ from utils import create_hash, require_keys
 from fvt_classifier import FvTClassifier
 from attention_classifier import AttentionClassifier
 from smearing import smear_features
+
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 TINFO_SAVE_DIR = pathlib.Path(__file__).parent / "data/TrainingInfo"
 TINFO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -253,7 +262,7 @@ class TrainingInfo:
         self._aux_info.update(kwargs)
 
     def save(self):
-        print(f"Saving Training Info: {self.hash}")
+        logger.info(f"Saving Training Info: {self.hash}")
         with open(self.SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 
@@ -268,41 +277,84 @@ class TrainingInfo:
         return hparams
 
     @classmethod
-    def load_metadata(cls):
+    def load_metadata(cls) -> dict:
         retry = 0
-        while retry < 6:
+        while retry < 1:
             try:
                 with open(cls.META_DIR, "rb") as f:
                     return pickle.load(f)
-            except (EOFError, pickle.UnpicklingError):
+            except (EOFError, pickle.UnpicklingError) as e:
                 # Handle corrupted pickle file
-                print(
-                    f"Warning: Metadata file at {cls.META_DIR} appears to be corrupted. Retrying..."
+                logger.warning(
+                    f"Warning: Metadata file at {cls.META_DIR} appears to be corrupted ({e}). Retrying..."
                 )
                 retry += 1
             except FileNotFoundError:
                 # Handle missing file
-                print(f"Warning: No metadata file found at {cls.META_DIR}. Retrying...")
+                logger.warning(
+                    f"Warning: No metadata file found at {cls.META_DIR}. Retrying..."
+                )
                 retry += 1
             # wait for 10 + Uniform(0, 1) seconds
             time.sleep(10 + np.random.rand())
-        print(f"Failed to load metadata file after {retry} retries.")
+        logger.error(f"Failed to load metadata file after {retry} retries.")
         return {}
 
     @classmethod
     def update_metadata(cls):
+        # Check if metadata cache exists
+        existing_metadata = cls.load_metadata()
+
+        # Find all names of experiment files
+        all_files = list(cls.SAVE_DIR.glob("*"))
+        all_hashes = [file.name for file in all_files]
+        existing_hashes = set(existing_metadata.keys())
+
+        added_files = [file for file in all_files if file.name not in existing_hashes]
+        removed_hashes = [hash_ for hash_ in existing_hashes if hash_ not in all_hashes]
+
+        logger.info(
+            f"Adding {len(added_files)} files, removing {len(removed_hashes)} hashes"
+        )
+
+        # Use a thread pool to read files in parallel
+        with ThreadPoolExecutor() as executor:
+            results = list(
+                tqdm.tqdm(
+                    executor.map(cls._process_file, added_files), total=len(added_files)
+                )
+            )
+
+        # Update metadata with new or modified entries
+        for hash_, hparams in results:
+            if hash_ not in existing_metadata or existing_metadata[hash_] != hparams:
+                existing_metadata[hash_] = hparams
+
+        # Remove removed files from metadata
+        for hash_ in removed_hashes:
+            if hash_ in existing_metadata:
+                del existing_metadata[hash_]
+
+        # Save updated metadata
         with open(cls.META_DIR, "wb") as f:
-            hashes, hparams = cls.find({}, return_hparams=True, from_metadata=False)
-            # Do not save aux_info in metadata
-            hparams_cleaned = []
-            for hparam in hparams:
-                hparam_cleaned = {}
-                for key in hparam.keys():
+            pickle.dump(existing_metadata, f)
+
+    @staticmethod
+    def _process_file(file_path):
+        try:
+            with open(file_path, "rb") as f:
+                tinfo = pickle.load(f)
+                tinfo: TrainingInfo
+                # Clean the hyperparameters
+                hparams_cleaned = {}
+                for key in tinfo.hparams.keys():
                     if re.match(r"^aux_info.*", key) and key != "aux_info_step":
                         continue
-                    hparam_cleaned[key] = hparam[key]
-                hparams_cleaned.append(hparam_cleaned)
-            pickle.dump(dict(zip(hashes, hparams_cleaned)), f)
+                    hparams_cleaned[key] = tinfo.hparams[key]
+                return tinfo.hash, hparams_cleaned
+        except Exception as e:
+            logger.error(f"Failed to process file {file_path}: {e}")
+            return None, None
 
     @classmethod
     def find(

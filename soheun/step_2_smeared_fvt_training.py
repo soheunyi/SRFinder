@@ -182,7 +182,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         step=2,
     )
     smeared_fvt_tinfo.save()
-    TrainingInfo.update_metadata()
+    # TrainingInfo.update_metadata()
 
 
 @click.command()

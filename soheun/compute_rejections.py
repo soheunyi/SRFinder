@@ -23,9 +23,10 @@ pull_arrays = {
     for signal_ratio, nbins in product(signal_ratios, nbins_list)
 }
 
-experiment_name = "CR_fvt_training_v2"
+experiment_name = "CR_fvt_training_ensemble_max_fvt"
 print(f"Experiment name: {experiment_name}")
 print(f"Enumerating hashes, time spend={time.time()-start_time}")
+n_hashes = 0
 for hash in test_info_dict:
     tinfo = TrainingInfo.load(hash)
     if tinfo.hparams["experiment_name"] != experiment_name:
@@ -35,7 +36,9 @@ for hash in test_info_dict:
     pulls = test_info_dict[hash]["pulls"]
     for nbins in nbins_list:
         pull_arrays[(signal_ratio, nbins)].append(pulls[nbins])
+    n_hashes += 1
 
+print(f"Number of hashes: {n_hashes}")
 pull_arrays = {k: np.array(v) for k, v in pull_arrays.items()}
 
 for nbins, signal_ratio in product(nbins_list, signal_ratios):

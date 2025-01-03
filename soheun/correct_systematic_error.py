@@ -1,4 +1,5 @@
 from copy import deepcopy
+import time
 import numpy as np
 import pandas as pd
 import torch
@@ -7,10 +8,14 @@ from fvt_classifier import FvTClassifier
 from attention_classifier import AttentionClassifier
 from dataset import MotherSamples, split_scdinfo
 from events_data import EventsData, events_from_scdinfo, get_is_signal
-from signal_region import get_SR_CR_cut
+from signal_region import get_SR_CR_cut, compute_sr_stats
 from training_info import TrainingInfo
 from utils import get_quantiles_with_weights
 
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 features = [
     "sym_Jet0_pt",
@@ -171,6 +176,8 @@ def correct_systematic_error(
     slope_max: float = 0.0,
     raw_df_list: list[pd.DataFrame] = [],
 ):
+    start_time = time.time()
+
     if len(raw_df_list) == 0:
         df_3b = pd.read_hdf("../events/MG3/dataframes/threeTag_picoAOD.h5")
         df_bg4b = pd.read_hdf("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
@@ -183,31 +190,24 @@ def correct_systematic_error(
     corrections = {nbins: [] for nbins in nbins_list}
     hist_corrected_dict = {}
 
+    # logger.info(f"Loading CR_fvt_tinfo for {CR_fvt_hash}")
+    start_time = time.time()
+
     CR_fvt_tinfo = TrainingInfo.load(CR_fvt_hash)
-    base_encoder_hash = CR_fvt_tinfo.hparams["encoder_hash"]
-    base_fvt_tinfo = TrainingInfo.load(base_encoder_hash)
-    smeared_fvt_hash = CR_fvt_tinfo.hparams["smeared_fvt_hash"]
-    smeared_fvt_tinfo = TrainingInfo.load(smeared_fvt_hash)
-
-    base_fvt_model = base_fvt_tinfo.load_trained_model(
-        CR_fvt_tinfo.hparams["encoder_mode"]
+    SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
+    ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
+    stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
+    SR_stats_train, SR_stats_tst = compute_sr_stats(
+        SR_stats_hashes, signal_filename, ensemble_mode, stats_type
     )
-    base_fvt_model.eval()
-    base_fvt_model.to(torch.device("cuda"))
-    base_fvt_model: FvTClassifier
-
-    smeared_fvt_model = smeared_fvt_tinfo.load_trained_model(
-        CR_fvt_tinfo.hparams["encoder_mode"]
-    )
-    smeared_fvt_model.eval()
-    smeared_fvt_model.to(torch.device("cuda"))
-    smeared_fvt_model: AttentionClassifier
-
+    # logger.info(f"Computed SR stats for {CR_fvt_hash}")
     # Use the same mother samples and exclude ones used for training base & smeared FvT model
-    msamples = MotherSamples.load(smeared_fvt_tinfo.ms_hash)
-    tst_scdinfo = msamples.scdinfo[~smeared_fvt_tinfo.ms_idx]
-    train_scdinfo = msamples.scdinfo[smeared_fvt_tinfo.ms_idx]
+    ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
+    msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
+    train_scdinfo = msamples.scdinfo[ms_idx]
+    tst_scdinfo = msamples.scdinfo[~ms_idx]
 
+    # logger.info(f"Fetching data for {CR_fvt_hash}")
     df_train = train_scdinfo.fetch_data_with_loaded_df(raw_df_list)
     df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
     events_train = EventsData.from_dataframe(df_train, features)
@@ -215,22 +215,24 @@ def correct_systematic_error(
     df_tst = tst_scdinfo.fetch_data_with_loaded_df(raw_df_list)
     df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
 
-    SR_stats_train = smeared_fvt_tinfo.aux_info["SR_stats_train"]
-    SR_stats_tst = smeared_fvt_tinfo.aux_info["SR_stats_tst"]
+    # logger.info(f"Fetched data for {CR_fvt_hash}")
+
+    # SR_stats_train = CR_fvt_tinfo.aux_info["SR_stats_train"]
+    # SR_stats_tst = CR_fvt_tinfo.aux_info["SR_stats_tst"]
     SR_cut, _ = get_SR_CR_cut(
         SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]
     )
 
     events_train_SR = events_train[SR_stats_train >= SR_cut]
     SR_stats_train_SR = SR_stats_train[SR_stats_train >= SR_cut]
-
+    # logger.info(f"Computed SR stats for {CR_fvt_hash}")
     SR_idx = SR_stats_tst >= SR_cut
     SR_stats_SR = SR_stats_tst[SR_idx]
     scdinfo_SR = tst_scdinfo[SR_idx]
     events_SR = EventsData.from_dataframe(
         scdinfo_SR.fetch_data_with_loaded_df(raw_df_list), features
     )
-
+    # logger.info(f"Fetched data for {CR_fvt_hash}")
     CR_fvt_model = CR_fvt_tinfo.load_trained_model("best")
     CR_fvt_model.eval()
     CR_fvt_model.to(torch.device("cuda"))
@@ -238,13 +240,13 @@ def correct_systematic_error(
     fvt_scores_SR = CR_fvt_model.predict(events_SR.X_torch)[:, 1].detach().cpu().numpy()
     reweights_SR = fvt_scores_SR / (1 - fvt_scores_SR)
     reweights_SR = np.where(events_SR.is_4b, 1, reweights_SR)
-
+    # logger.info(f"Computed reweights for {CR_fvt_hash}")
     fvt_scores_train_SR = (
         CR_fvt_model.predict(events_train_SR.X_torch)[:, 1].detach().cpu().numpy()
     )
     reweights_train_SR = fvt_scores_train_SR / (1 - fvt_scores_train_SR)
     reweights_train_SR = np.where(events_train_SR.is_4b, 1, reweights_train_SR)
-
+    # logger.info(f"Computed reweights for {CR_fvt_hash}")
     for nbins in nbins_list:
         if bins_mode == "quantile":
             SR_bins = get_quantiles_with_weights(

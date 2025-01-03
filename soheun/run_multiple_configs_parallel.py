@@ -8,6 +8,7 @@ from step_3_define_CR_and_train_fvt import routine as step_3_routine
 import torch
 import logging
 from datetime import datetime
+from training_info import TrainingInfo
 
 logging.basicConfig(level=logging.INFO)
 
@@ -107,6 +108,9 @@ def main(config, nprocs):
         process_args = [(parent_pid, pid, cfg, nprocs) for pid, cfg in process_args]
         # Use executor.map with the new function and args
         executor.map(run_process_with_id, process_args)
+
+    # update metadata
+    TrainingInfo.update_metadata()
 
 
 if __name__ == "__main__":

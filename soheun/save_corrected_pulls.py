@@ -9,6 +9,7 @@ import pickle
 from correct_systematic_error import correct_systematic_error
 from concurrent.futures import ProcessPoolExecutor
 
+TrainingInfo.update_metadata()
 
 features = [
     "sym_Jet0_pt",
@@ -42,7 +43,7 @@ print("Dataframes loaded")
 
 seeds = np.arange(50)
 nbins_list = [2**i for i in range(7)]
-experiment_name = "CR_fvt_training_repr_norm"
+experiment_name = "CR_fvt_training_ensemble_max_smeared"
 bins_mode = "quantile"
 n_3b = 100_0000
 
@@ -104,16 +105,18 @@ target_hashes = set(hashes) - set(test_info_dict.keys())
 print(f"Number of hashes to process: {len(target_hashes)}")
 
 print("Processing hashes starting")
-n_processes = 5
-with ProcessPoolExecutor(max_workers=n_processes) as executor:
-    test_infos = list(
-        tqdm.tqdm(executor.map(process_hash, target_hashes), total=len(target_hashes))
-    )
-    for hash, test_info in zip(target_hashes, test_infos):
-        test_info_dict[hash] = test_info
+# n_processes = 5
+# with ProcessPoolExecutor(max_workers=n_processes) as executor:
+#     test_infos = list(
+#         tqdm.tqdm(executor.map(process_hash, target_hashes), total=len(target_hashes))
+#     )
+#     for hash, test_info in zip(target_hashes, test_infos):
+#         test_info_dict[hash] = test_info
+
+for hash in tqdm.tqdm(target_hashes):
+    test_info_dict[hash] = process_hash(hash)
+    with open(test_info_dict_name, "wb") as f:
+        pickle.dump(test_info_dict, f)
+
 
 print("Processing hashes done")
-
-
-with open(test_info_dict_name, "wb") as f:
-    pickle.dump(test_info_dict, f)

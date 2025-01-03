@@ -19,6 +19,9 @@ from utils import safe_dict
 
 logging.info("Custom modules loaded")
 
+# update metadata before running
+TrainingInfo.update_metadata()
+
 
 def find_and_check_hash_unique(hparams_filter: dict):
     """Finds a unique training info hash based on a filter.
@@ -37,6 +40,16 @@ def find_and_check_hash_unique(hparams_filter: dict):
         len(hashes) == 1
     ), f"Expected 1 training info, found {len(hashes)} for filter: {hparams_filter}"
     return hashes[0]
+
+
+def find_and_check_hashes_have_same_ms(hparams_filter: dict):
+    hashes = TrainingInfo.find(hparams_filter)
+    tinfo_0 = TrainingInfo.load(hashes[0])
+    for hash in hashes:
+        tinfo = TrainingInfo.load(hash)
+        assert tinfo.ms_hash == tinfo_0.ms_hash
+        assert np.all(tinfo.ms_idx == tinfo_0.ms_idx)
+    return list(hashes)
 
 
 def check_dataset_conditions(
@@ -91,7 +104,10 @@ NPROCS = 10
 # EXPERIMENT_NAME = "CR_fvt_training_repr_norm"
 # BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
-EXPERIMENT_NAME = "CR_fvt_training_ensemble"
+# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_smeared"
+# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
+
+EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_fvt"
 BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 
@@ -99,9 +115,11 @@ BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 ################################## Set What to Run ###################################
 ######################################################################################
 
+# signal_ratios = [0.0]
+# dataset_seeds = range(1)  # start with ten seeds, will be increased to fifty later
 signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
-ensemble_seeds = range(15)
+ensemble_seeds = range(1)
 
 hparams_filter = {
     "experiment_name": EXPERIMENT_NAME,
@@ -184,7 +202,7 @@ for signal_ratio, seed, ensemble_seed in targets:
     config["CR_fvt"]["data_seed"] = ensemble_seed
     previous_step_experiment_name = "smeared_fvt_training_ensemble"
     config["previous_step_experiment_name"] = previous_step_experiment_name
-    config["previous_step_experiment_hash"] = find_and_check_hash_unique(
+    config["signal_region"]["SR_stats_hashes"] = find_and_check_hashes_have_same_ms(
         {
             "experiment_name": previous_step_experiment_name,
             "aux_info_step": 2,
@@ -195,11 +213,14 @@ for signal_ratio, seed, ensemble_seed in targets:
                 config["dataset"]["signal_filename"],
                 config["dataset"]["seed"],
             ),
-            "train_seed": ensemble_seed,
-            "model_seed": ensemble_seed,
-            "data_seed": ensemble_seed,
         }
     )
+    config["signal_region"]["ensemble_mode"] = "max"
+    # config["signal_region"]["stats_type"] = "smeared"
+    config["signal_region"]["stats_type"] = "fvt"
+    config["CR_fvt"]["train_seed"] = ensemble_seed
+    config["CR_fvt"]["model_seed"] = ensemble_seed
+    config["CR_fvt"]["data_seed"] = ensemble_seed
 
     # Step 3 config
     # config["CR_fvt"]["train_seed"] = seed
