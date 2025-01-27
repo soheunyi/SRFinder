@@ -1,5 +1,7 @@
 from copy import deepcopy
+import pathlib
 import time
+from typing import Literal
 import numpy as np
 import pandas as pd
 import torch
@@ -74,14 +76,18 @@ def constrained_linear_fit(
 
     if beta_1_min == beta_1_max == 0:
         X = X[:, 0].reshape(-1, 1)
-        A = X.T @ np.linalg.inv(V) @ X
-        b = X.T @ np.linalg.inv(V) @ y.reshape(-1, 1)
+        XT_V_inv = X.T / V.reshape(-1, 1)
+        XT_V_inv[np.isnan(XT_V_inv)] = 0
+        A = XT_V_inv @ X
+        b = XT_V_inv @ y.reshape(-1, 1)
         beta_0 = (b / A)[0, 0]
         beta_0 = np.clip(beta_0, beta_0_min, beta_0_max)
         return beta_0, 0
 
-    A = X.T @ np.linalg.inv(V) @ X
-    b = X.T @ np.linalg.inv(V) @ y.reshape(-1, 1)
+    XT_V_inv = X.T / V.reshape(1, -1)
+    XT_V_inv[np.isnan(XT_V_inv)] = 0
+    A = XT_V_inv @ X
+    b = XT_V_inv @ y.reshape(-1, 1)
 
     A_inv = np.linalg.inv(A)
     sol = (A_inv @ b).flatten()
@@ -170,28 +176,28 @@ def correct_systematic_error(
     CR_fvt_hash: str,
     nbins_list: list[int],
     bins_mode: str = "quantile",
+    bins_stats_type: Literal["fvt", "sr_stats"] = "fvt",
     intercept_min: float = -np.inf,
     intercept_max: float = np.inf,
     slope_min: float = 0.0,
     slope_max: float = 0.0,
-    raw_df_list: list[pd.DataFrame] = [],
+    loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
 ):
-    start_time = time.time()
 
-    if len(raw_df_list) == 0:
-        df_3b = pd.read_hdf("../events/MG3/dataframes/threeTag_picoAOD.h5")
-        df_bg4b = pd.read_hdf("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
-        df_signal = pd.read_hdf("../events/MG3/dataframes/HH4b_picoAOD.h5")
+    if len(loaded_df) == 0:
+        path_3b = pathlib.Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
+        path_bg4b = pathlib.Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
+        path_signal = pathlib.Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+        df_3b = pd.read_hdf(path_3b)
+        df_bg4b = pd.read_hdf(path_bg4b)
+        df_signal = pd.read_hdf(path_signal)
         df_3b["signal"] = False
         df_bg4b["signal"] = False
         df_signal["signal"] = True
-        raw_df_list = [df_3b, df_bg4b, df_signal]
+        loaded_df = {path_3b: df_3b, path_bg4b: df_bg4b, path_signal: df_signal}
 
     corrections = {nbins: [] for nbins in nbins_list}
     hist_corrected_dict = {}
-
-    # logger.info(f"Loading CR_fvt_tinfo for {CR_fvt_hash}")
-    start_time = time.time()
 
     CR_fvt_tinfo = TrainingInfo.load(CR_fvt_hash)
     SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
@@ -200,25 +206,18 @@ def correct_systematic_error(
     SR_stats_train, SR_stats_tst = compute_sr_stats(
         SR_stats_hashes, signal_filename, ensemble_mode, stats_type
     )
-    # logger.info(f"Computed SR stats for {CR_fvt_hash}")
-    # Use the same mother samples and exclude ones used for training base & smeared FvT model
     ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
     msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
     train_scdinfo = msamples.scdinfo[ms_idx]
     tst_scdinfo = msamples.scdinfo[~ms_idx]
 
-    # logger.info(f"Fetching data for {CR_fvt_hash}")
-    df_train = train_scdinfo.fetch_data_with_loaded_df(raw_df_list)
+    df_train = train_scdinfo.fetch_data(loaded_df)
     df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
     events_train = EventsData.from_dataframe(df_train, features)
 
-    df_tst = tst_scdinfo.fetch_data_with_loaded_df(raw_df_list)
+    df_tst = tst_scdinfo.fetch_data(loaded_df)
     df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
 
-    # logger.info(f"Fetched data for {CR_fvt_hash}")
-
-    # SR_stats_train = CR_fvt_tinfo.aux_info["SR_stats_train"]
-    # SR_stats_tst = CR_fvt_tinfo.aux_info["SR_stats_tst"]
     SR_cut, _ = get_SR_CR_cut(
         SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]
     )
@@ -228,42 +227,61 @@ def correct_systematic_error(
     # logger.info(f"Computed SR stats for {CR_fvt_hash}")
     SR_idx = SR_stats_tst >= SR_cut
     SR_stats_SR = SR_stats_tst[SR_idx]
-    scdinfo_SR = tst_scdinfo[SR_idx]
-    events_SR = EventsData.from_dataframe(
-        scdinfo_SR.fetch_data_with_loaded_df(raw_df_list), features
+    scdinfo_tst_SR = tst_scdinfo[SR_idx]
+    events_tst_SR = EventsData.from_dataframe(
+        scdinfo_tst_SR.fetch_data(loaded_df), features
     )
-    # logger.info(f"Fetched data for {CR_fvt_hash}")
-    CR_fvt_model = CR_fvt_tinfo.load_trained_model("best")
-    CR_fvt_model.eval()
-    CR_fvt_model.to(torch.device("cuda"))
-    CR_fvt_model: FvTClassifier
-    fvt_scores_SR = CR_fvt_model.predict(events_SR.X_torch)[:, 1].detach().cpu().numpy()
-    reweights_SR = fvt_scores_SR / (1 - fvt_scores_SR)
-    reweights_SR = np.where(events_SR.is_4b, 1, reweights_SR)
+
+    if (
+        "fvt_scores_tst_SR" not in CR_fvt_tinfo.aux_info
+        or "fvt_scores_train_SR" not in CR_fvt_tinfo.aux_info
+    ):
+        CR_fvt_model = CR_fvt_tinfo.load_trained_model("best")
+        CR_fvt_model.eval()
+        CR_fvt_model.to(torch.device("cuda"))
+        CR_fvt_model: FvTClassifier
+
+    if "fvt_scores_tst_SR" not in CR_fvt_tinfo.aux_info:
+        fvt_scores_tst_SR = (
+            CR_fvt_model.predict(events_tst_SR.X_torch)[:, 1].detach().cpu().numpy()
+        )
+    else:
+        fvt_scores_tst_SR = CR_fvt_tinfo.aux_info["fvt_scores_tst_SR"]
+
+    if "fvt_scores_train_SR" not in CR_fvt_tinfo.aux_info:
+        fvt_scores_train_SR = (
+            CR_fvt_model.predict(events_train_SR.X_torch)[:, 1].detach().cpu().numpy()
+        )
+    else:
+        fvt_scores_train_SR = CR_fvt_tinfo.aux_info["fvt_scores_train_SR"]
+
+    reweights_SR = fvt_scores_tst_SR / (1 - fvt_scores_tst_SR)
+    reweights_SR = np.where(events_tst_SR.is_4b, 1, reweights_SR)
     # logger.info(f"Computed reweights for {CR_fvt_hash}")
-    fvt_scores_train_SR = (
-        CR_fvt_model.predict(events_train_SR.X_torch)[:, 1].detach().cpu().numpy()
-    )
     reweights_train_SR = fvt_scores_train_SR / (1 - fvt_scores_train_SR)
     reweights_train_SR = np.where(events_train_SR.is_4b, 1, reweights_train_SR)
     # logger.info(f"Computed reweights for {CR_fvt_hash}")
+    bins_stats_train = (
+        SR_stats_train_SR if bins_stats_type == "sr_stats" else fvt_scores_train_SR
+    )
+    bins_stats_tst = SR_stats_SR if bins_stats_type == "sr_stats" else fvt_scores_tst_SR
     for nbins in nbins_list:
         if bins_mode == "quantile":
             SR_bins = get_quantiles_with_weights(
-                SR_stats_train_SR[events_train_SR.is_3b],
+                bins_stats_train[events_train_SR.is_3b],
                 (reweights_train_SR * events_train_SR.weights)[events_train_SR.is_3b],
                 np.linspace(0, 1, nbins + 1),
             )
         elif bins_mode == "uniform":
             SR_bins = np.linspace(
-                np.min(SR_stats_train_SR), np.max(SR_stats_train_SR), nbins + 1
+                np.min(bins_stats_train), np.max(bins_stats_train), nbins + 1
             )
 
-        hists = get_histograms(events_SR, SR_stats_SR, SR_bins, reweights_SR)
+        hists = get_histograms(events_tst_SR, bins_stats_tst, SR_bins, reweights_SR)
 
         y = hists["4b"] - hists["3b_rw"]
         X = np.stack([hists["3b_rw"], hists["3b_rw_x"]], axis=1)
-        V = np.diag(hists["3b_sq"] + hists["4b_sq"])
+        V = np.array(hists["3b_sq"] + hists["4b_sq"])
 
         intercept, slope = constrained_linear_fit(
             X,
@@ -276,20 +294,21 @@ def correct_systematic_error(
         )
         corrections[nbins].append((intercept, slope))
 
-        corrected_reweights = reweights_SR * (1 + intercept + slope * SR_stats_SR)
+        corrected_reweights = reweights_SR * (1 + intercept + slope * bins_stats_tst)
         corrected_weights = (
-            np.where(events_SR.is_4b, 1, corrected_reweights) * events_SR.weights
+            np.where(events_tst_SR.is_4b, 1, corrected_reweights)
+            * events_tst_SR.weights
         )
 
         hist_3b_corrected = np.histogram(
-            SR_stats_SR[events_SR.is_3b],
+            bins_stats_tst[events_tst_SR.is_3b],
             bins=SR_bins,
-            weights=corrected_weights[events_SR.is_3b],
+            weights=corrected_weights[events_tst_SR.is_3b],
         )[0]
         hist_3b_corrected_sq = np.histogram(
-            SR_stats_SR[events_SR.is_3b],
+            bins_stats_tst[events_tst_SR.is_3b],
             bins=SR_bins,
-            weights=corrected_weights[events_SR.is_3b] ** 2,
+            weights=corrected_weights[events_tst_SR.is_3b] ** 2,
         )[0]
         hists["3b_corrected"] = hist_3b_corrected
         hists["3b_corrected_sq"] = hist_3b_corrected_sq

@@ -1,301 +1,267 @@
 import os
-from typing import Callable
-import click
+from typing import Literal
 import numpy as np
-import pandas as pd
 import tqdm
+from joblib import Parallel, delayed
+import cvxpy as cp
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold
 
-from counting_test_v1 import events_from_scdinfo
-from fvt_classifier import FvTClassifier
-from events_data import EventsData
-from training_info import TrainingInfoV2
-from tst_info import TSTInfo
 
-
-def auc_score_fn(clf_scores: np.ndarray, is_4b: np.ndarray, weights: np.ndarray):
-
+def auc_score(clf_scores: np.ndarray, is_4b: np.ndarray, weights: np.ndarray):
     assert len(clf_scores) == len(is_4b) == len(weights)
 
-    clf_scores_3b = clf_scores[~is_4b].reshape(-1, 1)
-    clf_scores_4b = clf_scores[is_4b].reshape(1, -1)
-    weights_3b = weights[~is_4b].reshape(-1, 1)
-    weights_4b = weights[is_4b].reshape(1, -1)
+    clf_scores_argsort = np.argsort(clf_scores)
+    is_4b_sorted = is_4b[clf_scores_argsort]
+    weights_sorted = weights[clf_scores_argsort]
+    weights_3b_cumsum = np.cumsum(np.where(~is_4b_sorted, weights_sorted, 0))
+    weights_3b_sum = weights_3b_cumsum[-1]
+    weights_4b_sum = np.sum(weights_sorted[is_4b_sorted])
 
-    score_diff = clf_scores_4b - clf_scores_3b
-    weights = weights_3b * weights_4b
+    return np.sum(weights_3b_cumsum[is_4b_sorted] * weights_sorted[is_4b_sorted]) / (
+        weights_3b_sum * weights_4b_sum
+    )
 
-    return np.sum(weights * (score_diff > 0)) / np.sum(weights)
 
-
-def mce_score_fn(
+def mce_score(
     clf_scores: np.ndarray, is_4b: np.ndarray, weights: np.ndarray, pi: float
 ):
     assert len(clf_scores) == len(is_4b) == len(weights)
-
-    clf_scores_3b = clf_scores[~is_4b]
-    clf_scores_4b = clf_scores[is_4b]
-    weights_3b = weights[~is_4b]
     weights_4b = weights[is_4b]
+    weights_3b = weights[~is_4b]
+    clf_scores_4b = clf_scores[is_4b]
+    clf_scores_3b = clf_scores[~is_4b]
+    err_1 = np.sum(weights_4b * (clf_scores_4b < pi)) / np.sum(weights_4b)
+    err_2 = np.sum(weights_3b * (clf_scores_3b >= pi)) / np.sum(weights_3b)
+    return 0.5 * (err_1 + err_2)
 
-    return 0.5 * (
-        np.sum(weights_3b * (clf_scores_3b > pi)) / np.sum(weights_3b)
-        + np.sum(weights_4b * (clf_scores_4b < pi)) / np.sum(weights_4b)
-    )
 
-
-def calculate_null_score(
+def process_iteration(
+    i: int,
+    seed: int,
     clf_scores: np.ndarray,
     is_4b: np.ndarray,
     weights: np.ndarray,
-    bootstrap: bool,
-    score_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], float],
-    rnd_seed: int,
-):
-    np.random.seed(rnd_seed)
-    if bootstrap:
-        indices = np.random.choice(len(clf_scores), len(clf_scores), replace=True)
-    else:
-        indices = np.arange(len(clf_scores))
+    pi: float,
+    alpha: float,
+    method: str,
+) -> tuple[float, float, float]:
+    """Process one iteration of the bootstrap/permutation test."""
+    # Initialize RNG with seed unique to this iteration
+    rng = np.random.default_rng(seed + i)
+    n_samples = len(clf_scores)
+    sum_is_4b = np.sum(is_4b)
 
+    # Generate indices for scores/weights
+    if method == "bootstrap":
+        indices = rng.choice(n_samples, n_samples, replace=True)
+    elif method == "permutation":
+        indices = rng.permutation(n_samples)
+    else:
+        raise ValueError(f"Invalid method: {method}")
+
+    # Shuffle scores/weights
     clf_scores_rnd = clf_scores[indices]
     weights_rnd = weights[indices]
-    is_4b_rnd = np.random.choice(len(clf_scores), np.sum(is_4b), replace=False)
-    is_4b_rnd = np.isin(np.arange(len(clf_scores)), is_4b_rnd)
 
-    return score_fn(clf_scores_rnd, is_4b_rnd, weights_rnd)
+    # Randomly assign 4b labels
+    is_4b_rnd_indices = rng.choice(n_samples, sum_is_4b, replace=False)
+    is_4b_rnd = np.isin(np.arange(n_samples), is_4b_rnd_indices)
+
+    # Compute scores
+    auc = auc_score(clf_scores_rnd, is_4b_rnd, weights_rnd)
+    mce = mce_score(clf_scores_rnd, is_4b_rnd, weights_rnd, pi)
+    renyi = renyi_divergence(clf_scores_rnd, is_4b_rnd, weights_rnd, pi, alpha)
+
+    return auc, mce, renyi
 
 
-def test_via_classifier(
-    events: EventsData,
+def renyi_divergence(
     clf_scores: np.ndarray,
-    method: str,
-    bootstrap: bool = True,
-    n_samples: int = 1000,
-    p_value_type: str = "greater",
+    is_4b: np.ndarray,
+    weights: np.ndarray,
+    pi: float,
+    alpha: float,
 ):
-    assert p_value_type in [
-        "greater",
-        "less",
-        "two-sided",
-    ], f"p_value_type {p_value_type} is not supported"
+    # estimate the reverse renyi divergence using 4b samples
+    # i.e. calculates D_alpha(p_4b || p_3b)
+    # using clf_scores as a proxy for p_4b / (p_3b + p_4b)
+    assert len(clf_scores) == len(is_4b) == len(weights)
+    clf_scores_4b = clf_scores[is_4b]
+    dr_4b = clf_scores_4b / (1 - clf_scores_4b) * (1 - pi) / pi
+    weights_4b = weights[is_4b]
 
-    pi = events.total_weight_4b / events.total_weight
-    is_4b = events.is_4b
-    weights = events.weights
-
-    if method == "auc":
-        score_func = auc_score_fn
-    elif method == "mce":
-        score_func = lambda clf_scores, is_4b, weights: mce_score_fn(
-            clf_scores, is_4b, weights, pi
-        )
+    if alpha == 1:
+        return np.sum(np.log(dr_4b) * weights_4b) / np.sum(weights_4b)
     else:
-        raise ValueError(f"Method {method} is not supported")
-
-    score_0 = score_func(clf_scores, is_4b, weights)
-
-    null_scores = np.zeros(n_samples)
-    for rnd_seed in range(n_samples):
-        null_scores[rnd_seed] = calculate_null_score(
-            clf_scores, is_4b, weights, bootstrap, score_func, rnd_seed
+        return (1 / (alpha - 1)) * np.log(
+            np.sum(dr_4b ** (alpha - 1) * weights_4b) / np.sum(weights_4b)
         )
 
-    if p_value_type == "greater":
-        p_value = np.mean(null_scores > score_0)
-    elif p_value_type == "less":
-        p_value = np.mean(null_scores < score_0)
-    elif p_value_type == "two-sided":
-        p_value = np.mean(np.abs(null_scores - score_0) > np.abs(score_0))
 
-    return score_0, null_scores, p_value
+def minimize_renyi_divergence_cvxpy(
+    clf_scores: np.ndarray,
+    is_4b: np.ndarray,
+    weights: np.ndarray,
+    pi: float,
+    alpha: float,
+    correction_features: np.ndarray,
+):
+    assert alpha > 1
+    logits = np.log(clf_scores / (1 - clf_scores) * (1 - pi) / pi)
+    logits_4b = logits[is_4b]
+    logits_3b = logits[~is_4b]
+    weights_4b = weights[is_4b]
+    weights_3b = weights[~is_4b]
+    correction_features_4b = correction_features[is_4b]
+    correction_features_3b = correction_features[~is_4b]
+
+    beta = cp.Variable(correction_features_4b.shape[1])
+    logit_4b_corr = logits_4b + correction_features_4b @ beta
+    logit_3b_corr = logits_3b + correction_features_3b @ beta
+
+    constraints = [
+        cp.sum(cp.multiply(weights_3b, cp.exp(-logit_3b_corr))) <= np.sum(weights_3b),
+        beta[1] >= -0.5,
+    ]
+    objective = cp.Minimize(
+        (1 / (alpha - 1))
+        * cp.log_sum_exp(
+            logit_4b_corr * (alpha - 1) + np.log(weights_4b / np.sum(weights_4b))
+        )
+    )
+    problem = cp.Problem(objective, constraints)
+    problem.solve()
+
+    # print value when beta = 0
+    print(
+        (1 / (alpha - 1))
+        * np.log(
+            np.sum(np.exp(logits_4b * (alpha - 1)) * weights_4b) / np.sum(weights_4b)
+        )
+    )
+
+    return problem.value, beta.value
 
 
 def mi_test(
-    tstinfo_hash: str,
-    n_samples: int = 1000,
+    clf_scores: np.ndarray,
+    is_4b: np.ndarray,
+    weights: np.ndarray,
+    pi: float,
+    method: Literal["bootstrap", "permutation"],
+    n_reps: int,
+    seed: int,
+    do_tqdm: bool = True,
+    alpha: float = 2,
 ):
+    auc_score_orig = auc_score(clf_scores, is_4b, weights)
+    mce_score_orig = mce_score(clf_scores, is_4b, weights, pi)
+    renyi_score_orig = renyi_divergence(clf_scores, is_4b, weights, pi, alpha)
 
-    features = [
-        "sym_Jet0_pt",
-        "sym_Jet1_pt",
-        "sym_Jet2_pt",
-        "sym_Jet3_pt",
-        "sym_Jet0_eta",
-        "sym_Jet1_eta",
-        "sym_Jet2_eta",
-        "sym_Jet3_eta",
-        "sym_Jet0_phi",
-        "sym_Jet1_phi",
-        "sym_Jet2_phi",
-        "sym_Jet3_phi",
-        "sym_Jet0_m",
-        "sym_Jet1_m",
-        "sym_Jet2_m",
-        "sym_Jet3_m",
-    ]
-    device = "cuda"
-
-    tstinfo = TSTInfo.load(tstinfo_hash)
-    signal_filename = tstinfo.hparams["signal_filename"]
-    signal_ratio = tstinfo.hparams["signal_ratio"]
-    seed = tstinfo.hparams["seed"]
-    ratio_4b = tstinfo.hparams["ratio_4b"]
-    batch_size = 1024
-
-    CR_fvt_tinfo_hash = tstinfo.CR_fvt_tinfo_hash
-    CR_fvt_tinfo = TrainingInfoV2.load(CR_fvt_tinfo_hash)
-    CR_model = FvTClassifier.load_from_checkpoint(
-        f"data/checkpoints/{CR_fvt_tinfo.hash}_best.ckpt"
-    )
-    CR_model.to(device)
-    CR_model.eval()
-
-    events_tst = events_from_scdinfo(tstinfo.scdinfo_tst, features, signal_filename)
-
-    tst_fvt_scores = CR_model.predict(events_tst.X_torch).detach().cpu().numpy()[:, 1]
-    SR_stat = tstinfo.SR_stats
-    reweights = tst_fvt_scores / (1 - tst_fvt_scores) * (ratio_4b / (1 - ratio_4b))
-    SR_cut = tstinfo.SR_cut
-    in_SR = SR_stat > SR_cut
-
-    events_tst_clone = events_tst.clone()
-    events_tst_clone.reweight(
-        np.where(
-            events_tst_clone.is_4b,
-            events_tst_clone.weights,
-            events_tst_clone.weights * reweights,
+    # Parallel execution
+    n_jobs = np.clip(os.cpu_count() // 2, 1, 64)
+    results = Parallel(n_jobs=n_jobs, verbose=0)(
+        delayed(process_iteration)(
+            i, seed, clf_scores, is_4b, weights, pi, alpha, method
+        )
+        for i in tqdm.tqdm(
+            range(n_reps), desc="Processing iterations", disable=not do_tqdm
         )
     )
 
-    in_SR = SR_stat >= SR_cut
-    events_tst_clone_SR = events_tst_clone[in_SR]
+    # Unpack results
+    auc_score_null, mce_score_null, renyi_score_null = zip(*results)
+    auc_score_null = np.array(auc_score_null)
+    mce_score_null = np.array(mce_score_null)
+    renyi_score_null = np.array(renyi_score_null)
 
-    SR_classifier = FvTClassifier(
-        num_classes=2,
-        dim_input_jet_features=4,
-        dim_dijet_features=6,
-        dim_quadjet_features=6,
-        run_name="",
-        device=device,
-        lr=0.001,
+    return (
+        auc_score_orig,
+        mce_score_orig,
+        renyi_score_orig,
+        auc_score_null,
+        mce_score_null,
+        renyi_score_null,
     )
 
-    events_tst_SR_train, events_tst_SR_test = events_tst_clone_SR.split(0.9, seed=seed)
-    events_tst_SR_train, events_tst_SR_val = events_tst_SR_train.split(2 / 3, seed=seed)
-    events_tst_SR_train.fit_batch_size(batch_size=batch_size)
-    events_tst_SR_val.fit_batch_size(batch_size=batch_size)
 
-    print(len(events_tst_SR_train), len(events_tst_SR_val), len(events_tst_SR_test))
+def calibrate_fvt_scores_cv(
+    fvt_scores: np.ndarray,
+    is_4b: np.ndarray,
+    weights: np.ndarray,
+    n_folds: int = 5,
+    random_state: int = 42,
+    calibrator: str = "isotonic",
+    renyi_alpha: float = 2,
+    pi: float = 0.5,
+) -> np.ndarray:
+    """
+    Calibrate classifier scores using Platt scaling (logistic regression) with cross-validation.
 
-    SR_classifier.fit(
-        events_tst_SR_train.to_tensor_dataset(),
-        events_tst_SR_val.to_tensor_dataset(),
-        max_epochs=10,
-        train_seed=seed,
-        save_checkpoint=False,
-        callbacks=[],
-        batch_size=batch_size,
-    )
+    Args:
+        fvt_scores: Raw classifier scores (shape: [n_samples]).
+        is_4b: Binary labels (0 or 1, shape: [n_samples]).
+        weights: Sample weights (shape: [n_samples]).
+        n_folds: Number of cross-validation folds.
+        random_state: Random seed for reproducibility.
 
-    SR_classifier.eval()
-    SR_classifier.to(device)
+    Returns:
+        Calibrated probabilities (shape: [n_samples]).
+    """
+    if calibrator is None:
+        return fvt_scores
 
-    SR_classifier_scores = (
-        SR_classifier.predict(events_tst_SR_test.X_torch).detach().cpu().numpy()[:, 1]
-    )
-
-    auc_score_0, _, p_value_auc_bootstrap = test_via_classifier(
-        events_tst_SR_test,
-        SR_classifier_scores,
-        "auc",
-        bootstrap=True,
-        n_samples=n_samples,
-        p_value_type="greater",
-    )
-
-    mce_score_0, _, p_value_mce_bootstrap = test_via_classifier(
-        events_tst_SR_test,
-        SR_classifier_scores,
-        "mce",
-        bootstrap=True,
-        n_samples=n_samples,
-        p_value_type="less",
-    )
-
-    _, _, p_value_auc_permutation = test_via_classifier(
-        events_tst_SR_test,
-        SR_classifier_scores,
-        "auc",
-        bootstrap=False,
-        n_samples=n_samples,
-        p_value_type="greater",
-    )
-
-    _, _, p_value_mce_permutation = test_via_classifier(
-        events_tst_SR_test,
-        SR_classifier_scores,
-        "mce",
-        bootstrap=False,
-        n_samples=n_samples,
-        p_value_type="less",
-    )
-
-    results = {
-        "tstinfo_hash": tstinfo_hash,
-        "seed": seed,
-        "signal_ratio": signal_ratio,
-        "auc_score_0": auc_score_0,
-        "p_value_auc_bootstrap": p_value_auc_bootstrap,
-        "p_value_auc_permutation": p_value_auc_permutation,
-        "mce_score_0": mce_score_0,
-        "p_value_mce_bootstrap": p_value_mce_bootstrap,
-        "p_value_mce_permutation": p_value_mce_permutation,
-    }
-
-    return results
-
-
-@click.command()
-@click.option("--experiment-name", type=str, default="counting_test_high_4b_in_CR")
-@click.option("--n-3b", type=int, default=140_0000)
-@click.option("--n-samples", type=int, default=1000)
-@click.option("--seed-start", type=int)
-@click.option("--seed-end", type=int)
-def main(experiment_name, n_3b, n_samples, seed_start, seed_end):
-    df_name = f"data/tsv/tst_results_summary_{experiment_name}_n_3b={n_3b}_mi_test_seed={seed_start}_to_{seed_end}.tsv"
-
-    if os.path.exists(df_name):
-        df = pd.read_csv(df_name, sep="\t")
-    else:
-        df = pd.DataFrame(
-            columns=[
-                "tstinfo_hash",
-                "seed",
-                "signal_ratio",
-                "auc_score_0",
-                "p_value_auc_bootstrap",
-                "p_value_auc_permutation",
-                "mce_score_0",
-                "p_value_mce_bootstrap",
-                "p_value_mce_permutation",
-            ]
+    if calibrator == "minimize_renyi":
+        correction_features = np.log(
+            (fvt_scores / (1 - fvt_scores) * (1 - pi) / pi).reshape(-1, 1)
+        )
+        correction_features = np.concatenate(
+            [np.ones((correction_features.shape[0], 1)), correction_features], axis=1
+        )
+        # correction_features = np.ones_like(fvt_scores).reshape(-1, 1)
+        min_renyi_divergence, beta_value = minimize_renyi_divergence_cvxpy(
+            fvt_scores, is_4b, weights, pi, renyi_alpha, correction_features
         )
 
-    hparam_filter = {
-        "experiment_name": experiment_name,
-        "n_3b": n_3b,
-        "seed": lambda x: seed_start <= x < seed_end,
-    }
-    hashes = TSTInfo.find(hparam_filter, sort_by=["signal_ratio", "seed"])
-    existing_hashes = df["tstinfo_hash"].values if len(df) > 0 else []
-    hashes = [h for h in hashes if h not in existing_hashes]
+        print(min_renyi_divergence, beta_value)
+        corrected_logits = (
+            np.log(fvt_scores / (1 - fvt_scores) * (1 - pi) / pi)
+            + correction_features @ beta_value
+        )
+        corrected_fvt_scores = np.exp(corrected_logits) / (1 + np.exp(corrected_logits))
+        return corrected_fvt_scores
 
-    for tstinfo_hash in tqdm.tqdm(hashes):
-        print(f"Testing {tstinfo_hash}")
-        results = mi_test(tstinfo_hash, n_samples)
-        df = pd.concat([df, pd.DataFrame([results])], ignore_index=True)
-        df.to_csv(df_name, sep="\t", index=False)
+    calibrated_probs = np.zeros_like(fvt_scores)
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
 
+    for train_idx, test_idx in skf.split(fvt_scores, is_4b):
+        # Reshape scores to 2D (required by scikit-learn)
+        scores_train = fvt_scores[train_idx].reshape(-1, 1)
+        scores_test = fvt_scores[test_idx].reshape(-1, 1)
 
-if __name__ == "__main__":
-    main()
+        if calibrator == "isotonic":
+            y_min = np.min(fvt_scores)
+            y_max = np.max(fvt_scores)
+            regressor = IsotonicRegression(
+                out_of_bounds="clip", y_min=y_min, y_max=y_max
+            )
+        elif calibrator == "platt":
+            # Fit logistic regression (Platt scaling)
+            regressor = LogisticRegression(
+                penalty=None,  # Disable regularization (Platt scaling uses unregularized LR)
+                solver="lbfgs",  # Solver for unconstrained optimization
+                max_iter=1000,  # Ensure convergence
+            )
+        else:
+            raise ValueError(f"Invalid calibrator: {calibrator}")
+
+        regressor.fit(scores_train, is_4b[train_idx], sample_weight=weights[train_idx])
+
+        if calibrator == "isotonic":
+            calibrated_probs[test_idx] = regressor.predict(scores_test)
+        else:
+            calibrated_probs[test_idx] = regressor.predict_proba(scores_test)[:, 1]
+
+    return calibrated_probs

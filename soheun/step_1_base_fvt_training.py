@@ -178,7 +178,6 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
 
     base_fvt_tinfo.update_aux_info(description=f"Step 1: base_FvT", step=1)
     base_fvt_tinfo.save()
-    # TrainingInfo.update_metadata()
 
 
 @click.command()

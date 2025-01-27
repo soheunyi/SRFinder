@@ -45,7 +45,7 @@ def get_quantiles_with_weights(
 
     # normalize weights
     weights = weights / np.sum(weights)
-    sorted_indices = np.argsort(x_values)
+    sorted_indices = np.argsort(x_values, kind="stable")
     sorted_x_values = x_values[sorted_indices]
     sorted_weights = weights[sorted_indices]
 
@@ -60,3 +60,43 @@ def safe_dict(d: dict | None, key: str, default=None):
         return d[key]
     else:
         return default
+
+
+def select_random_true_elements(
+    idx: np.ndarray[bool], ratio: float, seed: int
+) -> np.ndarray[bool]:
+    true_idx_int = np.where(idx)[0]
+    np.random.seed(seed)
+    np.random.shuffle(true_idx_int)
+    selected_idx_int = true_idx_int[: int(len(true_idx_int) * ratio)]
+    selected_idx = np.zeros_like(idx, dtype=bool)
+    selected_idx[selected_idx_int] = True
+    return selected_idx
+
+
+def test_select_random_true_elements():
+    ratio = 0.5
+    n_true = 100
+    n_false = 100
+    n_expected_true = int(n_true * ratio)
+
+    for seed in range(10):
+        idx = np.array([True] * n_true + [False] * n_false)
+        np.random.seed(seed)
+        np.random.shuffle(idx)
+        selected_idx = select_random_true_elements(idx, ratio, seed)
+
+        assert (
+            np.sum(selected_idx) == n_expected_true
+        ), f"The number of selected elements is incorrect for seed {seed}"
+        assert np.all(
+            idx[selected_idx] == True
+        ), f"Selected elements should be a subset of the original True elements for seed {seed}"
+        assert np.array_equal(
+            select_random_true_elements(idx, ratio, seed),
+            select_random_true_elements(idx, ratio, seed),
+        ), f"The function should be deterministic given the same seed for seed {seed}"
+
+
+if __name__ == "__main__":
+    test_select_random_true_elements()

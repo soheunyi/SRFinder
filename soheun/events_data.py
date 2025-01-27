@@ -1,4 +1,5 @@
 from __future__ import annotations
+import pathlib
 import numpy as np
 import pandas as pd
 import torch
@@ -407,8 +408,13 @@ def get_is_signal(scdinfo: SCDatasetInfo, signal_filename: str):
     return is_signal
 
 
-def events_from_scdinfo(scdinfo: SCDatasetInfo, features: list, signal_filename: str):
-    df = scdinfo.fetch_data()
+def events_from_scdinfo(
+    scdinfo: SCDatasetInfo,
+    features: list,
+    signal_filename: str,
+    loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
+):
+    df = scdinfo.fetch_data(loaded_df)
     df["signal"] = get_is_signal(scdinfo, signal_filename)
     events = EventsData.from_dataframe(df, features)
 

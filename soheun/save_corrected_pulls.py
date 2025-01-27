@@ -1,61 +1,68 @@
+import datetime
+import pathlib
 import numpy as np
 import pandas as pd
 import os
 
 import tqdm
 from training_info import TrainingInfo
-import multiprocessing as mp
 import pickle
 from correct_systematic_error import correct_systematic_error
-from concurrent.futures import ProcessPoolExecutor
+
+
+# from multiprocessing import Pool, Manager
+
+
+# configs
+order = 1
+nbins_list = [2**i for i in range(2, 11)]
+bins_mode = "quantile"
+bins_stats_type = "fvt"
+experiment_names = [
+    "CR_fvt_training_ensemble_max_fvt",
+    # "CR_fvt_training_ensemble_max_smeared",
+]
+n_3b = 100_0000
+signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 
 TrainingInfo.update_metadata()
 
-features = [
-    "sym_Jet0_pt",
-    "sym_Jet1_pt",
-    "sym_Jet2_pt",
-    "sym_Jet3_pt",
-    "sym_Jet0_eta",
-    "sym_Jet1_eta",
-    "sym_Jet2_eta",
-    "sym_Jet3_eta",
-    "sym_Jet0_phi",
-    "sym_Jet1_phi",
-    "sym_Jet2_phi",
-    "sym_Jet3_phi",
-    "sym_Jet0_m",
-    "sym_Jet1_m",
-    "sym_Jet2_m",
-    "sym_Jet3_m",
-]
+print(
+    f"Configs: order={order}, nbins_list={nbins_list}, bins_mode={bins_mode}, bins_stats_type={bins_stats_type}, experiment_names={experiment_names}, n_3b={n_3b}, signal_ratios={signal_ratios}"
+)
 
 print("Loading dataframes")
-df_3b = pd.read_hdf("../events/MG3/dataframes/threeTag_picoAOD.h5")
-df_bg4b = pd.read_hdf("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
-df_signal = pd.read_hdf("../events/MG3/dataframes/HH4b_picoAOD.h5")
+path_3b = pathlib.Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
+path_bg4b = pathlib.Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
+path_signal = pathlib.Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+df_3b = pd.read_hdf(path_3b)
+df_bg4b = pd.read_hdf(path_bg4b)
+df_signal = pd.read_hdf(path_signal)
 df_3b["signal"] = False
 df_bg4b["signal"] = False
 df_signal["signal"] = True
-raw_df_list = [df_3b, df_bg4b, df_signal]
+loaded_df = {path_3b: df_3b, path_bg4b: df_bg4b, path_signal: df_signal}
 print("Dataframes loaded")
 
+if order == 1:
+    intercept_min = -np.inf
+    intercept_max = np.inf
+    slope_min = 0
+    slope_max = 0
+elif order == 2:
+    intercept_min = -np.inf
+    intercept_max = np.inf
+    slope_min = -np.inf
+    slope_max = np.inf
+else:
+    raise ValueError(f"Invalid order: {order}")
 
-seeds = np.arange(50)
-nbins_list = [2**i for i in range(7)]
-experiment_name = "CR_fvt_training_ensemble_max_smeared"
-bins_mode = "quantile"
-n_3b = 100_0000
 
-signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
-
-slope_min = 0.0
-slope_max = 0.0
-intercept_min = -np.inf
-intercept_max = np.inf
-
-test_info_dict_name = f"./data/tmp/test_info_by_hashes.pkl"
-
+order_str = f"order_{order}"
+bins_stats_type_str = f"{bins_stats_type}"
+test_info_dict_name = (
+    f"./data/tmp/test_info_by_hashes_{order_str}_{bins_stats_type_str}.pkl"
+)
 
 if os.path.exists(test_info_dict_name):
     with open(test_info_dict_name, "rb") as f:
@@ -64,21 +71,21 @@ else:
     test_info_dict = {}
 
 
-def process_hash(hash):
+def process_hash(hash, nbins_to_save):
     corrections, hists = correct_systematic_error(
         hash,
-        nbins_list,
+        nbins_to_save,
         bins_mode,
         intercept_min=intercept_min,
         intercept_max=intercept_max,
         slope_min=slope_min,
         slope_max=slope_max,
-        raw_df_list=raw_df_list,
+        loaded_df=loaded_df,
     )
 
     pulls = {}
 
-    for nbins in hists:
+    for nbins in nbins_to_save:
         hist = hists[nbins]
         hist_3b_corrected = hist["3b_corrected"]
         hist_3b_corrected_sq = hist["3b_corrected_sq"]
@@ -92,31 +99,45 @@ def process_hash(hash):
     return {"corrections": corrections, "hists": hists, "pulls": pulls}
 
 
+def process_and_save(hash):
+    print(f"[{datetime.datetime.now()}] Processing hash: {hash}")
+    existing_nbins = test_info_dict.get(hash, {}).get("hists", {}).keys()
+    nbins_to_save = [nbins for nbins in nbins_list if nbins not in existing_nbins]
+    if len(nbins_to_save) == 0:
+        print(f"[{datetime.datetime.now()}] No new nbins to save for hash: {hash}")
+        return
+    result = process_hash(hash, nbins_to_save)
+    if hash not in test_info_dict:
+        test_info_dict[hash] = result
+    else:
+        for key in result.keys():
+            test_info_dict[hash][key].update(result[key])
+
+    with open(test_info_dict_name, "wb") as f:
+        pickle.dump(test_info_dict, f)
+
+
 print("Finding hashes to process")
 hashes = TrainingInfo.find(
     {
-        "experiment_name": experiment_name,
+        "experiment_name": lambda x: x in experiment_names,
         "model": "FvTClassifier",
         "aux_info_step": 3,
         "dataset": lambda x: x["n_3b"] == n_3b and x["signal_ratio"] in signal_ratios,
     }
 )
-target_hashes = set(hashes) - set(test_info_dict.keys())
-print(f"Number of hashes to process: {len(target_hashes)}")
+# target_hashes = [h for h in hashes if h not in test_info_dict.keys()]
+target_hashes = list(hashes)
+# sort by hash names
+target_hashes.sort()
 
+print(f"Number of hashes to process: {len(target_hashes)}")
 print("Processing hashes starting")
-# n_processes = 5
-# with ProcessPoolExecutor(max_workers=n_processes) as executor:
-#     test_infos = list(
-#         tqdm.tqdm(executor.map(process_hash, target_hashes), total=len(target_hashes))
-#     )
-#     for hash, test_info in zip(target_hashes, test_infos):
-#         test_info_dict[hash] = test_info
+
+# with Pool(processes=4) as pool:
+#     pool.map(process_and_save, target_hashes)
 
 for hash in tqdm.tqdm(target_hashes):
-    test_info_dict[hash] = process_hash(hash)
-    with open(test_info_dict_name, "wb") as f:
-        pickle.dump(test_info_dict, f)
-
+    process_and_save(hash)
 
 print("Processing hashes done")

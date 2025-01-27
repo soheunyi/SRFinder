@@ -1,9 +1,10 @@
 from __future__ import annotations
 from copy import deepcopy
+from functools import lru_cache
 import pathlib
 import pickle
 import time
-from typing import Iterable
+from typing import Callable, Iterable
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -223,7 +224,8 @@ class TrainingInfo:
         features: Iterable[str],
         label: str,
         weight: str,
-        label_dtype: str = torch.long,
+        label_dtype: torch.dtype = torch.long,
+        reweighting_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
     ) -> tuple[TensorDataset, TensorDataset]:
         """
         fetch train and val dataloader
@@ -233,10 +235,18 @@ class TrainingInfo:
         X_train = torch.tensor(df_train[features].values, dtype=torch.float32)
         y_train = torch.tensor(df_train[label].values, dtype=label_dtype)
         w_train = torch.tensor(df_train[weight].values, dtype=torch.float32)
+        reweights_train = (
+            reweighting_fn(X_train, y_train) if reweighting_fn is not None else 1.0
+        )
+        w_train = w_train * reweights_train
 
         X_val = torch.tensor(df_val[features].values, dtype=torch.float32)
         y_val = torch.tensor(df_val[label].values, dtype=label_dtype)
         w_val = torch.tensor(df_val[weight].values, dtype=torch.float32)
+        reweights_val = (
+            reweighting_fn(X_val, y_val) if reweighting_fn is not None else 1.0
+        )
+        w_val = w_val * reweights_val
 
         train_dataset = TensorDataset(X_train, y_train, w_train)
         val_dataset = TensorDataset(X_val, y_val, w_val)
@@ -268,8 +278,15 @@ class TrainingInfo:
 
     @classmethod
     def load(cls, hash: str) -> TrainingInfo:
-        with open(cls.SAVE_DIR / hash, "rb") as f:
-            return pickle.load(f)
+        try:
+            with open(cls.SAVE_DIR / hash, "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Training Info {hash} not found")
+        except EOFError:
+            raise EOFError(f"Training Info {hash} is corrupted")
+        except pickle.UnpicklingError:
+            raise pickle.UnpicklingError(f"Training Info {hash} is corrupted")
 
     @classmethod
     def get_existing_hparams(cls):
@@ -299,6 +316,11 @@ class TrainingInfo:
             time.sleep(10 + np.random.rand())
         logger.error(f"Failed to load metadata file after {retry} retries.")
         return {}
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def load_cached_metadata():
+        return TrainingInfo.load_metadata()
 
     @classmethod
     def update_metadata(cls):
@@ -363,6 +385,7 @@ class TrainingInfo:
         return_hparams=False,
         sort_by: list[str] = [],
         from_metadata=True,
+        use_cached_metadata=False,
     ) -> list[str] | tuple[list[str], list[dict[str, any]]]:
 
         def is_match(hparam: dict[str, any]) -> bool:
@@ -376,7 +399,10 @@ class TrainingInfo:
 
         hash_hparams = []
         if from_metadata:
-            all_hash_hparams = cls.load_metadata()
+            if use_cached_metadata:
+                all_hash_hparams = cls.load_cached_metadata()
+            else:
+                all_hash_hparams = cls.load_metadata()
             for hash_, hparams in all_hash_hparams.items():
                 if is_match(hparams):
                     hash_hparams.append((hash_, hparams))
@@ -406,3 +432,14 @@ class TrainingInfo:
             return hashes, hparams
         else:
             return hashes
+
+    @classmethod
+    def delete(cls, hashes: list[str]):
+        print(f"Deleting {len(hashes)} hashes")
+        answer = input("Press Y/y to continue...")
+        if answer not in ["Y", "y"]:
+            print("Aborting")
+            return
+        for hash in hashes:
+            os.remove(cls.SAVE_DIR / hash)
+        cls.update_metadata()

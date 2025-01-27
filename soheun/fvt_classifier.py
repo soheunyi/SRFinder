@@ -78,6 +78,9 @@ class FvTClassifier(pl.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+        if not torch.cuda.is_available():
+            print("CUDA is not available, changing device to CPU")
+            device = torch.device("cpu")
 
         self.dim_j = dim_input_jet_features
         self.dim_d = dim_dijet_features
@@ -511,7 +514,7 @@ class FvTClassifier(pl.LightningModule):
     @torch.no_grad()
     def predict(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
-        batch_size = min(2**18, x.shape[0])
+        batch_size = min(2**15, x.shape[0])
         x_dataloader = DataLoader(x, batch_size=batch_size, shuffle=False)
         y_pred = torch.tensor([])
         if do_tqdm:
@@ -536,7 +539,7 @@ class FvTClassifier(pl.LightningModule):
         self, x: torch.Tensor, do_tqdm=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**18, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(x, batch_size=min(2**15, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         q_repr = torch.tensor([])
@@ -555,7 +558,7 @@ class FvTClassifier(pl.LightningModule):
 
     def q_repr(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**18, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(x, batch_size=min(2**15, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         q_repr = torch.tensor([])
@@ -571,7 +574,7 @@ class FvTClassifier(pl.LightningModule):
     @torch.no_grad()
     def predict_and_representations(self, x: torch.Tensor, do_tqdm=False):
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**18, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(x, batch_size=min(2**15, x.shape[0]), shuffle=False)
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         y_pred = torch.tensor([])

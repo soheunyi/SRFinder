@@ -3,9 +3,9 @@ from __future__ import annotations
 import pathlib
 import pickle
 from typing import Iterable
+from typing_extensions import deprecated
 import numpy as np
 import pandas as pd
-from torch.utils.data import DataLoader, TensorDataset
 import tqdm
 
 from utils import require_keys, create_hash
@@ -150,21 +150,27 @@ class SCDatasetInfo:
 
         return df_list
 
-    def fetch_data(self):
+    def fetch_data(self, loaded_df: dict[pathlib.Path, pd.DataFrame] = {}):
         df_list = []
         for file, inner_idx in zip(self.files, self.inner_idxs):
             if np.sum(inner_idx) == 0:
                 continue
 
-            df = pd.read_hdf(file)
-            assert len(df) == len(inner_idx)
+            for loaded_file in loaded_df.keys():
+                if file.resolve() == loaded_file.resolve():
+                    df = loaded_df[loaded_file]
+                    break
+            else:
+                df = pd.read_hdf(file)
 
+            assert len(df) == len(inner_idx)
             df_list.append(df[inner_idx])
 
         df = pd.concat(df_list).reset_index(drop=True)
 
         return df
 
+    @deprecated("Use fetch_data instead")
     def fetch_data_with_loaded_df(
         self, raw_df_list: list[pd.DataFrame]
     ) -> pd.DataFrame:

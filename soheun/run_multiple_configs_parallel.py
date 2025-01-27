@@ -5,6 +5,7 @@ import yaml
 from step_1_base_fvt_training import routine as step_1_routine
 from step_2_smeared_fvt_training import routine as step_2_routine
 from step_3_define_CR_and_train_fvt import routine as step_3_routine
+from step_4_mi_test import routine as step_4_routine
 import torch
 import logging
 from datetime import datetime
@@ -24,6 +25,8 @@ def run_single_config(config: dict, file_handler: logging.FileHandler):
         step_2_routine(config, file_handler)
     elif step == 3:
         step_3_routine(config, file_handler)
+    elif step == 4:
+        step_4_routine(config, file_handler)
     else:
         raise ValueError(f"Step {step} not supported")
 
@@ -81,7 +84,7 @@ Time taken: {hours:02d}:{minutes:02d}:{seconds:05.2f}
 """
         )
     except Exception as e:
-        logging.error(f"Process {pid} failed with error: {str(e)}")
+        logging.error(f"Process {pid} failed with error: {str(e)}", exc_info=True)
         raise
     finally:
         torch.cuda.empty_cache()

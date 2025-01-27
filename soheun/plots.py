@@ -546,13 +546,14 @@ def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_signal, weights):
 
 
 def hist_events_by_labels(
-    events: EventsData, values: np.ndarray, bins, ax, **hist_kwargs
+    events: EventsData, values: np.ndarray, bins, ax, errorbar=False, **hist_kwargs
 ):
     assert len(values) == len(events)
     color_3b = hist_kwargs.pop("color_3b", plt.get_cmap("tab10").colors[0])
     color_4b = hist_kwargs.pop("color_4b", plt.get_cmap("tab10").colors[1])
     color_signal = hist_kwargs.pop("color_signal", plt.get_cmap("tab10").colors[2])
-    ax.hist(
+
+    hist_3b, bins, _ = ax.hist(
         values[events.is_3b],
         bins=bins,
         histtype="step",
@@ -579,10 +580,34 @@ def hist_events_by_labels(
         color=color_signal,
         **hist_kwargs,
     )
+    if errorbar:
+        hist_3b_sq, _ = np.histogram(
+            values[events.is_3b],
+            bins=bins,
+            weights=events.weights[events.is_3b] ** 2,
+        )
+        hist_4b_sq, _ = np.histogram(
+            values[events.is_4b],
+            bins=bins,
+            weights=events.weights[events.is_4b] ** 2,
+        )
+        midpoints = (bins[:-1] + bins[1:]) / 2
+        ax.errorbar(
+            midpoints,
+            hist_3b,
+            yerr=np.sqrt(hist_3b_sq + hist_4b_sq),
+            color=plt.get_cmap("tab10").colors[0],
+            capsize=3,
+            fmt="o",
+            markersize=2,
+            label="Std. of 3b",
+        )
+    ymax = ax.get_ylim()[1]
+    ax.set_ylim(0, ymax)
 
 
 def get_weights_by_sr_stats(events: EventsData, sr_stats: np.ndarray):
-    sr_stats_argsort = np.argsort(sr_stats)[::-1]
+    sr_stats_argsort = np.argsort(sr_stats, kind="stable")[::-1]
     weights = events.weights[sr_stats_argsort]
     is_signal = events.is_signal[sr_stats_argsort]
     is_4b = events.is_4b[sr_stats_argsort]

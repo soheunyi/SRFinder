@@ -146,45 +146,9 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         "sym_Jet3_m",
     ]
 
-    # 1. Find and load encoder & smeared FvT model
-    # hashes = TrainingInfo.find(
-    #     {
-    #         "dataset": lambda x: (
-    #             x["n_3b"] == n_3b
-    #             and x["ratio_4b"] == ratio_4b
-    #             and x["signal_ratio"] == signal_ratio
-    #             and x["signal_filename"] == signal_filename
-    #             and x["seed"] == seed
-    #         ),
-    #         "aux_info_step": 2,
-    #         "experiment_name": config["previous_step_experiment_name"],
-    #     }
-    # )
-    # assert (
-    #     len(hashes) == 1
-    # ), f"Number of training info must be one, there are {len(hashes)}"
-
-    # smeared_fvt_tinfo = TrainingInfo.load(hashes[0])
-    # CR_fvt_hparams["smeared_fvt_hash"] = smeared_fvt_tinfo.hash
-    # base_encoder_hash = smeared_fvt_tinfo.hparams["encoder_hash"]
-    # CR_fvt_hparams["encoder_hash"] = base_encoder_hash
-
     SR_stats_hashes = config["signal_region"]["SR_stats_hashes"]
     ensemble_mode = config["signal_region"]["ensemble_mode"]
     stats_type = config["signal_region"]["stats_type"]
-
-    # base_fvt_model = TrainingInfo.load(base_encoder_hash).load_trained_model(
-    #     # CR_fvt_hparams["encoder_mode"]
-    #     "best"
-    # )
-    # base_fvt_model: FvTClassifier
-    # base_fvt_model.eval()
-    # base_fvt_model.to(torch.device("cuda"))
-
-    # smeared_fvt_model = smeared_fvt_tinfo.load_trained_model("best")
-    # smeared_fvt_model: AttentionClassifier
-    # smeared_fvt_model.eval()
-    # smeared_fvt_model.to(torch.device("cuda"))
 
     # Use the same mother samples and exclude ones used for training base & smeared FvT model
     tinfo_0 = TrainingInfo.load(SR_stats_hashes[0])
@@ -199,34 +163,9 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     events_train = events_from_scdinfo(
         msamples.scdinfo[tinfo_0.ms_idx], features, signal_filename
     )
-    # events_tst = events_from_scdinfo(
-    #     msamples.scdinfo[~tinfo_0.ms_idx], features, signal_filename
-    # )
-
-    # if ("SR_stats_train" not in smeared_fvt_tinfo.aux_info) or (
-    #     "SR_stats_tst" not in smeared_fvt_tinfo.aux_info
-    # ):
-    #     print("Calculating SR_stats_train and SR_stats_tst")
-    #     events_all = EventsData.merge([events_train, events_tst])
-    #     gamma_base_all, gamma_smeared_all, _ = get_DRs(
-    #         events_all, base_fvt_model, smeared_fvt_model, return_repr=True
-    #     )
-    #     SR_stats_all = np.log(gamma_base_all / gamma_smeared_all)
-
-    #     SR_stats_train = SR_stats_all[: len(events_train)]
-    #     SR_stats_tst = SR_stats_all[len(events_train) :]
-
-    #     smeared_fvt_tinfo.update_aux_info(
-    #         SR_stats_train=SR_stats_train,
-    #         SR_stats_tst=SR_stats_tst,
-    #     )
-    #     smeared_fvt_tinfo.save()
-    # else:
-    #     print("Using cached SR_stats_train and SR_stats_tst")
-    #     SR_stats_train = smeared_fvt_tinfo.aux_info["SR_stats_train"]
-    #     SR_stats_tst = smeared_fvt_tinfo.aux_info["SR_stats_tst"]
-
-    # tinfo_0 = TrainingInfo.load(SR_stats_hashes[0])
+    events_tst = events_from_scdinfo(
+        msamples.scdinfo[~tinfo_0.ms_idx], features, signal_filename
+    )
 
     SR_stats_train, SR_stats_tst = compute_sr_stats(
         SR_stats_hashes,
@@ -239,6 +178,8 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         SR_stats_train, events_train, config["signal_region"]
     )
     CR_idx = (SR_stats_tst >= CR_cut) & (SR_stats_tst < SR_cut)
+    SR_idx = SR_stats_tst >= SR_cut
+    SR_idx_train = SR_stats_train >= SR_cut
 
     tst_ms_idx = ~tinfo_0.ms_idx
     tst_ms_idx_int = tst_ms_idx.nonzero()[0]
@@ -309,9 +250,26 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         file_handler=file_handler,
     )
 
+    CR_fvt_model.eval()
+    CR_fvt_model.to(
+        torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    )
+    CR_fvt_model: FvTClassifier
+
+    events_train_SR = events_train[SR_idx_train]
+    events_tst_SR = events_tst[SR_idx]
+    fvt_scores_train_SR = (
+        CR_fvt_model.predict(events_train_SR.X_torch)[:, 1].detach().cpu().numpy()
+    )
+    fvt_scores_tst_SR = (
+        CR_fvt_model.predict(events_tst_SR.X_torch)[:, 1].detach().cpu().numpy()
+    )
+
     CR_fvt_tinfo.update_aux_info(
         description=f"FvT on Control Region",
         step=3,
+        fvt_scores_train_SR=fvt_scores_train_SR,
+        fvt_scores_tst_SR=fvt_scores_tst_SR,
     )
     CR_fvt_tinfo.save()
     # TrainingInfo.update_metadata()

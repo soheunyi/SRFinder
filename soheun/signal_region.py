@@ -1,6 +1,8 @@
+import pathlib
 import time
 from typing import Literal
 import numpy as np
+import pandas as pd
 import torch
 from dataset import MotherSamples
 from events_data import EventsData, events_from_scdinfo
@@ -60,11 +62,42 @@ def get_SR_CR_cut(SR_stats: np.ndarray, events_train: EventsData, SRCR_hparams: 
     W_4B_CUT_MIN = 0.001
     W_4B_CUT_MAX = 0.999
 
-    SR_stats_argsort = np.argsort(SR_stats)[::-1]
+    SR_stats_argsort = np.argsort(SR_stats, kind="stable")[::-1]
     SR_stats_sorted = SR_stats[SR_stats_argsort]
     weights = events_train.weights[SR_stats_argsort]
     is_4b = events_train.is_4b[SR_stats_argsort]
     cumul_4b_ratio = np.cumsum(weights * is_4b) / np.sum(weights * is_4b)
+
+    # print("48140", SR_stats_argsort[48140], SR_stats[SR_stats_argsort[48140]])
+    # print("48141", SR_stats_argsort[48141], SR_stats[SR_stats_argsort[48141]])
+    # print("48142", SR_stats_argsort[48142], SR_stats[SR_stats_argsort[48142]])
+    # print("48143", SR_stats_argsort[48143], SR_stats[SR_stats_argsort[48143]])
+    # print("48144", SR_stats_argsort[48144], SR_stats[SR_stats_argsort[48144]])
+    # print("48145", SR_stats_argsort[48145], SR_stats[SR_stats_argsort[48145]])
+    # print("48146", SR_stats_argsort[48146], SR_stats[SR_stats_argsort[48146]])
+    # print("48147", SR_stats_argsort[48147], SR_stats[SR_stats_argsort[48147]])
+    # print("48148", SR_stats_argsort[48148], SR_stats[SR_stats_argsort[48148]])
+    # print(np.sum(is_4b))
+    # print("48140", is_4b[48140])
+    # print("48141", is_4b[48141])
+    # print("48142", is_4b[48142])
+    # print("48143", is_4b[48143])
+    # print("48144", is_4b[48144])
+    # print("48145", is_4b[48145])
+    # print("48146", is_4b[48146])
+    # print("48147", is_4b[48147])
+    # print("48148", is_4b[48148])
+    # print(np.sum(weights * is_4b))
+    # tmp = np.cumsum(weights * is_4b)
+    # print("48140", tmp[48140])
+    # print("48141", tmp[48141])
+    # print("48142", tmp[48142])
+    # print("48143", tmp[48143])
+    # print("48144", tmp[48144])
+    # print("48145", tmp[48145])
+    # print("48146", tmp[48146])
+    # print("48147", tmp[48147])
+    # print("48148", tmp[48148])
 
     w_4b_SR_ratio = np.clip(SRCR_hparams["4b_in_SR"], W_4B_CUT_MIN, W_4B_CUT_MAX)
     w_4b_CR_ratio = np.clip(
@@ -73,6 +106,7 @@ def get_SR_CR_cut(SR_stats: np.ndarray, events_train: EventsData, SRCR_hparams: 
 
     SR_cut, CR_cut = None, None
     for i in range(1, len(cumul_4b_ratio)):
+        # use 8 digits precision
         if cumul_4b_ratio[i] > w_4b_SR_ratio and SR_cut is None:
             SR_cut = SR_stats_sorted[i - 1]
         if cumul_4b_ratio[i] > w_4b_CR_ratio and CR_cut is None:
@@ -92,14 +126,20 @@ def get_SR_CR_cut(SR_stats: np.ndarray, events_train: EventsData, SRCR_hparams: 
     return SR_cut, CR_cut
 
 
-def get_events(tinfo: TrainingInfo, signal_filename: str):
+def get_events(
+    tinfo: TrainingInfo,
+    signal_filename: str,
+    loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
+):
     ms_hash = tinfo.ms_hash
     ms_idx = tinfo.ms_idx
     msamples = MotherSamples.load(ms_hash)
     train_scdinfo = msamples.scdinfo[ms_idx]
     tst_scdinfo = msamples.scdinfo[~ms_idx]
-    events_train = events_from_scdinfo(train_scdinfo, features, signal_filename)
-    events_tst = events_from_scdinfo(tst_scdinfo, features, signal_filename)
+    events_train = events_from_scdinfo(
+        train_scdinfo, features, signal_filename, loaded_df
+    )
+    events_tst = events_from_scdinfo(tst_scdinfo, features, signal_filename, loaded_df)
     return events_train, events_tst
 
 
@@ -135,10 +175,11 @@ def compute_sr_stats(
     signal_filename: str,
     ensemble_mode: Literal["mean", "max"] = "max",
     stats_type: Literal["fvt", "smeared"] = "smeared",
+    loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
 ):
     tinfo_0 = TrainingInfo.load(hashes[0])
     # logger.info(f"Loading events for {tinfo_0.hash}")
-    events_train, events_tst = get_events(tinfo_0, signal_filename)
+    events_train, events_tst = get_events(tinfo_0, signal_filename, loaded_df)
     # logger.info(f"Loaded events for {tinfo_0.hash}")
     tinfo_list: list[TrainingInfo] = []
 
@@ -153,14 +194,10 @@ def compute_sr_stats(
     sr_stats_train_list = []
 
     if stats_type == "smeared":
-        # logger.info(f"Processing {len(tinfo_list)} models")
         for tinfo in tinfo_list:
-            # logger.info(f"Processing {tinfo.hash}")
             if "SR_stats_train" in tinfo.aux_info:
-                # logger.info(f"SR stats for {tinfo.hash} already computed")
                 SR_stats_train = tinfo.aux_info["SR_stats_train"]
             else:
-                # logger.info(f"Computing SR stats for {tinfo.hash}")
                 gamma_base, gamma_smeared = get_base_and_smeared_DRs(
                     events_train, tinfo.hash
                 )
@@ -169,10 +206,8 @@ def compute_sr_stats(
                 tinfo.save()
 
             if "SR_stats_tst" in tinfo.aux_info:
-                # logger.info(f"SR stats for {tinfo.hash} already computed")
                 SR_stats_tst = tinfo.aux_info["SR_stats_tst"]
             else:
-                # logger.info(f"Computing SR stats for {tinfo.hash}")
                 gamma_base, gamma_smeared = get_base_and_smeared_DRs(
                     events_tst, tinfo.hash
                 )
@@ -184,24 +219,38 @@ def compute_sr_stats(
             sr_stats_tst_list.append(SR_stats_tst)
 
     elif stats_type == "fvt":
-        # logger.info(f"Processing {len(tinfo_list)} models")
         for tinfo in tinfo_list:
-            # logger.info(f"Processing {tinfo.hash}")
             base_hash = tinfo.hparams["encoder_hash"]
-            base_tinfo = TrainingInfo.load(base_hash)
-            base_fvt_model = base_tinfo.load_trained_model("best")
-            base_fvt_model.eval()
-            base_fvt_model.to(torch.device("cuda"))
-            base_fvt_model: FvTClassifier
+            if (
+                "base_fvt_score_train" not in tinfo.aux_info
+                or "base_fvt_score_tst" not in tinfo.aux_info
+            ):
+                base_tinfo = TrainingInfo.load(base_hash)
+                base_fvt_model = base_tinfo.load_trained_model("best")
+                base_fvt_model.eval()
+                base_fvt_model.to(torch.device("cuda"))
+                base_fvt_model: FvTClassifier
 
-            base_fvt_score_train = (
-                base_fvt_model.predict(events_train.X_torch)[:, 1].cpu().numpy()
-            )
+            if "base_fvt_score_train" in tinfo.aux_info:
+                base_fvt_score_train = tinfo.aux_info["base_fvt_score_train"]
+            else:
+                base_fvt_score_train = (
+                    base_fvt_model.predict(events_train.X_torch)[:, 1].cpu().numpy()
+                )
+                tinfo.update_aux_info(base_fvt_score_train=base_fvt_score_train)
+                tinfo.save()
+
             sr_stats_train_list.append(base_fvt_score_train)
 
-            base_fvt_score_tst = (
-                base_fvt_model.predict(events_tst.X_torch)[:, 1].cpu().numpy()
-            )
+            if "base_fvt_score_tst" in tinfo.aux_info:
+                base_fvt_score_tst = tinfo.aux_info["base_fvt_score_tst"]
+            else:
+                base_fvt_score_tst = (
+                    base_fvt_model.predict(events_tst.X_torch)[:, 1].cpu().numpy()
+                )
+                tinfo.update_aux_info(base_fvt_score_tst=base_fvt_score_tst)
+                tinfo.save()
+
             sr_stats_tst_list.append(base_fvt_score_tst)
 
     else:
