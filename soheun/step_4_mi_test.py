@@ -61,7 +61,6 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         [
             "test_ratio",
             "data_seed",
-            "resample_SR",
         ],
     )
     require_keys(
@@ -72,6 +71,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
             "fit_batch_size",
             "model_seed",
             "train_seed",
+            "resample",
             "data_seed",
             "max_epochs",
             "val_ratio",
@@ -121,6 +121,9 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         )
     else:
         raise ValueError(f"Unknown model type: {config['mi_test_fvt']['model']}")
+
+    if config["mi_test_fvt"]["model"] != "FvTClassifier":
+        assert False, "Only FvTClassifier is supported for model-independent test"
 
     mi_test_fvt_hparams: dict = deepcopy(config["mi_test_fvt"])
     for key in config.keys():
@@ -183,9 +186,6 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     )
     SR_idx = SR_stats_tst >= SR_cut
 
-    SR_3b_idx = events_tst.is_3b & SR_idx
-    SR_4b_idx = events_tst.is_4b & SR_idx
-
     CR_fvt_model = CR_fvt_tinfo.load_trained_model("best")
     CR_fvt_model: FvTClassifier
     CR_fvt_model.eval()
@@ -194,7 +194,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         fvt_scores = CR_fvt_model.predict(X).detach().cpu()[:, 1]
         return torch.where(y == 0, fvt_scores / (1 - fvt_scores), 1.0)
 
-    resample_SR = config["mi_test_dataset"]["resample_SR"]
+    resample_SR = config["mi_test_fvt"]["resample"]
 
     if resample_SR:
         events_tst_SR = events_tst[SR_idx].clone()
@@ -205,16 +205,32 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
             .numpy()
         )
         events_tst_SR.reweight(reweights_tst_SR * events_tst_SR.weights)
-        w_3b = events_tst_SR.total_weight - events_tst_SR.total_weight_4b
-        w_4b = events_tst_SR.total_weight_4b
-        events_tst_SR_bg4b_est = events_tst_SR[events_tst_SR.is_3b].poisson_sample(
-            int(w_3b), seed=config["mi_test_dataset"]["data_seed"]
+
+        tst_SR_idx_bool = np.zeros_like(ms_idx, dtype=bool)
+        tst_idx = np.where(~ms_idx)[0]
+        tst_SR_idx_bool[tst_idx[SR_idx]] = True
+
+        mi_test_fvt_tinfo = TrainingInfo(
+            mi_test_fvt_hparams,
+            ms_hash=msamples.hash,
+            ms_idx=tst_SR_idx_bool,
         )
-        events_tst_SR_4b = events_tst_SR[events_tst_SR.is_4b].poisson_sample(
-            int(w_4b), seed=config["mi_test_dataset"]["data_seed"]
+
+        train_ratio = 1 - config["mi_test_dataset"]["test_ratio"]
+        mi_test_fvt_train_dset, mi_test_fvt_val_dset = (
+            mi_test_fvt_tinfo.fetch_train_val_tensor_datasets_with_resampling(
+                n_samples=int(len(events_tst_SR) * train_ratio),
+                features=features,
+                label="fourTag",
+                weight="weight",
+                label_dtype=torch.long,
+                reweighting_fn=reweighting_fn,
+            )
         )
 
     else:
+        SR_3b_idx = events_tst.is_3b & SR_idx
+        SR_4b_idx = events_tst.is_4b & SR_idx
         # select test_ratio of the events in the SR for 3b and 4b
         SR_3b_test_idx = select_random_true_elements(
             SR_3b_idx,
@@ -262,46 +278,70 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
             )
         )
 
-        pl.seed_everything(mi_test_fvt_hparams["model_seed"])
+    pl.seed_everything(mi_test_fvt_hparams["model_seed"])
 
-        if mi_test_fvt_hparams["model"] == "AttentionClassifier":
-            assert False, "AttentionClassifier is not supported"
-        elif mi_test_fvt_hparams["model"] == "FvTClassifier":
-            mi_test_fvt_model = FvTClassifier(
-                num_classes=2,
-                dim_input_jet_features=4,
-                dim_dijet_features=mi_test_fvt_hparams["dim_dijet_features"],
-                dim_quadjet_features=mi_test_fvt_hparams["dim_quadjet_features"],
-                run_name=mi_test_fvt_tinfo.hash,
-                depth=mi_test_fvt_hparams["depth"],
-            )
-        else:
-            raise ValueError(f"Unknown model type: {mi_test_fvt_hparams['model']}")
+    mi_test_fvt_model = FvTClassifier(
+        num_classes=2,
+        dim_input_jet_features=4,
+        dim_dijet_features=mi_test_fvt_hparams["dim_dijet_features"],
+        dim_quadjet_features=mi_test_fvt_hparams["dim_quadjet_features"],
+        run_name=mi_test_fvt_tinfo.hash,
+        depth=mi_test_fvt_hparams["depth"],
+    )
 
-        mi_test_fvt_model.fit(
-            mi_test_fvt_train_dset,
-            mi_test_fvt_val_dset,
-            max_epochs=mi_test_fvt_hparams["max_epochs"],
-            train_seed=mi_test_fvt_hparams["train_seed"],
-            save_checkpoint=True,
-            callbacks=[],
-            tb_log_dir=config["experiment_name"],
-            optimizer_config=mi_test_fvt_hparams["optimizer"],
-            lr_scheduler_config=mi_test_fvt_hparams["lr_scheduler"],
-            early_stop_patience=mi_test_fvt_hparams["early_stop_patience"],
-            dataloader_config=mi_test_fvt_hparams["dataloader"],
-            file_handler=file_handler,
+    mi_test_fvt_model.fit(
+        mi_test_fvt_train_dset,
+        mi_test_fvt_val_dset,
+        max_epochs=mi_test_fvt_hparams["max_epochs"],
+        train_seed=mi_test_fvt_hparams["train_seed"],
+        save_checkpoint=True,
+        callbacks=[],
+        tb_log_dir=config["experiment_name"],
+        optimizer_config=mi_test_fvt_hparams["optimizer"],
+        lr_scheduler_config=mi_test_fvt_hparams["lr_scheduler"],
+        early_stop_patience=mi_test_fvt_hparams["early_stop_patience"],
+        dataloader_config=mi_test_fvt_hparams["dataloader"],
+        file_handler=file_handler,
+    )
+
+    mi_test_fvt_model.eval()
+    mi_test_fvt_model.to(torch.device("cuda"))
+
+    file_handler.stream.write(f"Finished training model {mi_test_fvt_tinfo.hash}\n")
+    file_handler.stream.write(f"Current Time: {pd.Timestamp.now()}\n")
+    file_handler.stream.flush()
+
+    if resample_SR:
+        # compute fvt scores for all SR events
+        events_tst_SR = events_tst[SR_idx]
+        fvt_scores_tst_SR = (
+            mi_test_fvt_model.predict(events_tst_SR.X_torch)
+            .detach()
+            .cpu()
+            .numpy()[:, 1]
+        )
+        reweights_tst_SR = (
+            reweighting_fn(events_tst_SR.X_torch, events_tst_SR.is_4b_torch)
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        y_train = [v[1].item() for v in mi_test_fvt_train_dset]
+        y_val = [v[1].item() for v in mi_test_fvt_val_dset]
+        pi = np.mean(y_train + y_val)
+        mi_test_fvt_tinfo.update_aux_info(
+            description=f"Model independent test for {config['CR_fvt_hash']}",
+            step=config["step"],
+            fvt_scores_tst_SR=fvt_scores_tst_SR,
+            reweights_tst_SR=reweights_tst_SR,
+            pi=pi,
         )
 
-        file_handler.stream.write(f"Finished training model {mi_test_fvt_tinfo.hash}\n")
-        file_handler.stream.write(f"Current Time: {pd.Timestamp.now()}\n")
-        file_handler.stream.flush()
-
+    else:
         # compute fvt scores for the test dataset
         events_tst_SR_test = events_tst[SR_test_idx]
         events_tst_SR_train = events_tst[SR_idx & ~SR_test_idx]
-        mi_test_fvt_model.eval()
-        mi_test_fvt_model.to(torch.device("cuda"))
+        pi = events_tst_SR_train.total_weight_4b / events_tst_SR_train.total_weight
         fvt_scores_tst_SR_test = (
             mi_test_fvt_model.predict(events_tst_SR_test.X_torch)
             .detach()
@@ -326,8 +366,9 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
             fvt_scores_tst_SR_test=fvt_scores_tst_SR_test,
             reweights_tst_SR_test=reweights_tst_SR_test,
             reweights_tst_SR_train=reweights_tst_SR_train,
+            pi=pi,
         )
-        mi_test_fvt_tinfo.save()
+    mi_test_fvt_tinfo.save()
 
 
 @click.command()

@@ -11,6 +11,9 @@ import yaml
 from attention_classifier import AttentionClassifier
 from training_info import TrainingInfo
 from utils import require_keys
+from events_data import get_is_signal, EventsData
+from dataset import MotherSamples
+from fvt_classifier import FvTClassifier
 
 ###########################################################################################
 ###########################################################################################
@@ -181,8 +184,25 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         description=f"Step 2: smeared_FvT_based_on_{smeared_fvt_tinfo.hparams['encoder_hash']}",
         step=2,
     )
+
+    mother_samples = MotherSamples.load(smeared_fvt_tinfo.ms_hash)
+    tst_scdinfo = mother_samples.scdinfo[~smeared_fvt_tinfo.ms_idx]
+    df_tst = tst_scdinfo.fetch_data()
+    df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
+    events_tst = EventsData.from_dataframe(df_tst, features)
+
+    base_fvt_model = base_fvt_tinfo.load_trained_model("best")
+    base_fvt_model: FvTClassifier
+    base_fvt_model.eval()
+    _, base_q_repr = base_fvt_model.predict_and_representations(events_tst.X_torch)
+    base_q_repr = base_q_repr.numpy()
+
+    smeared_fvt_model = smeared_fvt_tinfo.load_trained_model("best")
+    smeared_fvt_model: AttentionClassifier
+    smeared_fvt_model.eval()
+    smeared_fvt_score = smeared_fvt_model.predict(base_q_repr)[:, 1].numpy()
+    smeared_fvt_tinfo.aux_info.update({"smeared_fvt_score": smeared_fvt_score})
     smeared_fvt_tinfo.save()
-    # TrainingInfo.update_metadata()
 
 
 @click.command()

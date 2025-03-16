@@ -70,15 +70,18 @@ def check_dataset_conditions(
 
 
 def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    signal_ratios = [0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(15)
+    signal_filename = "HH4b_resonant_400.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
         "dataset": lambda x: (
             safe_dict(x, "signal_ratio") in signal_ratios
             and safe_dict(x, "seed") in dataset_seeds
+            and safe_dict(x, "signal_filename") == signal_filename
         ),
         "train_seed": lambda x: x in ensemble_seeds,
         "model_seed": lambda x: x in ensemble_seeds,
@@ -101,9 +104,9 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     config_filenames = []
     configs_to_run = []
     postfixs = []
-    for signal_ratio, seed, ensemble_seed in targets:
+    for signal_ratio, seed, ensemble_seed in tqdm.tqdm(targets):
         config = deepcopy(base_config)
-        postfix = f"{seed}_{signal_ratio}_{ensemble_seed}"
+        postfix = f"{seed}_{signal_ratio}_{ensemble_seed}_{signal_filename}"
         if postfix in postfixs:
             raise ValueError(f"Postfix {postfix} already exists, cannot be duplicated")
         postfixs.append(postfix)
@@ -111,6 +114,7 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         config["experiment_name"] = EXPERIMENT_NAME
         config["dataset"]["signal_ratio"] = signal_ratio
         config["dataset"]["seed"] = seed
+        config["dataset"]["signal_filename"] = signal_filename
         config_filename = f"{EXPERIMENT_NAME}_{postfix}.yml"
         config_filenames.append(config_filename)
 
@@ -123,19 +127,30 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    # signal_ratios = [0.005]
+    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    # noise_scales = [2.5, 3.0]
+    # signal_filename = "HH4b_picoAOD.h5"
+    # base_experiment_name = "base_fvt_training_ensemble"
+
+    noise_scales = [0.5, 1.0, 1.5, 2.0]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(15)
+    base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
+    signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    signal_filename = "HH4b_resonant_400.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
         "dataset": lambda x: (
             safe_dict(x, "signal_ratio") in signal_ratios
             and safe_dict(x, "seed") in dataset_seeds
+            and safe_dict(x, "signal_filename") == signal_filename
         ),
         "train_seed": lambda x: x in ensemble_seeds,
         "model_seed": lambda x: x in ensemble_seeds,
         "data_seed": lambda x: x in ensemble_seeds,
+        "smearing": lambda x: x["noise_scale"] in noise_scales,
     }
     _, hparams = TrainingInfo.find(hparams_filter, return_hparams=True)
     existing = {
@@ -143,20 +158,21 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
             hparam["dataset"]["signal_ratio"],
             hparam["dataset"]["seed"],
             hparam["train_seed"],
+            hparam["smearing"]["noise_scale"],
         )
         for hparam in hparams
     }
-    targets = set(product(signal_ratios, dataset_seeds, ensemble_seeds))
+    targets = set(product(signal_ratios, dataset_seeds, ensemble_seeds, noise_scales))
     targets = list(targets - existing)
-    targets.sort(key=lambda x: (x[0], x[1], x[2]))
+    targets.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
     logging.info(f"Number of targets: {len(targets)}")
 
     config_filenames = []
     configs_to_run = []
     postfixs = []
-    for signal_ratio, seed, ensemble_seed in targets:
+    for signal_ratio, seed, ensemble_seed, noise_scale in tqdm.tqdm(targets):
         config = deepcopy(base_config)
-        postfix = f"{seed}_{signal_ratio}_{ensemble_seed}"
+        postfix = f"{seed}_{signal_ratio}_{ensemble_seed}_{noise_scale}"
         if postfix in postfixs:
             raise ValueError(f"Postfix {postfix} already exists, cannot be duplicated")
         postfixs.append(postfix)
@@ -165,14 +181,14 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
         config["dataset"]["seed"] = seed
         config["dataset"]["signal_ratio"] = signal_ratio
+        config["dataset"]["signal_filename"] = signal_filename
         config["experiment_name"] = EXPERIMENT_NAME
 
         config["smeared_fvt"]["train_seed"] = ensemble_seed
         config["smeared_fvt"]["model_seed"] = ensemble_seed
         config["smeared_fvt"]["data_seed"] = ensemble_seed
-        config["smearing"]["noise_scale"] = 1.0
+        config["smearing"]["noise_scale"] = noise_scale
         config["smearing"]["seed"] = seed
-        base_experiment_name = "base_fvt_training_ensemble"
         config["base_experiment_name"] = base_experiment_name
         config["base_experiment_hash"] = find_and_check_hash_unique(
             {
@@ -199,8 +215,11 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(1)
-    SR_size = 0.1
-    CR_size = 0.9
+    noise_scales = [2.5, 3.0]
+    SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
+
+    # SR_size = 0.1
+    # CR_size = 0.9
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -211,21 +230,42 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         "train_seed": lambda x: x in ensemble_seeds,
         "model_seed": lambda x: x in ensemble_seeds,
         "data_seed": lambda x: x in ensemble_seeds,
-        "signal_region": lambda x: x["4b_in_SR"] == SR_size
-        and x["4b_in_CR"] == CR_size,
     }
     _, hparams = TrainingInfo.find(hparams_filter, return_hparams=True)
+    step_2_hashes, step_2_hparams = TrainingInfo.find(
+        {
+            "experiment_name": "smeared_fvt_training_ensemble",
+            "aux_info_step": 2,
+        },
+        return_hparams=True,
+    )
+    step_2_hashes_hparams_dict = {
+        hash: hparam for hash, hparam in zip(step_2_hashes, step_2_hparams)
+    }
+    for hparam in hparams:
+        if "SR_stats_hashes" not in hparam["signal_region"]:
+            print(hparam)
+            raise ValueError("SR_stats_hashes not found in signal_region")
+
+        first_hash = hparam["signal_region"]["SR_stats_hashes"][0]
+        step_2_hparam = step_2_hashes_hparams_dict[first_hash]
+        hparam["smearing"] = step_2_hparam["smearing"]
+
     existing = {
         (
             hparam["dataset"]["signal_ratio"],
             hparam["dataset"]["seed"],
             hparam["train_seed"],
+            hparam["smearing"]["noise_scale"],
+            (hparam["signal_region"]["4b_in_SR"], hparam["signal_region"]["4b_in_CR"]),
         )
         for hparam in hparams
     }
-    targets = set(product(signal_ratios, dataset_seeds, ensemble_seeds))
+    targets = set(
+        product(signal_ratios, dataset_seeds, ensemble_seeds, noise_scales, SR_CR_sizes)
+    )
     targets = list(targets - existing)
-    targets.sort(key=lambda x: (x[0], x[1], x[2]))
+    targets.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
     logging.info(f"Number of targets: {len(targets)}")
 
     config_filenames = []
@@ -234,8 +274,10 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     input(
         f"Confirm that the step is correct: {base_config['step']}, press Enter to continue..."
     )
-    for signal_ratio, seed, ensemble_seed in targets:
-        postfix = f"{seed}_{signal_ratio}_{ensemble_seed}"
+    for signal_ratio, seed, ensemble_seed, noise_scale, SR_CR_size in tqdm.tqdm(
+        targets
+    ):
+        postfix = f"{seed}_{signal_ratio}_{ensemble_seed}_{noise_scale}_{SR_CR_size[0]}_{SR_CR_size[1]}"
         if postfix in postfixs:
             raise ValueError(f"Postfix {postfix} already exists, cannot be duplicated")
         postfixs.append(postfix)
@@ -265,6 +307,7 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
                     config["dataset"]["signal_filename"],
                     config["dataset"]["seed"],
                 ),
+                "smearing": lambda x: x["noise_scale"] == noise_scale,
             },
         )
         config["signal_region"]["ensemble_mode"] = "max"
@@ -274,8 +317,8 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
             config["signal_region"]["stats_type"] = "fvt"
         else:
             raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
-        config["signal_region"]["4b_in_SR"] = SR_size
-        config["signal_region"]["4b_in_CR"] = CR_size
+        config["signal_region"]["4b_in_SR"] = SR_CR_size[0]
+        config["signal_region"]["4b_in_CR"] = SR_CR_size[1]
 
         config["CR_fvt"]["train_seed"] = ensemble_seed
         config["CR_fvt"]["model_seed"] = ensemble_seed
@@ -302,6 +345,7 @@ def step_4_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         config = deepcopy(base_config)
         config["mi_test_fvt"]["dataloader"]["batch_size"] = batch_size
         config["mi_test_fvt"]["fit_batch_size"] = batch_size
+        config["mi_test_fvt"]["resample"] = True
 
         SR_size, CR_size = SR_CR_size
         postfix = f"{seed}_{signal_ratio}_{SR_size}_{CR_size}"

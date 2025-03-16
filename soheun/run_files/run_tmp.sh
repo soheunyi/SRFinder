@@ -1,6 +1,6 @@
 #!/bin/bash
 # specify partition to run in (statds or phil)
-#SBATCH --partition statds
+#SBATCH --partition phil_condo 
 #SBATCH --ntasks 1
 
 # number of CPUs and amount of memory you need:
@@ -19,7 +19,7 @@
 
 ## Choose one:
 
-RUN_FILENAME="run_mi_test_p_values.py"
+RUN_FILENAME="run_tmp.py"
 CONDA_ENV_NAME="coffea_torch"
 # ARGS="--experiment-name CR_fvt_training_ensemble_max_smeared"
 

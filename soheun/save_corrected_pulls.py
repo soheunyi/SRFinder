@@ -7,20 +7,25 @@ import os
 import tqdm
 from training_info import TrainingInfo
 import pickle
-from correct_systematic_error import correct_systematic_error
+from correct_systematic_error import (
+    correct_systematic_error,
+    correct_systematic_error_mi_test,
+)
 
 
 # from multiprocessing import Pool, Manager
 
 
 # configs
-order = 1
+order = 2
 nbins_list = [2**i for i in range(2, 11)]
 bins_mode = "quantile"
-bins_stats_type = "fvt"
+# bins_stats_type = "fvt"
+bins_stats_type = "mi_test"
 experiment_names = [
-    "CR_fvt_training_ensemble_max_fvt",
+    # "CR_fvt_training_ensemble_max_fvt",
     # "CR_fvt_training_ensemble_max_smeared",
+    "mi_test",
 ]
 n_3b = 100_0000
 signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
@@ -72,16 +77,25 @@ else:
 
 
 def process_hash(hash, nbins_to_save):
-    corrections, hists = correct_systematic_error(
-        hash,
-        nbins_to_save,
-        bins_mode,
-        intercept_min=intercept_min,
-        intercept_max=intercept_max,
-        slope_min=slope_min,
-        slope_max=slope_max,
-        loaded_df=loaded_df,
-    )
+    if bins_stats_type == "mi_test":
+        corrections, hists = correct_systematic_error_mi_test(
+            hash,
+            nbins_to_save,
+            bins_mode,
+            correction_order=order,
+            loaded_df=loaded_df,
+        )
+    else:
+        corrections, hists = correct_systematic_error(
+            hash,
+            nbins_to_save,
+            bins_mode,
+            intercept_min=intercept_min,
+            intercept_max=intercept_max,
+            slope_min=slope_min,
+            slope_max=slope_max,
+            loaded_df=loaded_df,
+        )
 
     pulls = {}
 
@@ -122,8 +136,10 @@ hashes = TrainingInfo.find(
     {
         "experiment_name": lambda x: x in experiment_names,
         "model": "FvTClassifier",
-        "aux_info_step": 3,
         "dataset": lambda x: x["n_3b"] == n_3b and x["signal_ratio"] in signal_ratios,
+        # "aux_info_step": 3,
+        "aux_info_step": 4,
+        "resample": lambda x: x is None or not x,
     }
 )
 # target_hashes = [h for h in hashes if h not in test_info_dict.keys()]
@@ -134,8 +150,6 @@ target_hashes.sort()
 print(f"Number of hashes to process: {len(target_hashes)}")
 print("Processing hashes starting")
 
-# with Pool(processes=4) as pool:
-#     pool.map(process_and_save, target_hashes)
 
 for hash in tqdm.tqdm(target_hashes):
     process_and_save(hash)

@@ -183,6 +183,53 @@ class TrainingInfo:
             TensorDataset(q_repr_smear_val, y_val, w_val),
         )
 
+    def fetch_train_val_tensor_datasets_with_resampling(
+        self,
+        n_samples: int,
+        features: Iterable[str],
+        label: str,
+        weight: str,
+        label_dtype: torch.dtype = torch.long,
+        reweighting_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+    ) -> tuple[TensorDataset, TensorDataset]:
+        assert "resample" in self.hparams
+        assert self.hparams["resample"]
+
+        df_train = self.scdinfo.fetch_data()
+        X_torch = torch.tensor(df_train[features].values, dtype=torch.float32)
+        y_torch = torch.tensor(df_train[label].values, dtype=label_dtype)
+        weights = torch.tensor(df_train[weight].values, dtype=torch.float32)
+        reweights = (
+            reweighting_fn(X_torch, y_torch) if reweighting_fn is not None else 1.0
+        )
+        weights = weights * reweights
+        weights = weights / weights.sum()
+
+        n_samples_val = int(n_samples * self.val_ratio)
+        n_samples_train = n_samples - n_samples_val
+        fit_batch_size = self.hparams.get("fit_batch_size", 0)
+        if fit_batch_size > 0:
+            n_samples_train = (n_samples_train // fit_batch_size) * fit_batch_size
+            n_samples_val = (n_samples_val // fit_batch_size) * fit_batch_size
+
+        torch.manual_seed(self.data_seed)
+
+        idx_train = torch.multinomial(weights, n_samples_train, replacement=True)
+        idx_val = torch.multinomial(weights, n_samples_val, replacement=True)
+
+        X_train = X_torch[idx_train]
+        y_train = y_torch[idx_train]
+        weights_train = torch.ones_like(y_train, dtype=torch.float32)
+
+        X_val = X_torch[idx_val]
+        y_val = y_torch[idx_val]
+        weights_val = torch.ones_like(y_val, dtype=torch.float32)
+
+        return (
+            TensorDataset(X_train, y_train, weights_train),
+            TensorDataset(X_val, y_val, weights_val),
+        )
+
     def fetch_train_val_scdinfo(self) -> tuple[SCDatasetInfo, SCDatasetInfo]:
         """
         Return the training and validation scdinfo.

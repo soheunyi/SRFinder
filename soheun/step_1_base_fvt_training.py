@@ -12,6 +12,7 @@ from fvt_classifier import FvTClassifier
 from dataset import MotherSamples
 from training_info import TrainingInfo
 from utils import require_keys
+from events_data import get_is_signal, EventsData
 
 ###########################################################################################
 ###########################################################################################
@@ -126,9 +127,15 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     }
     hashes = MotherSamples.find(ms_hparams, from_metadata=False)
     if len(hashes) == 0:
-        MotherSamples.from_hparams(ms_hparams).save()
-        hashes = MotherSamples.find(ms_hparams, from_metadata=False)
-    assert len(hashes) == 1, "Number of mother samples must be one"
+        raise ValueError(
+            "No mother samples found for the given parameters, first save the mother samples with hparams {}".format(
+                ms_hparams
+            )
+        )
+    elif len(hashes) > 1:
+        raise ValueError(
+            "Number of mother samples must be one, instead of {}".format(len(hashes))
+        )
     ms_hash = hashes[0]
     mother_samples = MotherSamples.load(ms_hash)
 
@@ -177,6 +184,18 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     )
 
     base_fvt_tinfo.update_aux_info(description=f"Step 1: base_FvT", step=1)
+
+    base_fvt_model = base_fvt_tinfo.load_trained_model("best")
+    base_fvt_model: FvTClassifier
+    base_fvt_model.eval()
+
+    tst_scdinfo = mother_samples.scdinfo[~ms_idx]
+    df_tst = tst_scdinfo.fetch_data()
+    df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
+    events_tst = EventsData.from_dataframe(df_tst, features)
+    base_fvt_score, _ = base_fvt_model.predict_and_representations(events_tst.X_torch)
+    base_fvt_score = base_fvt_score[:, 1].numpy()
+    base_fvt_tinfo.aux_info.update({"base_fvt_score": base_fvt_score})
     base_fvt_tinfo.save()
 
 

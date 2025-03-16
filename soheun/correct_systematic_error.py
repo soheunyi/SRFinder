@@ -12,7 +12,7 @@ from dataset import MotherSamples, split_scdinfo
 from events_data import EventsData, events_from_scdinfo, get_is_signal
 from signal_region import get_SR_CR_cut, compute_sr_stats
 from training_info import TrainingInfo
-from utils import get_quantiles_with_weights
+from utils import get_quantiles_with_weights, select_random_true_elements
 
 import logging
 
@@ -152,7 +152,7 @@ def get_histograms(
         bins=bins,
         weights=(events.weights * x_values * reweights)[events.is_3b],
     )[0]
-    hist_3b_sq = np.histogram(
+    hist_3b_rw_sq = np.histogram(
         x_values[events.is_3b],
         bins=bins,
         weights=(events.weights**2 * reweights**2)[events.is_3b],
@@ -162,13 +162,37 @@ def get_histograms(
         bins=bins,
         weights=(events.weights**2)[events.is_4b],
     )[0]
+    hist_signal = np.histogram(
+        x_values[events.is_signal],
+        bins=bins,
+        weights=events.weights[events.is_signal],
+    )[0]
+    hist_signal_sq = np.histogram(
+        x_values[events.is_signal],
+        bins=bins,
+        weights=(events.weights[events.is_signal] ** 2),
+    )[0]
+    hist_bg4b = np.histogram(
+        x_values[events.is_bg4b],
+        bins=bins,
+        weights=events.weights[events.is_bg4b],
+    )[0]
+    hist_bg4b_sq = np.histogram(
+        x_values[events.is_bg4b],
+        bins=bins,
+        weights=(events.weights[events.is_bg4b] ** 2),
+    )[0]
     return {
         "3b": hist_3b,
         "3b_rw": hist_3b_rw,
         "3b_rw_x": hist_3b_rw_x,
-        "3b_sq": hist_3b_sq,
+        "3b_rw_sq": hist_3b_rw_sq,
         "4b": hist_4b,
         "4b_sq": hist_4b_sq,
+        "signal": hist_signal,
+        "signal_sq": hist_signal_sq,
+        "bg4b": hist_bg4b,
+        "bg4b_sq": hist_bg4b_sq,
     }
 
 
@@ -309,6 +333,196 @@ def correct_systematic_error(
             bins_stats_tst[events_tst_SR.is_3b],
             bins=SR_bins,
             weights=corrected_weights[events_tst_SR.is_3b] ** 2,
+        )[0]
+        hists["3b_corrected"] = hist_3b_corrected
+        hists["3b_corrected_sq"] = hist_3b_corrected_sq
+        hist_corrected_dict[nbins] = deepcopy(hists)
+
+    return corrections, hist_corrected_dict
+
+
+def just_simple_linear_fit(
+    X: np.ndarray,
+    y: np.ndarray,
+    v: np.ndarray,
+):
+    assert y.ndim == v.ndim == 1
+    assert X.ndim == 2
+    assert len(X) == len(y) == len(v)
+    # remove 0 values from V
+    v_nonzero_idx = np.where(v != 0)[0]
+    X_nonzero = X[v_nonzero_idx]
+    y_nonzero = y[v_nonzero_idx].reshape(-1, 1)
+    v_nonzero = v[v_nonzero_idx]
+    n_eff_bins = len(v_nonzero)
+
+    V_inv = np.diag(1 / v_nonzero)
+    sol = (
+        np.linalg.inv(X_nonzero.T @ V_inv @ X_nonzero) @ X_nonzero.T @ V_inv @ y_nonzero
+    )
+    return sol.flatten(), n_eff_bins
+
+
+def correct_systematic_error_mi_test(
+    mi_test_hash: str,
+    nbins_list: list[int],
+    bins_mode: str = "quantile",
+    correction_order: int = 1,
+    loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
+):
+
+    if len(loaded_df) == 0:
+        path_3b = pathlib.Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
+        path_bg4b = pathlib.Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
+        path_signal = pathlib.Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+        df_3b = pd.read_hdf(path_3b)
+        df_bg4b = pd.read_hdf(path_bg4b)
+        df_signal = pd.read_hdf(path_signal)
+        df_3b["signal"] = False
+        df_bg4b["signal"] = False
+        df_signal["signal"] = True
+        loaded_df = {path_3b: df_3b, path_bg4b: df_bg4b, path_signal: df_signal}
+
+    corrections = {nbins: [] for nbins in nbins_list}
+    hist_corrected_dict = {}
+
+    mi_test_tinfo = TrainingInfo.load(mi_test_hash)
+
+    for key in [
+        "fvt_scores_tst_SR_train",
+        "fvt_scores_tst_SR_test",
+        "reweights_tst_SR_train",
+        "reweights_tst_SR_test",
+    ]:
+        if key not in mi_test_tinfo.aux_info:
+            print(f"Key {key} not found in aux_info of {mi_test_hash}")
+            continue
+
+    CR_fvt_hash = mi_test_tinfo.hparams["CR_fvt_hash"]
+    CR_fvt_tinfo = TrainingInfo.load(CR_fvt_hash)
+    SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
+    ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
+    stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
+    signal_filename = CR_fvt_tinfo.hparams["dataset"]["signal_filename"]
+
+    ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
+    msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
+
+    train_scdinfo = msamples.scdinfo[ms_idx]
+    df_train = train_scdinfo.fetch_data(loaded_df)
+    df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
+    events_train = EventsData.from_dataframe(df_train, features)
+
+    tst_scdinfo = msamples.scdinfo[~ms_idx]
+    df_tst = tst_scdinfo.fetch_data(loaded_df)
+    df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
+    events_tst = EventsData.from_dataframe(df_tst, features)
+
+    SR_stats_train, SR_stats_tst = compute_sr_stats(
+        SR_stats_hashes, signal_filename, ensemble_mode, stats_type, loaded_df
+    )
+    SR_cut, _ = get_SR_CR_cut(
+        SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]
+    )
+    SR_idx = SR_stats_tst >= SR_cut
+
+    SR_3b_idx = events_tst.is_3b & SR_idx
+    SR_4b_idx = events_tst.is_4b & SR_idx
+
+    mi_test_test_ratio = mi_test_tinfo.hparams["mi_test_dataset"]["test_ratio"]
+    mi_test_data_seed = mi_test_tinfo.hparams["mi_test_dataset"]["data_seed"]
+
+    # select test_ratio of the events in the SR for 3b and 4b
+    SR_3b_test_idx = select_random_true_elements(
+        SR_3b_idx,
+        mi_test_test_ratio,
+        mi_test_data_seed,
+    )
+    SR_4b_test_idx = select_random_true_elements(
+        SR_4b_idx,
+        mi_test_test_ratio,
+        mi_test_data_seed,
+    )
+
+    SR_test_idx = SR_3b_test_idx | SR_4b_test_idx
+    SR_train_idx = SR_idx & ~SR_test_idx
+
+    events_tst_SR_train = events_tst[SR_train_idx]
+    reweights_tst_SR_train = mi_test_tinfo.aux_info["reweights_tst_SR_train"]
+
+    events_tst_SR_test = events_tst[SR_test_idx]
+    reweights_tst_SR_test = mi_test_tinfo.aux_info["reweights_tst_SR_test"]
+
+    mi_fvt_scores_tst_SR_train, mi_fvt_scores_tst_SR_test = (
+        mi_test_tinfo.aux_info["fvt_scores_tst_SR_train"],
+        mi_test_tinfo.aux_info["fvt_scores_tst_SR_test"],
+    )
+
+    bins_stats_train, bins_stats_test = (
+        mi_fvt_scores_tst_SR_train,
+        mi_fvt_scores_tst_SR_test,
+    )
+
+    for nbins in nbins_list:
+        if bins_mode == "quantile":
+            SR_bins = get_quantiles_with_weights(
+                bins_stats_train[events_tst_SR_train.is_3b],
+                (reweights_tst_SR_train * events_tst_SR_train.weights)[
+                    events_tst_SR_train.is_3b
+                ],
+                np.linspace(0, 1, nbins + 1),
+            )
+        elif bins_mode == "uniform":
+            SR_bins = np.linspace(
+                np.min(bins_stats_train),
+                np.max(bins_stats_train),
+                nbins + 1,
+            )
+        SR_bins[0] = np.min([SR_bins[0], np.min(bins_stats_test)])
+        SR_bins[-1] = np.max([SR_bins[-1], np.max(bins_stats_test)])
+
+        hists = get_histograms(
+            events_tst_SR_test,
+            bins_stats_test,
+            SR_bins,
+            reweights_tst_SR_test,
+        )
+
+        y = hists["4b"] - hists["3b_rw"]
+        V = np.array(hists["3b_sq"] + hists["4b_sq"])
+
+        if correction_order == 1:
+            X = np.stack([hists["3b_rw"]], axis=1)
+            sol, n_eff_bins = just_simple_linear_fit(X, y, V)
+            intercept = sol[0]
+            slope = 0
+        elif correction_order == 2:
+            X = np.stack([hists["3b_rw"], hists["3b_rw_x"]], axis=1)
+            sol, n_eff_bins = just_simple_linear_fit(X, y, V)
+            intercept = sol[0]
+            slope = sol[1]
+        else:
+            raise ValueError(f"Invalid correction order: {correction_order}")
+
+        corrections[nbins].append((intercept, slope, n_eff_bins))
+
+        corrected_reweights = reweights_tst_SR_test * (
+            1 + intercept + slope * bins_stats_test
+        )
+        corrected_weights = (
+            np.where(events_tst_SR_test.is_4b, 1, corrected_reweights)
+            * events_tst_SR_test.weights
+        )
+
+        hist_3b_corrected = np.histogram(
+            bins_stats_test[events_tst_SR_test.is_3b],
+            bins=SR_bins,
+            weights=corrected_weights[events_tst_SR_test.is_3b],
+        )[0]
+        hist_3b_corrected_sq = np.histogram(
+            bins_stats_test[events_tst_SR_test.is_3b],
+            bins=SR_bins,
+            weights=corrected_weights[events_tst_SR_test.is_3b] ** 2,
         )[0]
         hists["3b_corrected"] = hist_3b_corrected
         hists["3b_corrected_sq"] = hist_3b_corrected_sq

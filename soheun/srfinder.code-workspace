@@ -1,0 +1,51 @@
+{
+	"folders": [
+		{
+			"path": ".",
+			"name": "SRFinder Root"
+		},
+		{
+			"path": "./soheun",
+			"name": "Source Code"
+		}
+	],
+	"settings": {
+		"files.watcherExclude": {
+			"**/events/**": true,
+			"**/data/**": true,
+			"**/*.h5": true,
+			"**/*.hdf": true,
+			"**/*.pkl": true,
+			"**/node_modules/*/**": true,
+			"**/.git/objects/**": true,
+			"**/.git/subtree-cache/**": true,
+			"**/venv/**": true,
+			"**/__pycache__/**": true
+		},
+		"search.exclude": {
+			"**/events/**": true,
+			"**/data/**": true,
+			"**/*.h5": true,
+			"**/*.hdf": true,
+			"**/*.pkl": true,
+			"**/node_modules/**": true,
+			"**/.git/**": true,
+			"**/venv/**": true,
+			"**/__pycache__/**": true
+		},
+		"files.exclude": {
+			"**/.git": true,
+			"**/.svn": true,
+			"**/.hg": true,
+			"**/CVS": true,
+			"**/.DS_Store": true,
+			"**/Thumbs.db": true,
+			"**/__pycache__": true,
+			"**/*.pyc": true
+		},
+		"python.analysis.exclude": [
+			"**/events/**",
+			"**/data/**"
+		]
+	}
+}

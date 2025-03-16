@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import pathlib
 import pickle
 from typing import Iterable
@@ -580,6 +581,17 @@ class MotherSamples:
             return hashes, hparams
         else:
             return hashes
+
+    @classmethod
+    def delete(cls, hashes: list[str]):
+        print(f"Deleting {len(hashes)} hashes")
+        answer = input("Press Y/y to continue...")
+        if answer not in ["Y", "y"]:
+            print("Aborting")
+            return
+        for hash in hashes:
+            os.remove(cls.SAVE_DIR / hash)
+        cls.update_metadata()
 
     def __repr__(self) -> str:
         return f"MotherSamples(hash={self.hash}, hparams={self.hparams})"

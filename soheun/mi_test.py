@@ -47,7 +47,7 @@ def process_iteration(
     alpha: float,
     method: str,
 ) -> tuple[float, float, float]:
-    """Process one iteration of the bootstrap/permutation test."""
+    """Process single iteration of the bootstrap/permutation test."""
     # Initialize RNG with seed unique to this iteration
     rng = np.random.default_rng(seed + i)
     n_samples = len(clf_scores)

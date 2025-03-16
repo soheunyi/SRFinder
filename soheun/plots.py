@@ -552,6 +552,7 @@ def hist_events_by_labels(
     color_3b = hist_kwargs.pop("color_3b", plt.get_cmap("tab10").colors[0])
     color_4b = hist_kwargs.pop("color_4b", plt.get_cmap("tab10").colors[1])
     color_signal = hist_kwargs.pop("color_signal", plt.get_cmap("tab10").colors[2])
+    error_type = hist_kwargs.pop("error_type", None)
 
     hist_3b, bins, _ = ax.hist(
         values[events.is_3b],
@@ -592,10 +593,16 @@ def hist_events_by_labels(
             weights=events.weights[events.is_4b] ** 2,
         )
         midpoints = (bins[:-1] + bins[1:]) / 2
+        if error_type == "4b":
+            yerr = np.sqrt(hist_4b_sq)
+        elif error_type == "3b":
+            yerr = np.sqrt(hist_3b_sq)
+        else:
+            yerr = np.sqrt(hist_3b_sq + hist_4b_sq)
         ax.errorbar(
             midpoints,
             hist_3b,
-            yerr=np.sqrt(hist_3b_sq + hist_4b_sq),
+            yerr=yerr,
             color=plt.get_cmap("tab10").colors[0],
             capsize=3,
             fmt="o",

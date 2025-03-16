@@ -11,7 +11,6 @@ dataset:
 mi_test_dataset:
   test_ratio: 0.33
   data_seed: 0
-  resample_SR: false
 mi_test_fvt:
   model: FvTClassifier
   dim_dijet_features: 6
@@ -23,6 +22,7 @@ mi_test_fvt:
   model_seed: 0
   train_seed: 0 
   data_seed: 0
+  resample: false
   max_epochs: 100
   val_ratio: 0.33
   early_stop_patience: null
