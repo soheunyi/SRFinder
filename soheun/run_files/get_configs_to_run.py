@@ -74,7 +74,7 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     signal_ratios = [0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(15)
-    signal_filename = "HH4b_resonant_400.h5"
+    signal_filename = "HH4b_800.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -104,6 +104,10 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     config_filenames = []
     configs_to_run = []
     postfixs = []
+    input(
+        f"Confirm that the step is correct: {base_config['step']}, press Enter to continue..."
+    )
+
     for signal_ratio, seed, ensemble_seed in tqdm.tqdm(targets):
         config = deepcopy(base_config)
         postfix = f"{seed}_{signal_ratio}_{ensemble_seed}_{signal_filename}"
@@ -133,12 +137,12 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     # signal_filename = "HH4b_picoAOD.h5"
     # base_experiment_name = "base_fvt_training_ensemble"
 
-    noise_scales = [0.5, 1.0, 1.5, 2.0]
+    noise_scales = [0.5, 1.0, 2.0, 3.0]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(15)
-    base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
+    base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
     signal_ratios = [0.005, 0.0075, 0.01, 0.02]
-    signal_filename = "HH4b_resonant_400.h5"
+    signal_filename = "HH4b_800.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -170,6 +174,10 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     config_filenames = []
     configs_to_run = []
     postfixs = []
+    input(
+        f"Confirm that the step is correct: {base_config['step']}, press Enter to continue..."
+    )
+
     for signal_ratio, seed, ensemble_seed, noise_scale in tqdm.tqdm(targets):
         config = deepcopy(base_config)
         postfix = f"{seed}_{signal_ratio}_{ensemble_seed}_{noise_scale}"
@@ -212,20 +220,20 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    signal_ratios = [0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(1)
-    noise_scales = [2.5, 3.0]
     SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
-
-    # SR_size = 0.1
-    # CR_size = 0.9
+    noise_scales = [0.5, 1.0, 2.0, 3.0]
+    previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_800"
+    signal_filename = "HH4b_800.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
         "dataset": lambda x: (
             safe_dict(x, "signal_ratio") in signal_ratios
             and safe_dict(x, "seed") in dataset_seeds
+            and safe_dict(x, "signal_filename") == signal_filename
         ),
         "train_seed": lambda x: x in ensemble_seeds,
         "model_seed": lambda x: x in ensemble_seeds,
@@ -234,7 +242,7 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     _, hparams = TrainingInfo.find(hparams_filter, return_hparams=True)
     step_2_hashes, step_2_hparams = TrainingInfo.find(
         {
-            "experiment_name": "smeared_fvt_training_ensemble",
+            "experiment_name": previous_step_experiment_name,
             "aux_info_step": 2,
         },
         return_hparams=True,
@@ -266,6 +274,7 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     )
     targets = list(targets - existing)
     targets.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
+
     logging.info(f"Number of targets: {len(targets)}")
 
     config_filenames = []
@@ -288,13 +297,13 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         config["experiment_name"] = EXPERIMENT_NAME
         config["dataset"]["signal_ratio"] = signal_ratio
         config["dataset"]["seed"] = seed
+        config["dataset"]["signal_filename"] = signal_filename
 
         assert "step" in config, "Step must be specified in the config file"
 
         config["CR_fvt"]["train_seed"] = ensemble_seed
         config["CR_fvt"]["model_seed"] = ensemble_seed
         config["CR_fvt"]["data_seed"] = ensemble_seed
-        previous_step_experiment_name = "smeared_fvt_training_ensemble"
         config["previous_step_experiment_name"] = previous_step_experiment_name
         config["signal_region"]["SR_stats_hashes"] = find_and_check_hashes_have_same_ms(
             {
@@ -311,9 +320,17 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
             },
         )
         config["signal_region"]["ensemble_mode"] = "max"
-        if EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_smeared":
+        if EXPERIMENT_NAME in [
+            "CR_fvt_training_ensemble_max_smeared",
+            "CR_fvt_training_ensemble_max_smeared_HH4b_400",
+            "CR_fvt_training_ensemble_max_smeared_HH4b_800",
+        ]:
             config["signal_region"]["stats_type"] = "smeared"
-        elif EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_fvt":
+        elif EXPERIMENT_NAME in [
+            "CR_fvt_training_ensemble_max_fvt",
+            "CR_fvt_training_ensemble_max_fvt_HH4b_400",
+            "CR_fvt_training_ensemble_max_fvt_HH4b_800",
+        ]:
             config["signal_region"]["stats_type"] = "fvt"
         else:
             raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")

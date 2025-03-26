@@ -49,31 +49,34 @@ def correct_systematic_error_new(
     bins_stats_type: Literal["fvt", "sr_stats"] = "sr_stats",
     loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
 ):
-    if bins_stats_type == "fvt":
-        raise NotImplementedError("FVT bins stats type not implemented")
+    # if bins_stats_type == "fvt":
+    #     raise NotImplementedError("FvT bins stats type not implemented")
     if len(loaded_df) == 0:
         path_3b = pathlib.Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
         path_bg4b = pathlib.Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
         path_signal = pathlib.Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+        path_signal_HH4b_400 = pathlib.Path("../events/MG3/dataframes/HH4b_400.h5")
         df_3b = pd.read_hdf(path_3b)
         df_bg4b = pd.read_hdf(path_bg4b)
         df_signal = pd.read_hdf(path_signal)
+        df_signal_HH4b_400 = pd.read_hdf(path_signal_HH4b_400)
         df_3b["signal"] = False
         df_bg4b["signal"] = False
         df_signal["signal"] = True
-        loaded_df = {path_3b: df_3b, path_bg4b: df_bg4b, path_signal: df_signal}
+        df_signal_HH4b_400["signal"] = True
+        loaded_df = {
+            path_3b: df_3b,
+            path_bg4b: df_bg4b,
+            path_signal: df_signal,
+            path_signal_HH4b_400: df_signal_HH4b_400,
+        }
 
     CR_fvt_tinfo = TrainingInfo.load(CR_fvt_hash)
     SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
     ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
     stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
-    SR_stats_train, SR_stats_tst = compute_sr_stats(
-        SR_stats_hashes,
-        signal_filename,
-        ensemble_mode,
-        stats_type,
-        loaded_df,
-    )
+    # if stats_type == "fvt":
+    #     raise NotImplementedError("FvT stats type not implemented")
     # base_fvt_train, base_fvt_tst = compute_sr_stats(
     #     SR_stats_hashes,
     #     signal_filename,
@@ -81,6 +84,15 @@ def correct_systematic_error_new(
     #     "fvt",
     #     loaded_df,
     # )
+    # else:
+    # assert stats_type == "smeared"
+    SR_stats_train, SR_stats_tst = compute_sr_stats(
+        SR_stats_hashes,
+        signal_filename,
+        ensemble_mode,
+        stats_type,
+        loaded_df,
+    )
     ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
     msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
     train_scdinfo = msamples.scdinfo[ms_idx]
@@ -223,33 +235,48 @@ def correct_systematic_error_new(
 if __name__ == "__main__":
     nbins_list = [2**i for i in range(2, 11)]
     bins_stats_type = "sr_stats"
-    experiment_names = [
-        "CR_fvt_training_ensemble_max_smeared",
-    ]
+    # experiment_names = [
+    #     "CR_fvt_training_ensemble_max_smeared_HH4b_400",
+    #     "CR_fvt_training_ensemble_max_smeared",
+    #     "CR_fvt_training_ensemble_max_fvt",
+    # ]
+    experiment_name = "CR_fvt_training_ensemble_max_fvt"
     n_3b = 100_0000
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 
     TrainingInfo.update_metadata()
 
     print(
-        f"Configs: nbins_list={nbins_list}, bins_stats_type={bins_stats_type}, experiment_names={experiment_names}, n_3b={n_3b}, signal_ratios={signal_ratios}"
+        f"Configs: nbins_list={nbins_list}, bins_stats_type={bins_stats_type}, experiment_name={experiment_name}, n_3b={n_3b}, signal_ratios={signal_ratios}"
     )
 
     print("Loading dataframes")
     path_3b = pathlib.Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
     path_bg4b = pathlib.Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
     path_signal = pathlib.Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+    path_signal_HH4b_800 = pathlib.Path("../events/MG3/dataframes/HH4b_800.h5")
+    path_signal_HH4b_400 = pathlib.Path("../events/MG3/dataframes/HH4b_400.h5")
     df_3b = pd.read_hdf(path_3b)
     df_bg4b = pd.read_hdf(path_bg4b)
     df_signal = pd.read_hdf(path_signal)
+    df_signal_HH4b_800 = pd.read_hdf(path_signal_HH4b_800)
+    df_signal_HH4b_400 = pd.read_hdf(path_signal_HH4b_400)
     df_3b["signal"] = False
     df_bg4b["signal"] = False
     df_signal["signal"] = True
-    loaded_df = {path_3b: df_3b, path_bg4b: df_bg4b, path_signal: df_signal}
-    print("Dataframes loaded")
+    df_signal_HH4b_800["signal"] = True
+    df_signal_HH4b_400["signal"] = True
+    loaded_df = {
+        path_3b: df_3b,
+        path_bg4b: df_bg4b,
+        path_signal: df_signal,
+        path_signal_HH4b_800: df_signal_HH4b_800,
+        path_signal_HH4b_400: df_signal_HH4b_400,
+    }
 
-    bins_stats_type_str = f"{bins_stats_type}"
-    pull_dict_name = f"./data/tmp/pull_by_hashes_{bins_stats_type_str}.pkl"
+    pull_dict_name = (
+        f"./data/pulls/pull_by_hashes_{bins_stats_type}_{experiment_name}.pkl"
+    )
 
     if os.path.exists(pull_dict_name):
         with open(pull_dict_name, "rb") as f:
@@ -271,15 +298,16 @@ if __name__ == "__main__":
             pickle.dump(pull_dict, f)
 
     print("Finding hashes to process")
-    hashes = TrainingInfo.find(
+    hashes, hparams = TrainingInfo.find(
         {
-            "experiment_name": lambda x: x in experiment_names,
+            "experiment_name": lambda x: x == experiment_name,
             "model": "FvTClassifier",
             "dataset": lambda x: x["n_3b"] == n_3b
             and x["signal_ratio"] in signal_ratios,
             "aux_info_step": 3,
             # "resample": lambda x: x is None or not x,
-        }
+        },
+        return_hparams=True,
     )
     # target_hashes = [h for h in hashes if h not in pull_dict.keys()]
     target_hashes = list(hashes)
