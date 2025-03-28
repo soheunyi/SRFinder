@@ -131,18 +131,18 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    # signal_ratios = [0.005]
-    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
-    # noise_scales = [2.5, 3.0]
-    # signal_filename = "HH4b_picoAOD.h5"
-    # base_experiment_name = "base_fvt_training_ensemble"
-
-    noise_scales = [0.5, 1.0, 2.0, 3.0]
-    dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
-    ensemble_seeds = range(15)
-    base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
     signal_ratios = [0.005, 0.0075, 0.01, 0.02]
-    signal_filename = "HH4b_800.h5"
+    noise_scales = [0.5, 1.0, 2.0, 3.0]
+    signal_filename = "HH4b_400.h5"
+    base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
+    ensemble_seeds = range(15)
+    dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
+
+    # noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    # # base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
+    # base_experiment_name = "base_fvt_training_ensemble"
+    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    # signal_filename = "HH4b_picoAOD.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -221,12 +221,17 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(1)
     SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
-    noise_scales = [0.5, 1.0, 2.0, 3.0]
-    previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_800"
-    signal_filename = "HH4b_800.h5"
+    # noise_scales = [0.5, 1.0, 2.0, 3.0]
+    noise_scales = [1.0]
+    # noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
+    signal_filename = "HH4b_400.h5"
+    # previous_step_experiment_name = "smeared_fvt_training_ensemble"
+    # signal_filename = "HH4b_picoAOD.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -319,6 +324,9 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
                 "smearing": lambda x: x["noise_scale"] == noise_scale,
             },
         )
+        assert (
+            len(config["signal_region"]["SR_stats_hashes"]) == 15
+        ), f"Expected 15 SR stats hashes, got {len(config['signal_region']['SR_stats_hashes'])}"
         config["signal_region"]["ensemble_mode"] = "max"
         if EXPERIMENT_NAME in [
             "CR_fvt_training_ensemble_max_smeared",

@@ -186,6 +186,11 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     )
 
     mother_samples = MotherSamples.load(smeared_fvt_tinfo.ms_hash)
+    train_scdinfo = mother_samples.scdinfo[smeared_fvt_tinfo.ms_idx]
+    df_train = train_scdinfo.fetch_data()
+    df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
+    events_train = EventsData.from_dataframe(df_train, features)
+
     tst_scdinfo = mother_samples.scdinfo[~smeared_fvt_tinfo.ms_idx]
     df_tst = tst_scdinfo.fetch_data()
     df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
@@ -194,14 +199,33 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     base_fvt_model = base_fvt_tinfo.load_trained_model("best")
     base_fvt_model: FvTClassifier
     base_fvt_model.eval()
-    _, base_q_repr = base_fvt_model.predict_and_representations(events_tst.X_torch)
-    base_q_repr = base_q_repr.numpy()
+
+    _, base_q_repr_train = base_fvt_model.predict_and_representations(
+        events_train.X_torch
+    )
+    base_q_repr_train = base_q_repr_train.numpy()
+
+    _, base_q_repr_tst = base_fvt_model.predict_and_representations(events_tst.X_torch)
+    base_q_repr_tst = base_q_repr_tst.numpy()
 
     smeared_fvt_model = smeared_fvt_tinfo.load_trained_model("best")
     smeared_fvt_model: AttentionClassifier
     smeared_fvt_model.eval()
-    smeared_fvt_score = smeared_fvt_model.predict(base_q_repr)[:, 1].numpy()
-    smeared_fvt_tinfo.aux_info.update({"smeared_fvt_score": smeared_fvt_score})
+
+    smeared_fvt_score_train = smeared_fvt_model.predict(base_q_repr_train)[:, 1].numpy()
+    smeared_fvt_logit_train = np.log(
+        smeared_fvt_score_train / (1 - smeared_fvt_score_train)
+    )
+
+    smeared_fvt_score_tst = smeared_fvt_model.predict(base_q_repr_tst)[:, 1].numpy()
+    smeared_fvt_logit_tst = np.log(smeared_fvt_score_tst / (1 - smeared_fvt_score_tst))
+
+    smeared_fvt_tinfo.aux_info.update(
+        {
+            "smeared_fvt_logit_train": smeared_fvt_logit_train,
+            "smeared_fvt_logit_tst": smeared_fvt_logit_tst,
+        }
+    )
     smeared_fvt_tinfo.save()
 
 

@@ -178,26 +178,38 @@ def correct_systematic_error_new(
 
         y = hists["4b"] - hists["3b_rw"]
 
-        for correction_order in [1, 2]:
+        for correction_order in [1, 2, 3]:
             if correction_order == 1:
                 X = np.stack([hists["3b_rw"]], axis=1)
                 sol, n_eff_bins = just_simple_linear_fit(X, y, V)
-                intercept = sol[0]
-                slope = 0
-            else:
+                c0 = sol[0]
+                c1 = 0
+                c2 = 0
+            elif correction_order == 2:
                 X = np.stack([hists["3b_rw"], hists["3b_rw_x"]], axis=1)
                 sol, n_eff_bins = just_simple_linear_fit(X, y, V)
-                intercept = sol[0]
-                slope = sol[1]
-
+                c0 = sol[0]
+                c1 = sol[1]
+                c2 = 0
+            elif correction_order == 3:
+                X = np.stack(
+                    [hists["3b_rw"], hists["3b_rw_x"], hists["3b_rw_x_sq"]], axis=1
+                )
+                sol, n_eff_bins = just_simple_linear_fit(X, y, V)
+                c0 = sol[0]
+                c1 = sol[1]
+                c2 = sol[2]
+            else:
+                raise ValueError(f"Invalid correction order: {correction_order}")
             pulls_info[f"correction_o{correction_order}"] = {
-                "intercept": intercept,
-                "slope": slope,
+                "c0": c0,
+                "c1": c1,
+                "c2": c2,
                 "n_eff_bins": n_eff_bins,
             }
 
             corrected_reweights = reweights_SR * (
-                1 + intercept + slope * bins_stats_tst
+                1 + c0 + c1 * bins_stats_tst + c2 * bins_stats_tst**2
             )
             corrected_weights = (
                 np.where(events_tst_SR.is_4b, 1, corrected_reweights)
@@ -233,7 +245,7 @@ def correct_systematic_error_new(
 
 
 if __name__ == "__main__":
-    nbins_list = [2**i for i in range(2, 11)]
+    nbins_list = [2**i for i in range(2, 9)]
     bins_stats_type = "sr_stats"
     # experiment_names = [
     #     "CR_fvt_training_ensemble_max_smeared_HH4b_400",

@@ -189,13 +189,32 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     base_fvt_model: FvTClassifier
     base_fvt_model.eval()
 
+    train_scdinfo = mother_samples.scdinfo[ms_idx]
+    df_train = train_scdinfo.fetch_data()
+    df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
+    events_train = EventsData.from_dataframe(df_train, features)
+    base_fvt_score_train, _ = base_fvt_model.predict_and_representations(
+        events_train.X_torch
+    )
+    base_fvt_score_train = base_fvt_score_train[:, 1].numpy()
+    base_fvt_logit_train = np.log(base_fvt_score_train / (1 - base_fvt_score_train))
+
     tst_scdinfo = mother_samples.scdinfo[~ms_idx]
     df_tst = tst_scdinfo.fetch_data()
     df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
     events_tst = EventsData.from_dataframe(df_tst, features)
-    base_fvt_score, _ = base_fvt_model.predict_and_representations(events_tst.X_torch)
-    base_fvt_score = base_fvt_score[:, 1].numpy()
-    base_fvt_tinfo.aux_info.update({"base_fvt_score": base_fvt_score})
+    base_fvt_score_tst, _ = base_fvt_model.predict_and_representations(
+        events_tst.X_torch
+    )
+    base_fvt_score_tst = base_fvt_score_tst[:, 1].numpy()
+    base_fvt_logit_tst = np.log(base_fvt_score_tst / (1 - base_fvt_score_tst))
+
+    base_fvt_tinfo.aux_info.update(
+        {
+            "base_fvt_logit_train": base_fvt_logit_train,
+            "base_fvt_logit_tst": base_fvt_logit_tst,
+        }
+    )
     base_fvt_tinfo.save()
 
 

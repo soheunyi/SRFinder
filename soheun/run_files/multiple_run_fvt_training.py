@@ -30,6 +30,7 @@ NPROCS = 10
 # EXPERIMENT_NAME = "base_fvt_training_ensemble"
 # BASE_CONFIG_FILENAME = "better_fvt_training.yml"
 
+# Was running this at March 25
 STEP = 1
 EXPERIMENT_NAME = "base_fvt_training_ensemble_HH4b_800"
 BASE_CONFIG_FILENAME = "better_fvt_training.yml"
@@ -52,6 +53,10 @@ BASE_CONFIG_FILENAME = "better_fvt_training.yml"
 
 # STEP = 3
 # EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_fvt"
+# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
+
+# STEP = 3
+# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_fvt_HH4b_400"
 # BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 # STEP = 4

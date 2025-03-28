@@ -152,6 +152,11 @@ def get_histograms(
         bins=bins,
         weights=(events.weights * x_values * reweights)[events.is_3b],
     )[0]
+    hist_3b_rw_x_sq = np.histogram(
+        x_values[events.is_3b],
+        bins=bins,
+        weights=(events.weights * x_values**2 * reweights)[events.is_3b],
+    )[0]
     hist_3b_rw_sq = np.histogram(
         x_values[events.is_3b],
         bins=bins,
@@ -186,6 +191,7 @@ def get_histograms(
         "3b": hist_3b,
         "3b_rw": hist_3b_rw,
         "3b_rw_x": hist_3b_rw_x,
+        "3b_rw_x_sq": hist_3b_rw_x_sq,
         "3b_rw_sq": hist_3b_rw_sq,
         "4b": hist_4b,
         "4b_sq": hist_4b_sq,

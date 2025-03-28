@@ -423,7 +423,7 @@ class TrainingInfo:
                 return tinfo.hash, hparams_cleaned
         except Exception as e:
             logger.error(f"Failed to process file {file_path}: {e}")
-            return None, None
+            return None, {}
 
     @classmethod
     def find(
@@ -451,8 +451,13 @@ class TrainingInfo:
             else:
                 all_hash_hparams = cls.load_metadata()
             for hash_, hparams in all_hash_hparams.items():
-                if is_match(hparams):
-                    hash_hparams.append((hash_, hparams))
+                try:
+                    if is_match(hparams):
+                        hash_hparams.append((hash_, hparams))
+                except Exception as e:
+                    print(hparams)
+                    logger.error(f"Failed to process hash {hash_}: {e}")
+                    raise e
         else:
             for file in tqdm.tqdm(cls.SAVE_DIR.glob("*")):
                 tinfo = cls.load(file)
