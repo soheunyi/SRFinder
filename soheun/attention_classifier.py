@@ -303,10 +303,14 @@ class AttentionClassifier(pl.LightningModule):
         trainer.fit(self, datamodule=self.datamodule)
 
     @torch.no_grad()
-    def predict(self, q: torch.Tensor, do_tqdm: bool = False) -> torch.Tensor:
+    def predict(
+        self, q: torch.Tensor, do_tqdm: bool = False, num_workers: int = 0
+    ) -> torch.Tensor:
         self.eval()
         batch_size = min(2**18, q.shape[0])
-        q_dataloader = DataLoader(q, batch_size=batch_size, shuffle=False)
+        q_dataloader = DataLoader(
+            q, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        )
 
         preds = []
         if do_tqdm:

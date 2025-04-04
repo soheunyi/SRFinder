@@ -188,7 +188,6 @@ for signal_ratio in signal_ratios:
                 signal_filename,
                 ensemble_mode,
                 stats_type,
-                loaded_df,
             )
 
             SR_cut, _ = get_SR_CR_cut(

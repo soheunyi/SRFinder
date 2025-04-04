@@ -12,7 +12,8 @@ from fvt_classifier import FvTClassifier
 from dataset import MotherSamples
 from training_info import TrainingInfo
 from utils import require_keys
-from events_data import get_is_signal, EventsData
+from constants import FEATURES
+from save_aux_info import step_1_save_aux_info
 
 ###########################################################################################
 ###########################################################################################
@@ -92,26 +93,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     base_fvt_hparams = deepcopy(config["base_fvt"])
     base_fvt_hparams["experiment_name"] = config["experiment_name"]
     base_fvt_hparams["dataset"] = config["dataset"]
-
-    # Define features
-    features = [
-        "sym_Jet0_pt",
-        "sym_Jet1_pt",
-        "sym_Jet2_pt",
-        "sym_Jet3_pt",
-        "sym_Jet0_eta",
-        "sym_Jet1_eta",
-        "sym_Jet2_eta",
-        "sym_Jet3_eta",
-        "sym_Jet0_phi",
-        "sym_Jet1_phi",
-        "sym_Jet2_phi",
-        "sym_Jet3_phi",
-        "sym_Jet0_m",
-        "sym_Jet1_m",
-        "sym_Jet2_m",
-        "sym_Jet3_m",
-    ]
+    base_fvt_hparams["step"] = 1
 
     # Unchangeable configurations
     dim_input_jet_features = 4
@@ -152,7 +134,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     print("Base FvT Training Hash: ", base_fvt_tinfo.hash)
 
     base_fvt_train_dset, base_fvt_val_dset = (
-        base_fvt_tinfo.fetch_train_val_tensor_datasets(features, "fourTag", "weight")
+        base_fvt_tinfo.fetch_train_val_tensor_datasets(FEATURES, "fourTag", "weight")
     )
 
     model_seed = base_fvt_hparams["model_seed"]
@@ -183,39 +165,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         file_handler=file_handler,
     )
 
-    base_fvt_tinfo.update_aux_info(description=f"Step 1: base_FvT", step=1)
-
-    base_fvt_model = base_fvt_tinfo.load_trained_model("best")
-    base_fvt_model: FvTClassifier
-    base_fvt_model.eval()
-
-    train_scdinfo = mother_samples.scdinfo[ms_idx]
-    df_train = train_scdinfo.fetch_data()
-    df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
-    events_train = EventsData.from_dataframe(df_train, features)
-    base_fvt_score_train, _ = base_fvt_model.predict_and_representations(
-        events_train.X_torch
-    )
-    base_fvt_score_train = base_fvt_score_train[:, 1].numpy()
-    base_fvt_logit_train = np.log(base_fvt_score_train / (1 - base_fvt_score_train))
-
-    tst_scdinfo = mother_samples.scdinfo[~ms_idx]
-    df_tst = tst_scdinfo.fetch_data()
-    df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
-    events_tst = EventsData.from_dataframe(df_tst, features)
-    base_fvt_score_tst, _ = base_fvt_model.predict_and_representations(
-        events_tst.X_torch
-    )
-    base_fvt_score_tst = base_fvt_score_tst[:, 1].numpy()
-    base_fvt_logit_tst = np.log(base_fvt_score_tst / (1 - base_fvt_score_tst))
-
-    base_fvt_tinfo.aux_info.update(
-        {
-            "base_fvt_logit_train": base_fvt_logit_train,
-            "base_fvt_logit_tst": base_fvt_logit_tst,
-        }
-    )
-    base_fvt_tinfo.save()
+    step_1_save_aux_info(base_fvt_tinfo)
 
 
 @click.command()

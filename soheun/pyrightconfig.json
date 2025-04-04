@@ -1,0 +1,24 @@
+{
+	"include": [
+		"./**"
+	],
+	"exclude": [
+		"**/__pycache__",
+		"**/.git",
+		"**/.venv",
+		"**/node_modules",
+		"data/**",
+		"test_data/**",
+		"temp/**",
+		"build/**",
+		"config/**",
+		"tb_logs/**",
+	],
+	"ignore": [
+		"**/*.pyc"
+	],
+	"reportMissingImports": true,
+	"reportMissingTypeStubs": false,
+	"pythonVersion": "3.11",
+	// "typeCheckingMode": "basic"
+}

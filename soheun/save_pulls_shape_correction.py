@@ -97,7 +97,6 @@ for SR_size in [0.05, 0.1, 0.15, 0.2]:
                 signal_filename,
                 ensemble_mode,
                 stats_type,
-                loaded_df,
             )
 
             SR_cut, CR_cut = get_SR_CR_cut(

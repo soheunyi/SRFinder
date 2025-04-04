@@ -83,7 +83,7 @@ def correct_systematic_error_new_mi_test(
     events_tst = EventsData.from_dataframe(df_tst, features)
 
     SR_stats_train, SR_stats_tst = compute_sr_stats(
-        SR_stats_hashes, signal_filename, ensemble_mode, stats_type, loaded_df
+        SR_stats_hashes, signal_filename, ensemble_mode, stats_type
     )
     SR_cut, _ = get_SR_CR_cut(
         SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]

@@ -2,7 +2,6 @@ import numpy as np
 from dataset import MotherSamples
 from training_info import TrainingInfo
 from events_data import EventsData, get_is_signal
-from signal_region import compute_sr_stats, get_SR_CR_cut
 import pickle
 import pandas as pd
 from tqdm import tqdm

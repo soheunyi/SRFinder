@@ -131,18 +131,19 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    signal_ratios = [0.005, 0.0075, 0.01, 0.02]
-    noise_scales = [0.5, 1.0, 2.0, 3.0]
-    signal_filename = "HH4b_400.h5"
-    base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
     ensemble_seeds = range(15)
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
 
-    # noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
-    # # base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
-    # base_experiment_name = "base_fvt_training_ensemble"
-    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
-    # signal_filename = "HH4b_picoAOD.h5"
+    # signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    # noise_scales = [0.5, 1.0, 2.0, 3.0]
+    # signal_filename = "HH4b_400.h5"
+    # base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
+    # base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
+
+    noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    base_experiment_name = "base_fvt_training_ensemble"
+    signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    signal_filename = "HH4b_picoAOD.h5"
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -220,18 +221,40 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    signal_ratios = [0.005, 0.0075, 0.01, 0.02]
-    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
     ensemble_seeds = range(1)
     SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
-    # noise_scales = [0.5, 1.0, 2.0, 3.0]
-    noise_scales = [1.0]
-    # noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
-    previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
-    signal_filename = "HH4b_400.h5"
-    # previous_step_experiment_name = "smeared_fvt_training_ensemble"
-    # signal_filename = "HH4b_picoAOD.h5"
+    noise_scales = [0.5, 1.0, 2.0, 3.0, np.inf]
+    # previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
+
+    if EXPERIMENT_NAME == "CR_fvt_training_ensemble_max":
+        previous_step_experiment_name = "smeared_fvt_training_ensemble"
+    elif EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_HH4b_400":
+        previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
+    else:
+        raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
+
+    if previous_step_experiment_name == "smeared_fvt_training_ensemble":
+        signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+        signal_filename = "HH4b_picoAOD.h5"
+    elif previous_step_experiment_name == "smeared_fvt_training_ensemble_HH4b_400":
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+        signal_filename = "HH4b_400.h5"
+    else:
+        raise ValueError(
+            f"Unknown previous step experiment name: {previous_step_experiment_name}"
+        )
+
+    print(f"Previous step experiment name: {previous_step_experiment_name}")
+    print(f"Signal filename: {signal_filename}")
+    print(f"Signal ratios: {signal_ratios}")
+    print(f"Noise scales: {noise_scales}")
+    print(f"Dataset seeds: {dataset_seeds}")
+    print(f"Ensemble seeds: {ensemble_seeds}")
+    print(f"SR_CR_sizes: {SR_CR_sizes}")
+    input("Press Enter to continue...")
+
+    metadata = TrainingInfo.load_metadata()
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -245,39 +268,42 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         "data_seed": lambda x: x in ensemble_seeds,
     }
     _, hparams = TrainingInfo.find(hparams_filter, return_hparams=True)
-    step_2_hashes, step_2_hparams = TrainingInfo.find(
-        {
-            "experiment_name": previous_step_experiment_name,
-            "aux_info_step": 2,
-        },
-        return_hparams=True,
-    )
-    step_2_hashes_hparams_dict = {
-        hash: hparam for hash, hparam in zip(step_2_hashes, step_2_hparams)
-    }
+    print("Existing hashes: ", len(hparams))
+    print("Hparams after step 1: ", len(hparams))
     for hparam in hparams:
         if "SR_stats_hashes" not in hparam["signal_region"]:
             print(hparam)
             raise ValueError("SR_stats_hashes not found in signal_region")
 
         first_hash = hparam["signal_region"]["SR_stats_hashes"][0]
-        step_2_hparam = step_2_hashes_hparams_dict[first_hash]
-        hparam["smearing"] = step_2_hparam["smearing"]
+        step_2_hparam = metadata[first_hash]
+        if hparam["signal_region"]["stats_type"] == "smeared":
+            hparam["noise_scale"] = step_2_hparam["smearing"]["noise_scale"]
+        elif hparam["signal_region"]["stats_type"] == "fvt":
+            hparam["noise_scale"] = np.inf
+        else:
+            raise ValueError(
+                f"Unknown stats_type: {hparam['signal_region']['stats_type']}"
+            )
 
+    print("Hparams after step 2: ", len(hparams))
     existing = {
         (
             hparam["dataset"]["signal_ratio"],
             hparam["dataset"]["seed"],
             hparam["train_seed"],
-            hparam["smearing"]["noise_scale"],
+            hparam["noise_scale"],
             (hparam["signal_region"]["4b_in_SR"], hparam["signal_region"]["4b_in_CR"]),
         )
         for hparam in hparams
     }
+    print("Existing hashes: ", len(existing))
     targets = set(
         product(signal_ratios, dataset_seeds, ensemble_seeds, noise_scales, SR_CR_sizes)
     )
+    print("Targets: ", len(targets))
     targets = list(targets - existing)
+    print("Targets after removing existing: ", len(targets))
     targets.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
 
     logging.info(f"Number of targets: {len(targets)}")
@@ -321,7 +347,16 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
                     config["dataset"]["signal_filename"],
                     config["dataset"]["seed"],
                 ),
-                "smearing": lambda x: x["noise_scale"] == noise_scale,
+                "smearing": lambda x: (
+                    x["noise_scale"]
+                    == (
+                        noise_scale
+                        if noise_scale != np.inf
+                        # use 1.0 for stats_type=fvt, which does not use smearing.
+                        # noise_scale does not matter for this case.
+                        else 1.0
+                    )
+                ),
             },
         )
         assert (
@@ -333,13 +368,25 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
             "CR_fvt_training_ensemble_max_smeared_HH4b_400",
             "CR_fvt_training_ensemble_max_smeared_HH4b_800",
         ]:
+            raise ValueError(f"Archived experiment name: {EXPERIMENT_NAME}")
             config["signal_region"]["stats_type"] = "smeared"
         elif EXPERIMENT_NAME in [
             "CR_fvt_training_ensemble_max_fvt",
             "CR_fvt_training_ensemble_max_fvt_HH4b_400",
             "CR_fvt_training_ensemble_max_fvt_HH4b_800",
         ]:
+            raise ValueError(f"Archived experiment name: {EXPERIMENT_NAME}")
+            assert noise_scale == 1.0, "FVT must be run with noise scale 1.0"
             config["signal_region"]["stats_type"] = "fvt"
+        elif EXPERIMENT_NAME in [
+            "CR_fvt_training_ensemble_max",
+            "CR_fvt_training_ensemble_max_HH4b_400",
+            "CR_fvt_training_ensemble_max_HH4b_800",
+        ]:
+            if noise_scale == np.inf:
+                config["signal_region"]["stats_type"] = "fvt"
+            else:
+                config["signal_region"]["stats_type"] = "smeared"
         else:
             raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
         config["signal_region"]["4b_in_SR"] = SR_CR_size[0]

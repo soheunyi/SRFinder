@@ -175,94 +175,68 @@ def compute_sr_stats(
     signal_filename: str,
     ensemble_mode: Literal["mean", "max"] = "max",
     stats_type: Literal["fvt", "smeared"] = "smeared",
-    loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
 ):
-    tinfo_0 = TrainingInfo.load(hashes[0])
-    # logger.info(f"Loading events for {tinfo_0.hash}")
-    events_train, events_tst = get_events(tinfo_0, signal_filename, loaded_df)
-    # logger.info(f"Loaded events for {tinfo_0.hash}")
-    tinfo_list: list[TrainingInfo] = []
+    smeared_tinfo_0 = TrainingInfo.load(hashes[0])
+    smeared_tinfo_list: list[TrainingInfo] = []
 
     for hash in hashes:
         tinfo = TrainingInfo.load(hash)
         assert tinfo.aux_info["step"] == 2, f"{hash}: Step is {tinfo.aux_info['step']}"
-        assert tinfo.ms_hash == tinfo_0.ms_hash, f"{hash}: MS hash is not matching"
-        assert np.all(tinfo.ms_idx == tinfo_0.ms_idx), f"{hash}: MS idx is not matching"
-        tinfo_list.append(tinfo)
+        assert (
+            tinfo.ms_hash == smeared_tinfo_0.ms_hash
+        ), f"{hash}: MS hash is not matching"
+        assert np.all(
+            tinfo.ms_idx == smeared_tinfo_0.ms_idx
+        ), f"{hash}: MS idx is not matching"
+        smeared_tinfo_list.append(tinfo)
+        tinfo_signal_filename = tinfo.hparams["dataset"]["signal_filename"]
+        assert (
+            tinfo_signal_filename == signal_filename
+        ), f"{hash}: Signal filename is not matching"
 
-    sr_stats_tst_list = []
-    sr_stats_train_list = []
+    SR_stats_tst_list = []
+    SR_stats_train_list = []
 
-    if stats_type == "smeared":
-        for tinfo in tinfo_list:
-            if "SR_stats_train" in tinfo.aux_info:
-                SR_stats_train = tinfo.aux_info["SR_stats_train"]
-            else:
-                gamma_base, gamma_smeared = get_base_and_smeared_DRs(
-                    events_train, tinfo.hash
-                )
-                SR_stats_train = np.log(gamma_base / gamma_smeared)
-                tinfo.update_aux_info(SR_stats_train=SR_stats_train)
-                tinfo.save()
+    for tinfo in smeared_tinfo_list:
+        base_hash = tinfo.hparams["encoder_hash"]
+        base_tinfo = TrainingInfo.load(base_hash)
+        assert (
+            "base_fvt_logit_train" in base_tinfo.aux_info
+        ), f"{base_hash}: base_fvt_logit_train is not found. Run step_1_save_aux_info first"
+        assert (
+            "base_fvt_logit_tst" in base_tinfo.aux_info
+        ), f"{base_hash}: base_fvt_logit_tst is not found. Run step_1_save_aux_info first"
 
-            if "SR_stats_tst" in tinfo.aux_info:
-                SR_stats_tst = tinfo.aux_info["SR_stats_tst"]
-            else:
-                gamma_base, gamma_smeared = get_base_and_smeared_DRs(
-                    events_tst, tinfo.hash
-                )
-                SR_stats_tst = np.log(gamma_base / gamma_smeared)
-                tinfo.update_aux_info(SR_stats_tst=SR_stats_tst)
-                tinfo.save()
+        base_fvt_logit_train = base_tinfo.aux_info["base_fvt_logit_train"]
+        base_fvt_logit_tst = base_tinfo.aux_info["base_fvt_logit_tst"]
 
-            sr_stats_train_list.append(SR_stats_train)
-            sr_stats_tst_list.append(SR_stats_tst)
+        if stats_type == "smeared":
+            assert (
+                "smeared_fvt_logit_train" in tinfo.aux_info
+            ), f"{tinfo.hash}: smeared_fvt_logit_train is not found. Run step_2_save_aux_info first"
+            assert (
+                "smeared_fvt_logit_tst" in tinfo.aux_info
+            ), f"{tinfo.hash}: smeared_fvt_logit_tst is not found. Run step_2_save_aux_info first"
+            smeared_fvt_logit_train = tinfo.aux_info["smeared_fvt_logit_train"]
+            smeared_fvt_logit_tst = tinfo.aux_info["smeared_fvt_logit_tst"]
+            SR_stats_train = base_fvt_logit_train - smeared_fvt_logit_train
+            SR_stats_tst = base_fvt_logit_tst - smeared_fvt_logit_tst
+        elif stats_type == "fvt":
+            SR_stats_train = base_fvt_logit_train
+            SR_stats_tst = base_fvt_logit_tst
+        else:
+            raise ValueError(f"stats_type {stats_type} not supported")
 
-    elif stats_type == "fvt":
-        for tinfo in tinfo_list:
-            base_hash = tinfo.hparams["encoder_hash"]
-            if (
-                "base_fvt_score_train" not in tinfo.aux_info
-                or "base_fvt_score_tst" not in tinfo.aux_info
-            ):
-                base_tinfo = TrainingInfo.load(base_hash)
-                base_fvt_model = base_tinfo.load_trained_model("best")
-                base_fvt_model.eval()
-                base_fvt_model.to(torch.device("cuda"))
-                base_fvt_model: FvTClassifier
-
-            if "base_fvt_score_train" in tinfo.aux_info:
-                base_fvt_score_train = tinfo.aux_info["base_fvt_score_train"]
-            else:
-                base_fvt_score_train = (
-                    base_fvt_model.predict(events_train.X_torch)[:, 1].cpu().numpy()
-                )
-                tinfo.update_aux_info(base_fvt_score_train=base_fvt_score_train)
-                tinfo.save()
-
-            sr_stats_train_list.append(base_fvt_score_train)
-
-            if "base_fvt_score_tst" in tinfo.aux_info:
-                base_fvt_score_tst = tinfo.aux_info["base_fvt_score_tst"]
-            else:
-                base_fvt_score_tst = (
-                    base_fvt_model.predict(events_tst.X_torch)[:, 1].cpu().numpy()
-                )
-                tinfo.update_aux_info(base_fvt_score_tst=base_fvt_score_tst)
-                tinfo.save()
-
-            sr_stats_tst_list.append(base_fvt_score_tst)
-
-    else:
-        raise ValueError(f"stats_type {stats_type} not supported")
+        SR_stats_train_list.append(SR_stats_train)
+        SR_stats_tst_list.append(SR_stats_tst)
 
     if ensemble_mode == "mean":
-        sr_stats_train = np.mean(sr_stats_train_list, axis=0)
-        sr_stats_tst = np.mean(sr_stats_tst_list, axis=0)
+        ensemble_SR_stats_train = np.mean(SR_stats_train_list, axis=0)
+        ensemble_SR_stats_tst = np.mean(SR_stats_tst_list, axis=0)
     elif ensemble_mode == "max":
-        sr_stats_train = np.max(sr_stats_train_list, axis=0)
-        sr_stats_tst = np.max(sr_stats_tst_list, axis=0)
+        ensemble_SR_stats_train = np.max(SR_stats_train_list, axis=0)
+        ensemble_SR_stats_tst = np.max(SR_stats_tst_list, axis=0)
     else:
         raise ValueError(f"ensemble_mode {ensemble_mode} not supported")
 
-    return sr_stats_train, sr_stats_tst
+    return ensemble_SR_stats_train, ensemble_SR_stats_tst

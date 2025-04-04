@@ -512,10 +512,12 @@ class FvTClassifier(pl.LightningModule):
         trainer.fit(self, datamodule=self.datamodule)
 
     @torch.no_grad()
-    def predict(self, x: torch.Tensor, do_tqdm=False):
+    def predict(self, x: torch.Tensor, do_tqdm=False, num_workers=0):
         self.eval()
         batch_size = min(2**15, x.shape[0])
-        x_dataloader = DataLoader(x, batch_size=batch_size, shuffle=False)
+        x_dataloader = DataLoader(
+            x, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        )
         y_pred = torch.tensor([])
         if do_tqdm:
             x_dataloader = tqdm.tqdm(x_dataloader)
@@ -536,10 +538,12 @@ class FvTClassifier(pl.LightningModule):
 
     @torch.no_grad()
     def representations(
-        self, x: torch.Tensor, do_tqdm=False
+        self, x: torch.Tensor, do_tqdm=False, num_workers=0
     ) -> tuple[torch.Tensor, torch.Tensor]:
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**15, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(
+            x, batch_size=min(2**15, x.shape[0]), shuffle=False, num_workers=num_workers
+        )
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         q_repr = torch.tensor([])
@@ -556,9 +560,11 @@ class FvTClassifier(pl.LightningModule):
 
         return q_repr, view_scores
 
-    def q_repr(self, x: torch.Tensor, do_tqdm=False):
+    def q_repr(self, x: torch.Tensor, do_tqdm=False, num_workers=0):
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**15, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(
+            x, batch_size=min(2**15, x.shape[0]), shuffle=False, num_workers=num_workers
+        )
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         q_repr = torch.tensor([])
@@ -572,9 +578,13 @@ class FvTClassifier(pl.LightningModule):
         return q_repr
 
     @torch.no_grad()
-    def predict_and_representations(self, x: torch.Tensor, do_tqdm=False):
+    def predict_and_representations(
+        self, x: torch.Tensor, do_tqdm=False, num_workers=0
+    ):
         self.eval()
-        x_dataloader = DataLoader(x, batch_size=min(2**15, x.shape[0]), shuffle=False)
+        x_dataloader = DataLoader(
+            x, batch_size=min(2**15, x.shape[0]), shuffle=False, num_workers=num_workers
+        )
 
         x_dataloader = x_dataloader if not do_tqdm else tqdm.tqdm(x_dataloader)
         y_pred = torch.tensor([])

@@ -16,6 +16,7 @@ from fvt_classifier import FvTClassifier
 from training_info import TrainingInfo
 from utils import require_keys
 from signal_region import get_SR_CR_cut, compute_sr_stats
+from constants import FEATURES
 
 
 ###########################################################################################
@@ -125,26 +126,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     CR_fvt_hparams["experiment_name"] = config["experiment_name"]
     CR_fvt_hparams["dataset"] = config["dataset"]
     CR_fvt_hparams["signal_region"] = config["signal_region"]
-
-    # Define features
-    features = [
-        "sym_Jet0_pt",
-        "sym_Jet1_pt",
-        "sym_Jet2_pt",
-        "sym_Jet3_pt",
-        "sym_Jet0_eta",
-        "sym_Jet1_eta",
-        "sym_Jet2_eta",
-        "sym_Jet3_eta",
-        "sym_Jet0_phi",
-        "sym_Jet1_phi",
-        "sym_Jet2_phi",
-        "sym_Jet3_phi",
-        "sym_Jet0_m",
-        "sym_Jet1_m",
-        "sym_Jet2_m",
-        "sym_Jet3_m",
-    ]
+    CR_fvt_hparams["step"] = 3
 
     SR_stats_hashes = config["signal_region"]["SR_stats_hashes"]
     ensemble_mode = config["signal_region"]["ensemble_mode"]
@@ -161,10 +143,10 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
 
     msamples = MotherSamples.load(tinfo_0.ms_hash)
     events_train = events_from_scdinfo(
-        msamples.scdinfo[tinfo_0.ms_idx], features, signal_filename
+        msamples.scdinfo[tinfo_0.ms_idx], FEATURES, signal_filename
     )
     events_tst = events_from_scdinfo(
-        msamples.scdinfo[~tinfo_0.ms_idx], features, signal_filename
+        msamples.scdinfo[~tinfo_0.ms_idx], FEATURES, signal_filename
     )
 
     SR_stats_train, SR_stats_tst = compute_sr_stats(
@@ -194,7 +176,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     )
 
     CR_fvt_train_dset, CR_fvt_val_dset = CR_fvt_tinfo.fetch_train_val_tensor_datasets(
-        features,
+        FEATURES,
         label="fourTag",
         weight="weight",
         label_dtype=torch.long,

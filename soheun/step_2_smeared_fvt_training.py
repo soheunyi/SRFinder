@@ -9,11 +9,10 @@ import yaml
 
 
 from attention_classifier import AttentionClassifier
+from save_aux_info import step_2_save_aux_info
 from training_info import TrainingInfo
 from utils import require_keys
-from events_data import get_is_signal, EventsData
-from dataset import MotherSamples
-from fvt_classifier import FvTClassifier
+from constants import FEATURES
 
 ###########################################################################################
 ###########################################################################################
@@ -103,26 +102,6 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     smeared_fvt_hparams["smearing"] = config["smearing"]
     smeared_fvt_hparams["step"] = 2
 
-    # Define features
-    features = [
-        "sym_Jet0_pt",
-        "sym_Jet1_pt",
-        "sym_Jet2_pt",
-        "sym_Jet3_pt",
-        "sym_Jet0_eta",
-        "sym_Jet1_eta",
-        "sym_Jet2_eta",
-        "sym_Jet3_eta",
-        "sym_Jet0_phi",
-        "sym_Jet1_phi",
-        "sym_Jet2_phi",
-        "sym_Jet3_phi",
-        "sym_Jet0_m",
-        "sym_Jet1_m",
-        "sym_Jet2_m",
-        "sym_Jet3_m",
-    ]
-
     # 1. Load base experiment encoder and cross-check if conditions are met
     if config["base_experiment_hash"] is None:
         raise ValueError("base_experiment_hash is not set")
@@ -148,7 +127,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
 
     smeared_fvt_train_dset, smeared_fvt_val_dset = (
         smeared_fvt_tinfo.fetch_train_val_smeared_features(
-            features,
+            FEATURES,
             label="fourTag",
             weight="weight",
             label_dtype=torch.long,
@@ -180,53 +159,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
         file_handler=file_handler,
     )
 
-    smeared_fvt_tinfo.update_aux_info(
-        description=f"Step 2: smeared_FvT_based_on_{smeared_fvt_tinfo.hparams['encoder_hash']}",
-        step=2,
-    )
-
-    mother_samples = MotherSamples.load(smeared_fvt_tinfo.ms_hash)
-    train_scdinfo = mother_samples.scdinfo[smeared_fvt_tinfo.ms_idx]
-    df_train = train_scdinfo.fetch_data()
-    df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
-    events_train = EventsData.from_dataframe(df_train, features)
-
-    tst_scdinfo = mother_samples.scdinfo[~smeared_fvt_tinfo.ms_idx]
-    df_tst = tst_scdinfo.fetch_data()
-    df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
-    events_tst = EventsData.from_dataframe(df_tst, features)
-
-    base_fvt_model = base_fvt_tinfo.load_trained_model("best")
-    base_fvt_model: FvTClassifier
-    base_fvt_model.eval()
-
-    _, base_q_repr_train = base_fvt_model.predict_and_representations(
-        events_train.X_torch
-    )
-    base_q_repr_train = base_q_repr_train.numpy()
-
-    _, base_q_repr_tst = base_fvt_model.predict_and_representations(events_tst.X_torch)
-    base_q_repr_tst = base_q_repr_tst.numpy()
-
-    smeared_fvt_model = smeared_fvt_tinfo.load_trained_model("best")
-    smeared_fvt_model: AttentionClassifier
-    smeared_fvt_model.eval()
-
-    smeared_fvt_score_train = smeared_fvt_model.predict(base_q_repr_train)[:, 1].numpy()
-    smeared_fvt_logit_train = np.log(
-        smeared_fvt_score_train / (1 - smeared_fvt_score_train)
-    )
-
-    smeared_fvt_score_tst = smeared_fvt_model.predict(base_q_repr_tst)[:, 1].numpy()
-    smeared_fvt_logit_tst = np.log(smeared_fvt_score_tst / (1 - smeared_fvt_score_tst))
-
-    smeared_fvt_tinfo.aux_info.update(
-        {
-            "smeared_fvt_logit_train": smeared_fvt_logit_train,
-            "smeared_fvt_logit_tst": smeared_fvt_logit_tst,
-        }
-    )
-    smeared_fvt_tinfo.save()
+    step_2_save_aux_info(smeared_fvt_tinfo)
 
 
 @click.command()

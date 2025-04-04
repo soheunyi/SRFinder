@@ -22,7 +22,8 @@ TrainingInfo.update_metadata()
 ######################### Set Experiment Name and N Runfiles #########################
 ######################################################################################
 
-PROB_STATDS = 0.5
+PROB_STATDS = 0.3
+PROB_PHIL = 0.4
 N_RUNFILES = 10
 NPROCS = 10
 
@@ -31,9 +32,9 @@ NPROCS = 10
 # BASE_CONFIG_FILENAME = "better_fvt_training.yml"
 
 # Was running this at March 25
-STEP = 1
-EXPERIMENT_NAME = "base_fvt_training_ensemble_HH4b_800"
-BASE_CONFIG_FILENAME = "better_fvt_training.yml"
+# STEP = 1
+# EXPERIMENT_NAME = "base_fvt_training_ensemble_HH4b_800"
+# BASE_CONFIG_FILENAME = "better_fvt_training.yml"
 
 # STEP = 2
 # EXPERIMENT_NAME = "smeared_fvt_training_ensemble"
@@ -44,20 +45,12 @@ BASE_CONFIG_FILENAME = "better_fvt_training.yml"
 # BASE_CONFIG_FILENAME = "smeared_fvt_training.yml"
 
 # STEP = 3
-# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_smeared"
+# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max"
 # BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
-# STEP = 3
-# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_smeared_HH4b_400"
-# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
-
-# STEP = 3
-# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_fvt"
-# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
-
-# STEP = 3
-# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_fvt_HH4b_400"
-# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
+STEP = 3
+EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_400"
+BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 # STEP = 4
 # EXPERIMENT_NAME = "mi_test"
@@ -72,7 +65,12 @@ for i, config_string in enumerate(CONFIG_STRINGS):
 
 RUN_PARTITIONS = []
 for _ in range(N_RUNFILES):
-    RUN_PARTITIONS.append("statds" if np.random.rand() < PROB_STATDS else "phil_condo")
+    if np.random.rand() < PROB_STATDS:
+        RUN_PARTITIONS.append("statds")
+    elif np.random.rand() < PROB_PHIL + PROB_STATDS:
+        RUN_PARTITIONS.append("phil_condo")
+    else:
+        RUN_PARTITIONS.append("cmist_condo")
 
 logging.info(
     f"n_tasks (runfiles) {len(CONFIG_CHUNKS)}, max n_tasks per runfile {max([len(chunk) for chunk in CONFIG_CHUNKS.values()])}"

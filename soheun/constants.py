@@ -1,0 +1,18 @@
+FEATURES = [
+    "sym_Jet0_pt",
+    "sym_Jet1_pt",
+    "sym_Jet2_pt",
+    "sym_Jet3_pt",
+    "sym_Jet0_eta",
+    "sym_Jet1_eta",
+    "sym_Jet2_eta",
+    "sym_Jet3_eta",
+    "sym_Jet0_phi",
+    "sym_Jet1_phi",
+    "sym_Jet2_phi",
+    "sym_Jet3_phi",
+    "sym_Jet0_m",
+    "sym_Jet1_m",
+    "sym_Jet2_m",
+    "sym_Jet3_m",
+]

@@ -21,7 +21,6 @@ from correct_systematic_error import (
 from events_data import EventsData, get_is_signal
 from utils import get_quantiles_with_weights, select_random_true_elements
 
-signal_filename = "HH4b_picoAOD.h5"
 
 features = [
     "sym_Jet0_pt",
@@ -75,6 +74,7 @@ def correct_systematic_error_new(
     SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
     ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
     stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
+    signal_filename = CR_fvt_tinfo.hparams["dataset"]["signal_filename"]
     # if stats_type == "fvt":
     #     raise NotImplementedError("FvT stats type not implemented")
     # base_fvt_train, base_fvt_tst = compute_sr_stats(
@@ -91,7 +91,6 @@ def correct_systematic_error_new(
         signal_filename,
         ensemble_mode,
         stats_type,
-        loaded_df,
     )
     ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
     msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
@@ -144,8 +143,20 @@ def correct_systematic_error_new(
         fvt_scores_train_SR = CR_fvt_tinfo.aux_info["fvt_scores_train_SR"]
 
     reweights_SR = fvt_scores_tst_SR / (1 - fvt_scores_tst_SR)
+    if len(reweights_SR) != len(events_tst_SR.is_4b):
+        print(
+            f"len(reweights_SR) != len(events_tst_SR.is_4b): {len(reweights_SR)} != {len(events_tst_SR.is_4b)}"
+        )
+        print(f"hash: {CR_fvt_hash}")
+        return None
     reweights_SR = np.where(events_tst_SR.is_4b, 1, reweights_SR)
     reweights_train_SR = fvt_scores_train_SR / (1 - fvt_scores_train_SR)
+    if len(reweights_train_SR) != len(events_train_SR.is_4b):
+        print(
+            f"len(reweights_train_SR) != len(events_train_SR.is_4b): {len(reweights_train_SR)} != {len(events_train_SR.is_4b)}"
+        )
+        print(f"hash: {CR_fvt_hash}")
+        return None
     reweights_train_SR = np.where(events_train_SR.is_4b, 1, reweights_train_SR)
     bins_stats_train = SR_stats_train_SR
     bins_stats_tst = SR_stats_SR
@@ -252,7 +263,7 @@ if __name__ == "__main__":
     #     "CR_fvt_training_ensemble_max_smeared",
     #     "CR_fvt_training_ensemble_max_fvt",
     # ]
-    experiment_name = "CR_fvt_training_ensemble_max_fvt"
+    experiment_name = "CR_fvt_training_ensemble_max"
     n_3b = 100_0000
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 
@@ -304,6 +315,8 @@ if __name__ == "__main__":
         result = correct_systematic_error_new(
             hash, nbins_list, bins_stats_type, loaded_df
         )
+        if result is None:
+            return
         pull_dict[hash] = result
 
         with open(pull_dict_name, "wb") as f:
