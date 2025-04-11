@@ -2,9 +2,6 @@ import numpy as np
 import multiprocessing as mp
 from sklearn.neighbors import NearestNeighbors
 
-import tqdm
-from events_data import EventsData
-
 
 def dist_func(x, y):
     return np.linalg.norm(x - y, axis=1)

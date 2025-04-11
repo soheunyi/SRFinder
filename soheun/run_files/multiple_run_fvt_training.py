@@ -22,7 +22,7 @@ TrainingInfo.update_metadata()
 ######################### Set Experiment Name and N Runfiles #########################
 ######################################################################################
 
-PROB_STATDS = 0.3
+PROB_STATDS = 0.4
 PROB_PHIL = 0.4
 N_RUNFILES = 10
 NPROCS = 10
@@ -44,12 +44,20 @@ NPROCS = 10
 # EXPERIMENT_NAME = "smeared_fvt_training_ensemble_HH4b_400"
 # BASE_CONFIG_FILENAME = "smeared_fvt_training.yml"
 
+# STEP = 2
+# EXPERIMENT_NAME = "smeared_fvt_training_ensemble_HH4b_800"
+# BASE_CONFIG_FILENAME = "smeared_fvt_training.yml"
+
 # STEP = 3
 # EXPERIMENT_NAME = "CR_fvt_training_ensemble_max"
 # BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
+# STEP = 3
+# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_400"
+# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
+
 STEP = 3
-EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_400"
+EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_800"
 BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 # STEP = 4

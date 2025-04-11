@@ -1,0 +1,13 @@
+{
+	"mcpServers": {
+		"cognee": {
+			"command": "/home/export/soheuny/cognee/cognee-mcp/.venv/bin/uv",
+			"args": [
+				"--directory",
+				"/home/export/soheuny/cognee/cognee-mcp",
+				"run",
+				"cognee"
+			]
+		}
+	}
+}

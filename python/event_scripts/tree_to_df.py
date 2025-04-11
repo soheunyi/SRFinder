@@ -2,7 +2,7 @@ import sys
 
 sys.path.insert(0, "../../python/classifier/")
 # import make_df
-import make_df_hh4b_resonant
+import make_df_zz4b
 import ROOT
 
 import argparse
@@ -35,6 +35,6 @@ args = parser.parse_args()
 print(args.fourTag)
 
 f = ROOT.TFile(args.pathin, "READ")
-t = f.Get("Tree")
-df = make_df_hh4b_resonant.make_df(t, fourTag=args.fourTag)
+t = f.Get("Events")
+df = make_df_zz4b.make_df(t, fourTag=args.fourTag)
 df.to_hdf(args.pathout, key="df", mode="w")

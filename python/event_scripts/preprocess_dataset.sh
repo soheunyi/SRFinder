@@ -37,5 +37,9 @@ DF_PATH=../../events/$DATA/dataframes
 # python tree_to_df.py -pi $TTREE_PATH/fourTag_10x_picoAOD.root -po $DF_PATH/fourTag_10x_picoAOD.h5 -f True
 # python tree_to_df.py -pi $TTREE_PATH/fourTag_picoAOD.root -po $DF_PATH/fourTag_picoAOD.h5 -f True
 # python tree_to_df.py -pi $TTREE_PATH/threeTag_picoAOD.root -po $DF_PATH/threeTag_picoAOD.h5 -f False
-python tree_to_df.py -pi $TTREE_PATH/HH4b_400.root -po $DF_PATH/HH4b_400.h5 -f True
-python tree_to_df.py -pi $TTREE_PATH/HH4b_800.root -po $DF_PATH/HH4b_800.h5 -f True
+# python tree_to_df.py -pi $TTREE_PATH/HH4b_400.root -po $DF_PATH/HH4b_400.h5 -f True
+# python tree_to_df.py -pi $TTREE_PATH/HH4b_800.root -po $DF_PATH/HH4b_800.h5 -f True
+python tree_to_df.py -pi $TTREE_PATH/picoAOD_ZH4b.chunk0.root -po $DF_PATH/picoAOD_ZH4b.chunk0.h5 -f True
+python tree_to_df.py -pi $TTREE_PATH/picoAOD_ZH4b.chunk1.root -po $DF_PATH/picoAOD_ZH4b.chunk1.h5 -f True
+python tree_to_df.py -pi $TTREE_PATH/picoAOD_ZZ4b.chunk0.root -po $DF_PATH/picoAOD_ZZ4b.chunk0.h5 -f True
+python tree_to_df.py -pi $TTREE_PATH/picoAOD_ZZ4b.chunk1.root -po $DF_PATH/picoAOD_ZZ4b.chunk1.h5 -f True

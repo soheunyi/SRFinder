@@ -7,7 +7,7 @@ import tqdm
 from fvt_encoder import FvTEncoder
 import pytorch_lightning as pl
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from torch import optim
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
@@ -402,8 +402,8 @@ class FvTClassifier(pl.LightningModule):
 
     def fit(
         self,
-        train_dataset,
-        val_dataset,
+        train_dataset: TensorDataset,
+        val_dataset: TensorDataset,
         max_epochs=50,
         train_seed: int = None,
         save_checkpoint: bool = True,
@@ -414,6 +414,7 @@ class FvTClassifier(pl.LightningModule):
         early_stop_patience: None | int = None,
         dataloader_config: dict = {},
         file_handler: logging.FileHandler | None = None,
+        preload_to_gpu: bool = False,
     ):
         assert "batch_size" in dataloader_config
 
@@ -430,6 +431,26 @@ class FvTClassifier(pl.LightningModule):
             pl.seed_everything(train_seed)
 
         torch.set_float32_matmul_precision("medium")
+
+        # Preload datasets to GPU if requested and possible
+        if preload_to_gpu and torch.cuda.is_available():
+            try:
+                # Check if we have enough GPU memory
+                train_tensors = [t.to(self.device) for t in train_dataset.tensors]
+                val_tensors = [t.to(self.device) for t in val_dataset.tensors]
+                train_dataset = TensorDataset(*train_tensors)
+                val_dataset = TensorDataset(*val_tensors)
+                print("Successfully preloaded datasets to GPU")
+            except RuntimeError as e:
+                print(f"Warning: Could not preload datasets to GPU due to: {e}")
+                print("Falling back to CPU datasets with GPU transfer during training")
+                # Reset any partially moved tensors back to CPU
+                if "train_tensors" in locals():
+                    train_dataset = TensorDataset(
+                        *[t.cpu() for t in train_dataset.tensors]
+                    )
+                if "val_tensors" in locals():
+                    val_dataset = TensorDataset(*[t.cpu() for t in val_dataset.tensors])
 
         tb_log_dir = pathlib.Path(f"./tb_logs/{tb_log_dir}")
         tb_log_dir.mkdir(parents=True, exist_ok=True)
@@ -501,11 +522,14 @@ class FvTClassifier(pl.LightningModule):
 
         torch.autograd.set_detect_anomaly(True)
 
+        # Set num_workers to 0 if data is preloaded to GPU
+        num_workers = 0 if preload_to_gpu else dataloader_config.get("num_workers", 0)
+
         self.datamodule = FvTDataModule(
             train_dataset,
             val_dataset,
             dataloader_config["batch_size"],
-            num_workers=0,
+            num_workers=num_workers,
             batch_size_milestones=dataloader_config.get("batch_size_milestones", []),
             batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
         )

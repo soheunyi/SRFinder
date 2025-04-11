@@ -28,6 +28,8 @@ def step_1_save_aux_info(
     ):
         return
 
+    if "step" not in base_fvt_tinfo.hparams:
+        base_fvt_tinfo._hparams["step"] = base_fvt_tinfo.aux_info["step"]
     assert (
         base_fvt_tinfo.hparams["step"] == 1
     ), f"Step should be 1, but is {base_fvt_tinfo.hparams['step']}"
@@ -549,49 +551,30 @@ def step_2_delete_unnecessary_aux_info(experiment_name: str):
             tinfo.save()
 
 
-@click.command()
-@click.option("--ds-start", type=int, required=True)
-@click.option("--ds-end", type=int, required=True)
-def main(ds_start: int, ds_end: int):
-    experiment_name = "smeared_fvt_training_ensemble"
-    for dataset_seed in range(ds_start, ds_end):
-        for signal_ratio in [0.0, 0.02]:
-            step_2_save_aux_info_later_accelerated(
-                experiment_name, dataset_seed, signal_ratio, num_workers=8
-            )
+def main():
+    experiment_name = "base_fvt_training_ensemble_HH4b_800"
+    path_3b = Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
+    path_bg4b = Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
+    path_HH4b = Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+    path_HH4b_400 = Path("../events/MG3/dataframes/HH4b_400.h5")
+    path_HH4b_800 = Path("../events/MG3/dataframes/HH4b_800.h5")
+    loaded_df = {
+        path_3b: pd.read_hdf(path_3b),
+        path_bg4b: pd.read_hdf(path_bg4b),
+        path_HH4b: pd.read_hdf(path_HH4b),
+        path_HH4b_400: pd.read_hdf(path_HH4b_400),
+        path_HH4b_800: pd.read_hdf(path_HH4b_800),
+    }
+    hashes = TrainingInfo.find({"experiment_name": experiment_name})
+    for hash_ in tqdm.tqdm(hashes, total=len(hashes)):
+        tinfo = TrainingInfo.load(hash_)
+        step_1_save_aux_info(tinfo, loaded_df)
+    # for dataset_seed in range(ds_start, ds_end):
+    #     for signal_ratio in [0.0, 0.02]:
+    #         step_2_save_aux_info_later_accelerated(
+    #             experiment_name, dataset_seed, signal_ratio, num_workers=8
+    #         )
 
 
 if __name__ == "__main__":
     main()
-#     experiment_name = "smeared_fvt_training_ensemble"
-# # num_workers = 8
-# # signal_ratio = 0.02
-# # print(f"Starting step 2 of {experiment_name}, signal_ratio: {signal_ratio}")
-# # chunk_idx = 7
-# # num_chunks = 8
-# # signal_ratios = [0.0, 0.02]
-# # dataset_seeds = range(31, 32)
-# # hashes = TrainingInfo.find(
-# #     {
-# #         "experiment_name": experiment_name,
-# #         "dataset": lambda x: (
-# #             x["signal_ratio"] in signal_ratios and x["seed"] in dataset_seeds
-# #         ),
-# #     }
-# # )
-# # hashes = sorted(hashes)
-# # hashes = hashes[chunk_idx::num_chunks]
-# # print(chunk_idx, len(hashes))
-# # step_2_save_aux_info_later(hashes, nprocs=4)
-# # step_2_sanity_check(experiment_name)
-# # step_2_delete_unnecessary_aux_info(experiment_name)
-# # step_1_delete_unnecessary_aux_info(experiment_name)
-
-# for dataset_seed in range(32, 50):
-#     for signal_ratio in [0.0, 0.02]:
-#         step_2_save_aux_info_later_accelerated(
-#             experiment_name,
-#             dataset_seed,
-#             signal_ratio,
-#             num_workers=8,
-#         )

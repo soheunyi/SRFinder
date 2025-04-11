@@ -68,12 +68,22 @@ data_directory = pathlib.Path("/home/export/soheuny/SRFinder/events/MG3")
 # df_hh4b["fourTag"] = True
 # df_hh4b.to_hdf(data_directory / "dataframes" / "HH4b_picoAOD.h5", key="df", mode="w")
 
-df_hh4b_400 = pd.read_hdf(data_directory / "dataframes" / "HH4b_400.h5")
-df_hh4b_400 = symmetrize_df(df_hh4b_400)
-df_hh4b_400["fourTag"] = True
-df_hh4b_400.to_hdf(data_directory / "dataframes" / "HH4b_400.h5", key="df", mode="w")
+# df_hh4b_400 = pd.read_hdf(data_directory / "dataframes" / "HH4b_400.h5")
+# df_hh4b_400 = symmetrize_df(df_hh4b_400)
+# df_hh4b_400["fourTag"] = True
+# df_hh4b_400.to_hdf(data_directory / "dataframes" / "HH4b_400.h5", key="df", mode="w")
 
-df_hh4b_800 = pd.read_hdf(data_directory / "dataframes" / "HH4b_800.h5")
-df_hh4b_800 = symmetrize_df(df_hh4b_800)
-df_hh4b_800["fourTag"] = True
-df_hh4b_800.to_hdf(data_directory / "dataframes" / "HH4b_800.h5", key="df", mode="w")
+# df_hh4b_800 = pd.read_hdf(data_directory / "dataframes" / "HH4b_800.h5")
+# df_hh4b_800 = symmetrize_df(df_hh4b_800)
+# df_hh4b_800["fourTag"] = True
+# df_hh4b_800.to_hdf(data_directory / "dataframes" / "HH4b_800.h5", key="df", mode="w")
+
+df_zh4b = pd.read_hdf(data_directory / "dataframes" / "ZH4b_picoAOD.h5")
+df_zh4b = symmetrize_df(df_zh4b)
+df_zh4b["fourTag"] = True
+df_zh4b.to_hdf(data_directory / "dataframes" / "ZH4b_picoAOD.h5", key="df", mode="w")
+
+df_zz4b = pd.read_hdf(data_directory / "dataframes" / "ZZ4b_picoAOD.h5")
+df_zz4b = symmetrize_df(df_zz4b)
+df_zz4b["fourTag"] = True
+df_zz4b.to_hdf(data_directory / "dataframes" / "ZZ4b_picoAOD.h5", key="df", mode="w")

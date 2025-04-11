@@ -1,6 +1,6 @@
 #!/bin/bash
 # specify partition to run in (statds or phil)
-#SBATCH --partition phil_condo
+#SBATCH --partition statds
 #SBATCH --ntasks 1
 
 # number of CPUs and amount of memory you need:
@@ -19,9 +19,9 @@
 
 ## Choose one:
 
-RUN_FILENAME="save_corrected_pulls_new.py"
+RUN_FILENAME="save_aux_info.py"
 CONDA_ENV_NAME="coffea_torch"
-# ARGS="--ds-start 47 --ds-end 50"
+ARGS=""
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 

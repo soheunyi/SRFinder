@@ -140,10 +140,27 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     # base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
     # base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
 
-    noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
-    base_experiment_name = "base_fvt_training_ensemble"
+    # noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    # noise_scales = [0.5, 1.0]
+    noise_scales = [2.0, 3.0]
+    # base_experiment_name = "base_fvt_training_ensemble"
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
-    signal_filename = "HH4b_picoAOD.h5"
+    # signal_filename = "HH4b_picoAOD.h5"
+
+    if EXPERIMENT_NAME == "smeared_fvt_training_ensemble":
+        base_experiment_name = "base_fvt_training_ensemble"
+        signal_filename = "HH4b_picoAOD.h5"
+        signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "smeared_fvt_training_ensemble_HH4b_400":
+        base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
+        signal_filename = "HH4b_400.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "smeared_fvt_training_ensemble_HH4b_800":
+        base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
+        signal_filename = "HH4b_800.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    else:
+        raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -225,12 +242,16 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     ensemble_seeds = range(1)
     SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
     noise_scales = [0.5, 1.0, 2.0, 3.0, np.inf]
+    # noise_scales = [0.5, 1.0, np.inf]
+    # noise_scales = [2.0, 3.0]
     # previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
 
     if EXPERIMENT_NAME == "CR_fvt_training_ensemble_max":
         previous_step_experiment_name = "smeared_fvt_training_ensemble"
     elif EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_HH4b_400":
         previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
+    elif EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_HH4b_800":
+        previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_800"
     else:
         raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
 
@@ -240,6 +261,9 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     elif previous_step_experiment_name == "smeared_fvt_training_ensemble_HH4b_400":
         signal_ratios = [0.005, 0.0075, 0.01, 0.02]
         signal_filename = "HH4b_400.h5"
+    elif previous_step_experiment_name == "smeared_fvt_training_ensemble_HH4b_800":
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+        signal_filename = "HH4b_800.h5"
     else:
         raise ValueError(
             f"Unknown previous step experiment name: {previous_step_experiment_name}"

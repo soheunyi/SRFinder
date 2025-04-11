@@ -263,7 +263,7 @@ if __name__ == "__main__":
     #     "CR_fvt_training_ensemble_max_smeared",
     #     "CR_fvt_training_ensemble_max_fvt",
     # ]
-    experiment_name = "CR_fvt_training_ensemble_max"
+    experiment_name = "CR_fvt_training_ensemble_max_HH4b_800"
     n_3b = 100_0000
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 
