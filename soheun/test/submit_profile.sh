@@ -11,6 +11,11 @@
 CONDA_ENV_NAME="coffea_torch"
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 
-echo "Running FvTClassifier speed test"
-cd ..
-srun $PYTHON test/test_training_speed.py
+echo "Starting FvTClassifier profiling"
+echo "Using CUDA: $CUDA_VISIBLE_DEVICES"
+
+# Set Python path to include the project root
+export PYTHONPATH="/home/export/soheuny/SRFinder/soheun:$PYTHONPATH"
+
+cd /home/export/soheuny/SRFinder/soheun
+srun $PYTHON test/profile_fit.py 

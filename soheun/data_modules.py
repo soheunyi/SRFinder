@@ -11,13 +11,11 @@ class FvTDataModule(pl.LightningDataModule):
         num_workers=4,
         batch_size_milestones=None,
         batch_size_multiplier=2,
-        prefetch_factor=2,
         pin_memory=True,
         persistent_workers=True,
     ):
         super().__init__()
         # DataLoader performance settings
-        self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
         # Datasets and batching
@@ -40,7 +38,6 @@ class FvTDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers and self.num_workers > 0,
-            prefetch_factor=self.prefetch_factor,
         )
 
     def val_dataloader(self):
@@ -51,5 +48,4 @@ class FvTDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers and self.num_workers > 0,
-            prefetch_factor=self.prefetch_factor,
         )

@@ -1,5 +1,6 @@
 import logging
 import os
+
 try:
     # Literal introduced in Python 3.8
     from typing import Literal
@@ -420,6 +421,7 @@ class FvTClassifier(pl.LightningModule):
         dataloader_config: dict = {},
         file_handler: logging.FileHandler | None = None,
         preload_to_gpu: bool = False,
+        progress_bar_epochs: int = None,
     ):
         assert "batch_size" in dataloader_config
 
@@ -469,8 +471,10 @@ class FvTClassifier(pl.LightningModule):
             loggers.append(file_logger)
 
         progress_bar = TQDMProgressBar(
-            refresh_rate=max(
-                1, (len(train_dataset) // dataloader_config["batch_size"]) // 10
+            refresh_rate=(
+                max(1, (len(train_dataset) // dataloader_config["batch_size"]) // 10)
+                if progress_bar_epochs is None
+                else progress_bar_epochs
             )
         )
         # callbacks = callbacks + [progress_bar]
@@ -533,9 +537,8 @@ class FvTClassifier(pl.LightningModule):
 
         # Determine number of workers (zero if data is preloaded to GPU)
         num_workers = 0 if preload_to_gpu else dataloader_config.get("num_workers", 0)
-        # Extract new DataLoader performance settings (defaults match FvTDataModule)
-        prefetch = dataloader_config.get("prefetch_factor", 2)
-        pin_mem = dataloader_config.get("pin_memory", True)
+        # Extract DataLoader performance settings (defaults match FvTDataModule)
+        pin_mem = False if preload_to_gpu else dataloader_config.get("pin_memory", True)
         persist = dataloader_config.get("persistent_workers", True)
         # Initialize data module with enhanced performance options
         self.datamodule = FvTDataModule(
@@ -545,7 +548,6 @@ class FvTClassifier(pl.LightningModule):
             num_workers=num_workers,
             batch_size_milestones=dataloader_config.get("batch_size_milestones", []),
             batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
-            prefetch_factor=prefetch,
             pin_memory=pin_mem,
             persistent_workers=persist,
         )

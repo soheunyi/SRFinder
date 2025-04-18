@@ -1,0 +1,3 @@
+Configuration	Throughput (samples/sec)	Time per Epoch (sec)
+batch_size=1024, num_workers=0	17000.01	41.26
+batch_size=1024, num_workers=4	15855.55	44.24
