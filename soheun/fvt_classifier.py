@@ -1,6 +1,11 @@
 import logging
 import os
-from typing import Literal
+try:
+    # Literal introduced in Python 3.8
+    from typing import Literal
+except ImportError:
+    # fallback for older Python
+    from typing_extensions import Literal
 import numpy as np
 import torch
 import tqdm
@@ -443,7 +448,11 @@ class FvTClassifier(pl.LightningModule):
                 print("Successfully preloaded datasets to GPU")
             except RuntimeError as e:
                 print(f"Warning: Could not preload datasets to GPU due to: {e}")
-                print("Falling back to CPU datasets with GPU transfer during training")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    print("Emptied CUDA cache after preload failure")
+                preload_to_gpu = False
+                print("Falling back to CPU datasets with CPU data loading")
                 # Reset any partially moved tensors back to CPU
                 if "train_tensors" in locals():
                     train_dataset = TensorDataset(
@@ -522,9 +531,13 @@ class FvTClassifier(pl.LightningModule):
 
         torch.autograd.set_detect_anomaly(True)
 
-        # Set num_workers to 0 if data is preloaded to GPU
+        # Determine number of workers (zero if data is preloaded to GPU)
         num_workers = 0 if preload_to_gpu else dataloader_config.get("num_workers", 0)
-
+        # Extract new DataLoader performance settings (defaults match FvTDataModule)
+        prefetch = dataloader_config.get("prefetch_factor", 2)
+        pin_mem = dataloader_config.get("pin_memory", True)
+        persist = dataloader_config.get("persistent_workers", True)
+        # Initialize data module with enhanced performance options
         self.datamodule = FvTDataModule(
             train_dataset,
             val_dataset,
@@ -532,7 +545,11 @@ class FvTClassifier(pl.LightningModule):
             num_workers=num_workers,
             batch_size_milestones=dataloader_config.get("batch_size_milestones", []),
             batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
+            prefetch_factor=prefetch,
+            pin_memory=pin_mem,
+            persistent_workers=persist,
         )
+        # Launch training
         trainer.fit(self, datamodule=self.datamodule)
 
     @torch.no_grad()

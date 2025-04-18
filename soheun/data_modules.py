@@ -9,16 +9,24 @@ class FvTDataModule(pl.LightningDataModule):
         val_dataset,
         batch_size,
         num_workers=4,
-        batch_size_milestones=[],
+        batch_size_milestones=None,
         batch_size_multiplier=2,
+        prefetch_factor=2,
+        pin_memory=True,
+        persistent_workers=True,
     ):
         super().__init__()
+        # DataLoader performance settings
+        self.prefetch_factor = prefetch_factor
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        # Datasets and batching
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.batch_size_multiplier = batch_size_multiplier
-        self.batch_size_milestones = batch_size_milestones
+        self.batch_size_milestones = batch_size_milestones or []
 
     def train_dataloader(self):
         if self.trainer.current_epoch in self.batch_size_milestones:
@@ -30,6 +38,9 @@ class FvTDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
+            prefetch_factor=self.prefetch_factor,
         )
 
     def val_dataloader(self):
@@ -38,4 +49,7 @@ class FvTDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
+            prefetch_factor=self.prefetch_factor,
         )
