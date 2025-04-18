@@ -6,9 +6,9 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import os
-
-import torch
+import click
 import tqdm
+import torch
 from dataset import MotherSamples
 from fvt_classifier import FvTClassifier
 from signal_region import compute_sr_stats, get_SR_CR_cut
@@ -45,10 +45,11 @@ features = [
 def correct_systematic_error_new(
     CR_fvt_hash: str,
     nbins_list: list[int],
-    bins_stats_type: Literal["fvt", "sr_stats"] = "sr_stats",
+    bin_stats_type: Literal["fvt", "smeared"],
+    bin_ensemble_mode: Literal["mean", "max"],
     loaded_df: dict[pathlib.Path, pd.DataFrame] = {},
 ):
-    # if bins_stats_type == "fvt":
+    # if bin_stats_type == "fvt":
     #     raise NotImplementedError("FvT bins stats type not implemented")
     if len(loaded_df) == 0:
         path_3b = pathlib.Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
@@ -72,26 +73,31 @@ def correct_systematic_error_new(
 
     CR_fvt_tinfo = TrainingInfo.load(CR_fvt_hash)
     SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
-    ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
-    stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
+    CR_stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
+    CR_ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
+
     signal_filename = CR_fvt_tinfo.hparams["dataset"]["signal_filename"]
-    # if stats_type == "fvt":
-    #     raise NotImplementedError("FvT stats type not implemented")
-    # base_fvt_train, base_fvt_tst = compute_sr_stats(
-    #     SR_stats_hashes,
-    #     signal_filename,
-    #     ensemble_mode,
-    #     "fvt",
-    #     loaded_df,
-    # )
-    # else:
-    # assert stats_type == "smeared"
     SR_stats_train, SR_stats_tst = compute_sr_stats(
         SR_stats_hashes,
         signal_filename,
-        ensemble_mode,
-        stats_type,
+        CR_ensemble_mode,
+        CR_stats_type,
     )
+    if CR_stats_type == "fvt" and bin_stats_type == "smeared":
+        bin_stats_train, bin_stats_tst = compute_sr_stats(
+            SR_stats_hashes,
+            signal_filename,
+            bin_ensemble_mode,
+            "fvt",
+        )
+    else:
+        bin_stats_train, bin_stats_tst = compute_sr_stats(
+            SR_stats_hashes,
+            signal_filename,
+            bin_ensemble_mode,
+            bin_stats_type,
+        )
+
     ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
     msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
     train_scdinfo = msamples.scdinfo[ms_idx]
@@ -109,11 +115,9 @@ def correct_systematic_error_new(
     )
 
     events_train_SR = events_train[SR_stats_train >= SR_cut]
-    SR_stats_train_SR = SR_stats_train[SR_stats_train >= SR_cut]
-    # base_fvt_train_SR = base_fvt_train[SR_stats_train >= SR_cut]
+    bin_stats_train_SR = bin_stats_train[SR_stats_train >= SR_cut]
     SR_idx = SR_stats_tst >= SR_cut
-    SR_stats_SR = SR_stats_tst[SR_idx]
-    # base_fvt_tst_SR = base_fvt_tst[SR_idx]
+    bin_stats_tst_SR = bin_stats_tst[SR_idx]
     scdinfo_tst_SR = tst_scdinfo[SR_idx]
     events_tst_SR = EventsData.from_dataframe(
         scdinfo_tst_SR.fetch_data(loaded_df), features
@@ -158,30 +162,24 @@ def correct_systematic_error_new(
         print(f"hash: {CR_fvt_hash}")
         return None
     reweights_train_SR = np.where(events_train_SR.is_4b, 1, reweights_train_SR)
-    bins_stats_train = SR_stats_train_SR
-    bins_stats_tst = SR_stats_SR
-    # bins_stats_train = (
-    #     SR_stats_train_SR if bins_stats_type == "sr_stats" else base_fvt_train_SR
-    # )
-    # bins_stats_tst = SR_stats_SR if bins_stats_type == "sr_stats" else base_fvt_tst_SR
 
     pulls_info_list = []
     for binning_mode, nbins in product(["train", "test"], nbins_list):
         pulls_info = {"binning_mode": binning_mode, "nbins": nbins}
         if binning_mode == "train":
             SR_bins = get_quantiles_with_weights(
-                bins_stats_train[events_train_SR.is_3b],
+                bin_stats_train_SR[events_train_SR.is_3b],
                 (reweights_train_SR * events_train_SR.weights)[events_train_SR.is_3b],
                 np.linspace(0, 1, nbins + 1),
             )
         else:
             SR_bins = get_quantiles_with_weights(
-                bins_stats_tst[events_tst_SR.is_3b],
+                bin_stats_tst_SR[events_tst_SR.is_3b],
                 (reweights_SR * events_tst_SR.weights)[events_tst_SR.is_3b],
                 np.linspace(0, 1, nbins + 1),
             )
 
-        hists = get_histograms(events_tst_SR, bins_stats_tst, SR_bins, reweights_SR)
+        hists = get_histograms(events_tst_SR, bin_stats_tst_SR, SR_bins, reweights_SR)
         if binning_mode == "train":
             V = np.array(hists["3b_rw_sq"] + hists["4b_sq"])
         else:
@@ -220,7 +218,7 @@ def correct_systematic_error_new(
             }
 
             corrected_reweights = reweights_SR * (
-                1 + c0 + c1 * bins_stats_tst + c2 * bins_stats_tst**2
+                1 + c0 + c1 * bin_stats_tst_SR + c2 * bin_stats_tst_SR**2
             )
             corrected_weights = (
                 np.where(events_tst_SR.is_4b, 1, corrected_reweights)
@@ -228,12 +226,12 @@ def correct_systematic_error_new(
             )
 
             hist_3b_corrected = np.histogram(
-                bins_stats_tst[events_tst_SR.is_3b],
+                bin_stats_tst_SR[events_tst_SR.is_3b],
                 bins=SR_bins,
                 weights=corrected_weights[events_tst_SR.is_3b],
             )[0]
             hist_3b_corrected_sq = np.histogram(
-                bins_stats_tst[events_tst_SR.is_3b],
+                bin_stats_tst_SR[events_tst_SR.is_3b],
                 bins=SR_bins,
                 weights=corrected_weights[events_tst_SR.is_3b] ** 2,
             )[0]
@@ -255,22 +253,23 @@ def correct_systematic_error_new(
     return pulls_info_list
 
 
-if __name__ == "__main__":
+@click.command()
+@click.option("--bin_stats_type", type=str, required=True)
+@click.option("--bin_ensemble_mode", type=str, required=True)
+@click.option("--experiment_name", type=str, required=True)
+def save_pulls(
+    bin_stats_type: Literal["fvt", "smeared"],
+    bin_ensemble_mode: Literal["mean", "max"],
+    experiment_name: str,
+):
     nbins_list = [2**i for i in range(2, 9)]
-    bins_stats_type = "sr_stats"
-    # experiment_names = [
-    #     "CR_fvt_training_ensemble_max_smeared_HH4b_400",
-    #     "CR_fvt_training_ensemble_max_smeared",
-    #     "CR_fvt_training_ensemble_max_fvt",
-    # ]
-    experiment_name = "CR_fvt_training_ensemble_max_HH4b_800"
     n_3b = 100_0000
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 
-    TrainingInfo.update_metadata()
+    # TrainingInfo.update_metadata()
 
     print(
-        f"Configs: nbins_list={nbins_list}, bins_stats_type={bins_stats_type}, experiment_name={experiment_name}, n_3b={n_3b}, signal_ratios={signal_ratios}"
+        f"Configs: nbins_list={nbins_list}, bin_stats_type={bin_stats_type}, bin_ensemble_mode={bin_ensemble_mode}, experiment_name={experiment_name}, n_3b={n_3b}, signal_ratios={signal_ratios}"
     )
 
     print("Loading dataframes")
@@ -297,9 +296,7 @@ if __name__ == "__main__":
         path_signal_HH4b_400: df_signal_HH4b_400,
     }
 
-    pull_dict_name = (
-        f"./data/pulls/pull_by_hashes_{bins_stats_type}_{experiment_name}.pkl"
-    )
+    pull_dict_name = f"./data/pulls/pull_by_hashes_{bin_stats_type}_{bin_ensemble_mode}_{experiment_name}.pkl"
 
     if os.path.exists(pull_dict_name):
         with open(pull_dict_name, "rb") as f:
@@ -313,7 +310,7 @@ if __name__ == "__main__":
             return
         print(f"[{datetime.datetime.now()}] Processing hash: {hash}")
         result = correct_systematic_error_new(
-            hash, nbins_list, bins_stats_type, loaded_df
+            hash, nbins_list, bin_stats_type, bin_ensemble_mode, loaded_df
         )
         if result is None:
             return
@@ -330,11 +327,10 @@ if __name__ == "__main__":
             "dataset": lambda x: x["n_3b"] == n_3b
             and x["signal_ratio"] in signal_ratios,
             "aux_info_step": 3,
-            # "resample": lambda x: x is None or not x,
+            "signal_region": lambda x: x["stats_type"] == "fvt",
         },
         return_hparams=True,
     )
-    # target_hashes = [h for h in hashes if h not in pull_dict.keys()]
     target_hashes = list(hashes)
     # sort by hash names
     target_hashes.sort()
@@ -346,3 +342,7 @@ if __name__ == "__main__":
         process_and_save(hash)
 
     print("Processing hashes done")
+
+
+if __name__ == "__main__":
+    save_pulls()
