@@ -246,11 +246,20 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     # noise_scales = [2.0, 3.0]
     # previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
 
-    if EXPERIMENT_NAME == "CR_fvt_training_ensemble_max":
+    if EXPERIMENT_NAME in [
+        "CR_fvt_training_ensemble_max",
+        "CR_fvt_training_ensemble_mean",
+    ]:
         previous_step_experiment_name = "smeared_fvt_training_ensemble"
-    elif EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_HH4b_400":
+    elif EXPERIMENT_NAME in [
+        "CR_fvt_training_ensemble_max_HH4b_400",
+        "CR_fvt_training_ensemble_mean_HH4b_400",
+    ]:
         previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_400"
-    elif EXPERIMENT_NAME == "CR_fvt_training_ensemble_max_HH4b_800":
+    elif EXPERIMENT_NAME in [
+        "CR_fvt_training_ensemble_max_HH4b_800",
+        "CR_fvt_training_ensemble_mean_HH4b_800",
+    ]:
         previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_800"
     else:
         raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
@@ -386,33 +395,27 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         assert (
             len(config["signal_region"]["SR_stats_hashes"]) == 15
         ), f"Expected 15 SR stats hashes, got {len(config['signal_region']['SR_stats_hashes'])}"
-        config["signal_region"]["ensemble_mode"] = "max"
+
         if EXPERIMENT_NAME in [
-            "CR_fvt_training_ensemble_max_smeared",
-            "CR_fvt_training_ensemble_max_smeared_HH4b_400",
-            "CR_fvt_training_ensemble_max_smeared_HH4b_800",
-        ]:
-            raise ValueError(f"Archived experiment name: {EXPERIMENT_NAME}")
-            config["signal_region"]["stats_type"] = "smeared"
-        elif EXPERIMENT_NAME in [
-            "CR_fvt_training_ensemble_max_fvt",
-            "CR_fvt_training_ensemble_max_fvt_HH4b_400",
-            "CR_fvt_training_ensemble_max_fvt_HH4b_800",
-        ]:
-            raise ValueError(f"Archived experiment name: {EXPERIMENT_NAME}")
-            assert noise_scale == 1.0, "FVT must be run with noise scale 1.0"
-            config["signal_region"]["stats_type"] = "fvt"
-        elif EXPERIMENT_NAME in [
             "CR_fvt_training_ensemble_max",
             "CR_fvt_training_ensemble_max_HH4b_400",
             "CR_fvt_training_ensemble_max_HH4b_800",
         ]:
-            if noise_scale == np.inf:
-                config["signal_region"]["stats_type"] = "fvt"
-            else:
-                config["signal_region"]["stats_type"] = "smeared"
+            config["signal_region"]["ensemble_mode"] = "max"
+        elif EXPERIMENT_NAME in [
+            "CR_fvt_training_ensemble_mean",
+            "CR_fvt_training_ensemble_mean_HH4b_400",
+            "CR_fvt_training_ensemble_mean_HH4b_800",
+        ]:
+            config["signal_region"]["ensemble_mode"] = "mean"
         else:
             raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
+
+        if noise_scale == np.inf:
+            config["signal_region"]["stats_type"] = "fvt"
+        else:
+            config["signal_region"]["stats_type"] = "smeared"
+
         config["signal_region"]["4b_in_SR"] = SR_CR_size[0]
         config["signal_region"]["4b_in_CR"] = SR_CR_size[1]
 

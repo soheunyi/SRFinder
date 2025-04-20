@@ -376,21 +376,22 @@ class TrainingInfo:
 
         # Find all names of experiment files
         all_files = list(cls.SAVE_DIR.glob("*"))
-        all_hashes = [file.name for file in all_files]
+        all_hashes = set(file.name for file in all_files)
         existing_hashes = set(existing_metadata.keys())
 
-        added_files = [file for file in all_files if file.name not in existing_hashes]
-        removed_hashes = [hash_ for hash_ in existing_hashes if hash_ not in all_hashes]
+        added_hashes = all_hashes - existing_hashes
+        removed_hashes = existing_hashes - all_hashes
 
         logger.info(
-            f"Adding {len(added_files)} files, removing {len(removed_hashes)} hashes"
+            f"Adding {len(added_hashes)} files, removing {len(removed_hashes)} hashes"
         )
 
         # Use a thread pool to read files in parallel
         with ThreadPoolExecutor() as executor:
             results = list(
                 tqdm.tqdm(
-                    executor.map(cls._process_file, added_files), total=len(added_files)
+                    executor.map(cls._process_hash, added_hashes),
+                    total=len(added_hashes),
                 )
             )
 
@@ -408,10 +409,10 @@ class TrainingInfo:
         with open(cls.META_DIR, "wb") as f:
             pickle.dump(existing_metadata, f)
 
-    @staticmethod
-    def _process_file(file_path):
+    @classmethod
+    def _process_hash(cls, hash_):
         try:
-            with open(file_path, "rb") as f:
+            with open(cls.SAVE_DIR / hash_, "rb") as f:
                 tinfo = pickle.load(f)
                 tinfo: TrainingInfo
                 # Clean the hyperparameters
@@ -422,7 +423,7 @@ class TrainingInfo:
                     hparams_cleaned[key] = tinfo.hparams[key]
                 return tinfo.hash, hparams_cleaned
         except Exception as e:
-            logger.error(f"Failed to process file {file_path}: {e}")
+            logger.error(f"Failed to process hash {hash_}: {e}")
             return None, {}
 
     @classmethod

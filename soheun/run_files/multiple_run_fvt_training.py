@@ -52,13 +52,17 @@ NPROCS = 10
 # EXPERIMENT_NAME = "CR_fvt_training_ensemble_max"
 # BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
+STEP = 3
+EXPERIMENT_NAME = "CR_fvt_training_ensemble_mean"
+BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
+
 # STEP = 3
 # EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_400"
 # BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
-STEP = 3
-EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_800"
-BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
+# STEP = 3
+# EXPERIMENT_NAME = "CR_fvt_training_ensemble_max_HH4b_800"
+# BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 # STEP = 4
 # EXPERIMENT_NAME = "mi_test"
