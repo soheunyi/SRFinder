@@ -1,5 +1,6 @@
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 import pytorch_lightning as pl
+import torch
 
 
 class FvTDataModule(pl.LightningDataModule):
@@ -43,6 +44,64 @@ class FvTDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
+        )
+
+
+class StackedFvTDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        train_datasets: list[TensorDataset],
+        val_datasets: list[TensorDataset],
+        batch_size,
+        batch_size_milestones=None,
+        batch_size_multiplier=2,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+    ):
+        super().__init__()
+        assert len(train_datasets) == len(val_datasets)
+        # Concatenate datasets along axis=0
+        # Access the underlying tensors tuple (.tensors) from each TensorDataset
+        x_train = torch.stack([dataset.tensors[0] for dataset in train_datasets], dim=1)
+        y_train = torch.stack([dataset.tensors[1] for dataset in train_datasets], dim=1)
+        w_train = torch.stack([dataset.tensors[2] for dataset in train_datasets], dim=1)
+        self.stacked_train_dataset = TensorDataset(x_train, y_train, w_train)
+
+        x_val = torch.stack([dataset.tensors[0] for dataset in val_datasets], dim=1)
+        y_val = torch.stack([dataset.tensors[1] for dataset in val_datasets], dim=1)
+        w_val = torch.stack([dataset.tensors[2] for dataset in val_datasets], dim=1)
+        self.stacked_val_dataset = TensorDataset(x_val, y_val, w_val)
+
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.batch_size_milestones = batch_size_milestones or []
+        self.batch_size_multiplier = batch_size_multiplier
+
+    def train_dataloader(self):
+        if self.trainer.current_epoch in self.batch_size_milestones:
+            self.batch_size *= self.batch_size_multiplier
+            print(f"Batch size updated to: {self.batch_size}")
+
+        return DataLoader(
+            self.stacked_train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.stacked_val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,

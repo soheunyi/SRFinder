@@ -238,9 +238,14 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
+    dataset_seeds = range(20, 50)
     ensemble_seeds = range(1)
-    SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
+    SR_CR_sizes = [
+        (0.05, 0.95),
+        (0.1, 0.9),
+        (0.15, 0.85),
+        (0.2, 0.8),
+    ]
     noise_scales = [0.5, 1.0, 2.0, 3.0, np.inf]
     # noise_scales = [0.5, 1.0, np.inf]
     # noise_scales = [2.0, 3.0]

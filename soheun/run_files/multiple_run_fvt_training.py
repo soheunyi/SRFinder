@@ -22,8 +22,8 @@ TrainingInfo.update_metadata()
 ######################### Set Experiment Name and N Runfiles #########################
 ######################################################################################
 
-PROB_STATDS = 0.4
-PROB_PHIL = 0.4
+PROB_STATDS = 0.7
+PROB_PHIL = 0.0
 N_RUNFILES = 10
 NPROCS = 10
 
