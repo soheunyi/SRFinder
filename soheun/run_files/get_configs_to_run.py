@@ -523,7 +523,4 @@ def write_and_get_configs_to_run(
             logging.error(f"Error writing config file: {e}")
             raise e
 
-    CONFIG_STRINGS = [
-        f"-c configs/tmp/{config_filename}" for config_filename in config_filenames
-    ]
-    return CONFIG_STRINGS
+    return config_filenames, configs_to_run

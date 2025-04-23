@@ -14,6 +14,7 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from pl_loggers import FileHandlerLogger
+from pl_callbacks import SaveIndividualClassifierCallback
 import numpy as np
 
 
@@ -41,7 +42,8 @@ class StackedFvTClassifier(pl.LightningModule):
         dim_input_jet_features: int,
         dim_dijet_features: int,
         dim_quadjet_features: int,
-        run_name: str,
+        run_names: list[str],
+        stacked_run_name: str,
         device: str = (
             torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         ),
@@ -63,8 +65,8 @@ class StackedFvTClassifier(pl.LightningModule):
         self.dim_q = dim_quadjet_features
 
         self.num_classes = num_classes
-        self.run_name = run_name
-
+        self.run_names = run_names
+        self.stacked_run_name = stacked_run_name
         require_keys(depth, ["encoder", "decoder"])
         self.depth = depth
 
@@ -73,17 +75,14 @@ class StackedFvTClassifier(pl.LightningModule):
         self.optimizer_config = None
         self.lr_scheduler_config = None
 
-        self.train_losses = torch.tensor([])
-        self.train_batchsizes = torch.tensor([])
-        self.train_total_weights = 0.0
-        self.val_losses = torch.tensor([])
-        self.val_batchsizes = torch.tensor([])
-        self.val_total_weights = 0.0
+        self.avg_train_losses = torch.tensor([])
+        self.val_losses_per_stack = torch.tensor([], dtype=torch.float32).view(
+            0, self.num_stacks
+        )
+        self.val_weights_per_stack = torch.tensor([], dtype=torch.float32).view(
+            0, self.num_stacks
+        )
         self.best_val_loss = torch.inf
-
-        self.val_preds = torch.tensor([])
-        self.val_labels = torch.tensor([])
-        self.val_weights = torch.tensor([])
 
         self.history: list[dict] = []
         # stacking multiple FvTClassifier module
@@ -95,12 +94,12 @@ class StackedFvTClassifier(pl.LightningModule):
                     dim_input_jet_features=self.dim_j,
                     dim_dijet_features=self.dim_d,
                     dim_quadjet_features=self.dim_q,
-                    run_name=self.run_name,
+                    run_name=self.run_names[i],
                     device=self.device,
                     depth=self.depth,
                     repr_norm=self.repr_norm,
                 )
-                for _ in range(self.num_stacks)
+                for i in range(self.num_stacks)
             ]
         )
 
@@ -109,6 +108,9 @@ class StackedFvTClassifier(pl.LightningModule):
         self.ce_loss = nn.CrossEntropyLoss(reduction="none")
 
         self.to(device)
+
+        # Disable automatic optimization for learning rate scheduling per stack
+        self.automatic_optimization = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -120,11 +122,20 @@ class StackedFvTClassifier(pl.LightningModule):
             logits_stack: float tensor of shape (batch_size, num_stacks, num_classes)
         """
 
-        all_logits = [fvt(x[:, i, :]) for i, fvt in enumerate(self.fvt_classifiers)]
+        # Standard approach - process each model sequentially with its complete batch
+        all_logits = []
+        for i, fvt in enumerate(self.fvt_classifiers):
+            # Extract this stack's input for all batch items
+            stack_input = x[:, i, :]
+            # Process the entire batch in one go, ensuring gradient flow
+            logits = fvt(stack_input)
+            all_logits.append(logits)
+
+        # Stack results along stack dimension
         logits_stack = torch.stack(all_logits, dim=1)
         return logits_stack
 
-    def _calculate_loss(
+    def _calculate_losses(
         self, logits_stack: torch.Tensor, y: torch.Tensor, w: torch.Tensor
     ):
         """Helper to calculate weighted loss across stacks."""
@@ -159,63 +170,108 @@ class StackedFvTClassifier(pl.LightningModule):
 
         # Sum the loss across all stacks (each loss is already batch-averaged)
         # Use torch.stack to preserve computation graph before summing
-        final_loss = torch.stack(losses_per_stack).sum()
-        # final_loss = torch.stack(losses_per_stack).mean() # Alternative: Average loss across stacks
-        return final_loss
+        return torch.stack(losses_per_stack)
 
     def training_step(self, batch, batch_idx):
+        optimizers = self.optimizers()
         x, y, w = batch  # Assumes standard batch structure
         x, y, w = (
             x.to(self.device),
             y.to(self.device),
             w.to(self.device),
-        )  # Optional explicit transfer
+        )
 
-        logits_stack = self(x)  # Shape: (batch_size, num_stacks, num_classes)
-        loss = self._calculate_loss(logits_stack, y, w)
+        # Track individual losses for logging
+        all_losses = []
+
+        # Process each classifier independently with its own forward/backward pass
+        for i, fvt in enumerate(self.fvt_classifiers):
+            optimizer = optimizers[i]
+            optimizer.zero_grad()
+
+            # Extract this stack's input and targets
+            stack_input = x[:, i, :]
+            stack_y = y[:, i]
+            stack_w = w[:, i]
+
+            # Forward pass for this stack only
+            logits = fvt(stack_input)
+
+            # Calculate loss for this stack
+            unreduced_loss = self.ce_loss(logits, stack_y)
+            loss = (unreduced_loss * stack_w).mean()
+
+            # Backward pass and optimizer step
+            self.manual_backward(loss)
+            optimizer.step()
+
+            all_losses.append(loss.detach())
+
+        # Stack losses for logging
+        stacked_losses = torch.stack(all_losses)
+        avg_loss = torch.mean(stacked_losses)
+
+        self.avg_train_losses = torch.cat(
+            (self.avg_train_losses, avg_loss.to("cpu").view(1))
+        )
 
         # Log training loss
         self.log(
             "avg_train_loss",
-            loss / self.num_stacks,
+            avg_loss,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            sync_dist=True,
         )
 
-        # Optionally log learning rate
-        # lr = self.optimizers().param_groups[0]['lr']
-        # self.log('learning_rate', lr, on_step=True, on_epoch=False, prog_bar=True, logger=True)
-
-        return loss
+        return avg_loss
 
     def validation_step(self, batch, batch_idx):
         x, y, w = batch
         x, y, w = x.to(self.device), y.to(self.device), w.to(self.device)
 
-        logits_stack = self(x)
-        loss = self._calculate_loss(logits_stack, y, w)
+        # Calculate individual losses for each stack
+        batch_losses = []
+        batch_weights = []
 
-        # Log validation loss (accumulates over epoch)
-        self.log(
-            "avg_val_loss",
-            loss / self.num_stacks,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
+        for i, fvt in enumerate(self.fvt_classifiers):
+            # Extract this stack's input and targets
+            stack_input = x[:, i, :]
+            stack_y = y[:, i]
+            stack_w = w[:, i]
 
-        return loss
+            # Forward pass for this stack only
+            logits = fvt(stack_input)
+
+            # Calculate loss for this stack
+            unreduced_loss = self.ce_loss(logits, stack_y)
+            loss = (unreduced_loss * stack_w).mean()
+            batch_losses.append(loss)
+
+            # Store the sum of weights for this stack
+            batch_weights.append(stack_w.sum())
+
+        # Stack losses and weights for all classifiers in this batch
+        stacked_losses = torch.stack(batch_losses)  # [num_stacks]
+        stacked_weights = torch.stack(batch_weights)  # [num_stacks]
+
+        # Add to our running validation metrics
+        self.val_losses_per_stack = torch.cat(
+            (self.val_losses_per_stack, stacked_losses.detach().to("cpu").view(1, -1)),
+            dim=0,
+        )  # [number of batches, num_stacks]
+
+        self.val_weights_per_stack = torch.cat(
+            (
+                self.val_weights_per_stack,
+                stacked_weights.detach().to("cpu").view(1, -1),
+            ),
+            dim=0,
+        )  # [number of batches, num_stacks]
 
     def on_train_epoch_end(self):
-        avg_loss = (
-            torch.sum(self.train_losses * self.train_batchsizes)
-            / self.train_total_weights
-        )
+        avg_loss = torch.mean(self.avg_train_losses)
         avg_loss_first_digits = (
             int(avg_loss.item() * 1000) if not torch.isnan(avg_loss) else 0
         )
@@ -225,30 +281,29 @@ class StackedFvTClassifier(pl.LightningModule):
             else 0
         )
         self.log("epoch", self.trainer.current_epoch, on_epoch=True)
-        self.log("train_loss", avg_loss, on_epoch=True)
+        self.log("avg_train_loss", avg_loss, on_epoch=True)
         self.log(
-            "train_loss_lower_digits",
+            "1000x_avg_train_loss_lower_digits",
             avg_loss_first_digits,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
-            "train_loss_second_digits",
+            "1000x_avg_train_loss_second_digits",
             avg_loss_second_digits,
             on_epoch=True,
             prog_bar=True,
         )
 
-        self.train_losses = torch.tensor([])
-        self.train_batchsizes = torch.tensor([])
-        self.train_total_weights = 0.0
+        self.avg_train_losses = torch.tensor([])
 
         self.nan_check()
 
     def on_validation_epoch_end(self):
-        avg_loss = (
-            torch.sum(self.val_losses * self.val_batchsizes) / self.val_total_weights
-        )
+        avg_losses = torch.sum(
+            self.val_losses_per_stack * self.val_weights_per_stack, dim=0
+        ) / torch.sum(self.val_weights_per_stack, dim=0)
+        avg_loss = torch.mean(avg_losses)
         avg_loss_first_digits = (
             int(avg_loss.item() * 1000) if not torch.isnan(avg_loss) else 0
         )
@@ -258,25 +313,28 @@ class StackedFvTClassifier(pl.LightningModule):
             else 0
         )
 
-        last_lr = (
-            self.trainer.lr_scheduler_configs[0].scheduler.get_last_lr()[-1]
-            if self.lr_scheduler_config["type"] != "none"
-            else self.optimizer_config["lr"]
-        )
+        # Update to handle multiple schedulers
+        if self.lr_scheduler_config["type"] != "none":
+            # You might want to log the LR of the first optimizer or average across all
+            last_lr = self.trainer.lr_scheduler_configs[0].scheduler.get_last_lr()[-1]
+        else:
+            last_lr = self.optimizer_config["lr"]
 
+        for i in range(self.num_stacks):
+            self.log(
+                f"val_loss_stack_{i}",
+                avg_losses[i].item(),
+                on_epoch=True,
+                prog_bar=False,
+            )
         self.log(
-            "val_loss",
-            avg_loss.item(),
-            on_epoch=True,
-        )
-        self.log(
-            "1000x_val_loss_first_digits",
+            "1000x_avg_val_loss_first_digits",
             avg_loss_first_digits,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
-            "1000x_val_loss_second_digits",
+            "1000x_avg_val_loss_second_digits",
             avg_loss_second_digits,
             on_epoch=True,
             prog_bar=True,
@@ -303,12 +361,9 @@ class StackedFvTClassifier(pl.LightningModule):
 
         if avg_loss < self.best_val_loss:
             self.best_val_loss = avg_loss
-        self.val_losses = torch.tensor([])
-        self.val_batchsizes = torch.tensor([])
-        self.val_total_weights = 0.0
-        self.val_preds = torch.tensor([])
-        self.val_labels = torch.tensor([])
-        self.val_weights = torch.tensor([])
+        self.avg_val_losses = torch.tensor([])
+        self.val_losses_per_stack = torch.tensor([]).view(0, self.num_stacks)
+        self.val_weights_per_stack = torch.tensor([]).view(0, self.num_stacks)
 
         self.nan_check()
 
@@ -331,31 +386,6 @@ class StackedFvTClassifier(pl.LightningModule):
                 print("NaN found in parameter:", name)
                 raise ValueError(f"NaN found in parameter: {name}")
 
-    def test_step(self, batch, batch_idx):
-        x, y, w = batch
-        x, y, w = x.to(self.device), y.to(self.device), w.to(self.device)
-
-        logits_stack = self(x)
-        loss = self._calculate_loss(logits_stack, y, w)
-
-        # Log test loss (accumulates over epoch)
-        self.log(
-            "avg_test_loss",
-            loss / self.num_stacks,
-            on_step=False,
-            on_epoch=True,
-            logger=True,
-            sync_dist=True,
-        )
-
-        # Log metrics similar to validation_step
-        # preds_stack = torch.argmax(logits_stack, dim=-1)
-        # acc_per_stack = (preds_stack == y.unsqueeze(0)).float().mean(dim=1)
-        # avg_acc = acc_per_stack.mean()
-        # self.log("test_acc", avg_acc, on_step=False, on_epoch=True, logger=True, sync_dist=True)
-
-        return loss
-
     @torch.no_grad()
     def predict(self, x):
         """Defines prediction logic. Returns raw logits by default."""
@@ -376,34 +406,48 @@ class StackedFvTClassifier(pl.LightningModule):
                 ["factor", "threshold", "patience", "cooldown", "min_lr"],
             )
 
-        if self.optimizer_config["type"] == "Adam":
-            optimizer = optim.Adam(self.parameters(), lr=self.optimizer_config["lr"])
-        elif self.optimizer_config["type"] == "SGD":
-            optimizer = optim.SGD(self.parameters(), lr=self.optimizer_config["lr"])
-        else:
-            raise ValueError(f"Invalid optimizer type: {self.optimizer_config['type']}")
+        # Create separate optimizers for each classifier
+        optimizers = []
+        schedulers = []
 
-        return_dict = {"optimizer": optimizer, "monitor": "val_loss"}
+        for i, classifier in enumerate(self.fvt_classifiers):
+            # You can customize optimizer settings per classifier if needed
+            if self.optimizer_config["type"] == "Adam":
+                # Can customize lr or other parameters per classifier
+                opt = optim.Adam(
+                    classifier.parameters(), lr=self.optimizer_config["lr"]
+                )
+            elif self.optimizer_config["type"] == "SGD":
+                opt = optim.SGD(classifier.parameters(), lr=self.optimizer_config["lr"])
+            else:
+                raise ValueError(
+                    f"Invalid optimizer type: {self.optimizer_config['type']}"
+                )
 
+            optimizers.append(opt)
+
+            # Create scheduler for each optimizer if needed
+            if self.lr_scheduler_config["type"] != "none":
+                if self.lr_scheduler_config["type"] == "ReduceLROnPlateau":
+                    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                        opt,
+                        "min",
+                        factor=self.lr_scheduler_config["factor"],
+                        threshold=self.lr_scheduler_config["threshold"],
+                        patience=self.lr_scheduler_config["patience"],
+                        cooldown=self.lr_scheduler_config["cooldown"],
+                        min_lr=self.lr_scheduler_config["min_lr"],
+                    )
+                    # Monitor the specific loss for this stack
+                    schedulers.append(
+                        {"scheduler": scheduler, "monitor": f"val_loss_stack_{i}"}
+                    )
+
+        # Return in the format expected by PyTorch Lightning
         if self.lr_scheduler_config["type"] == "none":
-            pass
-        elif self.lr_scheduler_config["type"] == "ReduceLROnPlateau":
-            lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                "min",
-                factor=self.lr_scheduler_config["factor"],
-                threshold=self.lr_scheduler_config["threshold"],
-                patience=self.lr_scheduler_config["patience"],
-                cooldown=self.lr_scheduler_config["cooldown"],
-                min_lr=self.lr_scheduler_config["min_lr"],
-            )
-            return_dict["lr_scheduler"] = lr_scheduler
+            return optimizers
         else:
-            raise ValueError(
-                f"Invalid lr scheduler type: {self.lr_scheduler_config['type']}"
-            )
-
-        return return_dict
+            return optimizers, schedulers
 
     def fit(
         self,
@@ -439,7 +483,7 @@ class StackedFvTClassifier(pl.LightningModule):
 
         tb_log_dir = pathlib.Path(f"./tb_logs/{tb_log_dir}")
         tb_log_dir.mkdir(parents=True, exist_ok=True)
-        loggers = [TensorBoardLogger(tb_log_dir, name=self.run_name)]
+        loggers = [TensorBoardLogger(tb_log_dir, name=self.stacked_run_name)]
         if file_handler is not None:
             file_logger = FileHandlerLogger(file_handler)
             loggers.append(file_logger)
@@ -454,14 +498,7 @@ class StackedFvTClassifier(pl.LightningModule):
         callbacks = callbacks + [progress_bar]
 
         if self.early_stop_patience is not None:
-            early_stop_callback = EarlyStopping(
-                monitor="val_loss",
-                min_delta=0.00,
-                patience=self.early_stop_patience,
-                verbose=False,
-                mode="min",
-            )
-            callbacks.append(early_stop_callback)
+            raise NotImplementedError("Early stopping not implemented for stacked FvT")
 
         if save_checkpoint:
             delete_existing_checkpoints = False
@@ -471,33 +508,15 @@ class StackedFvTClassifier(pl.LightningModule):
             checkpoint_dir = pathlib.Path(f"./data/tmp/checkpoints/")
 
         for mode in ["best", "last"]:
-            ckpt_path = checkpoint_dir / f"{self.run_name}_{mode}.ckpt"
-            if ckpt_path.exists():
-                if delete_existing_checkpoints:
-                    print(f"Deleting existing checkpoint: {ckpt_path}")
-                    os.remove(ckpt_path)
-                else:
-                    raise FileExistsError(f"{ckpt_path} already exists")
-
-            filename = f"{self.run_name}_{mode}"
-            if mode == "best":
-                ckpt_callback = ModelCheckpoint(
-                    dirpath=checkpoint_dir,
-                    filename=filename,
-                    monitor="val_loss",
-                    mode="min",
-                    save_top_k=1,
+            callbacks.append(
+                SaveIndividualClassifierCallback(
+                    save_dir=checkpoint_dir,
+                    run_names=self.run_names,
+                    monitor_metrics=[
+                        f"val_loss_stack_{i}" for i in range(self.num_stacks)
+                    ],
                 )
-                callbacks.append(ckpt_callback)
-            elif mode == "last":
-                ckpt_callback = ModelCheckpoint(
-                    dirpath=checkpoint_dir,
-                    filename=filename,
-                    save_last=True,
-                )
-                callbacks.append(ckpt_callback)
-            else:
-                raise ValueError(f"Invalid checkpoint mode: {mode}")
+            )
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,

@@ -6,6 +6,7 @@ from step_1_base_fvt_training import routine as step_1_routine
 from step_2_smeared_fvt_training import routine as step_2_routine
 from step_3_define_CR_and_train_fvt import routine as step_3_routine
 from step_4_mi_test import routine as step_4_routine
+from step_3_stacked_define_CR_and_train_fvt import routine as step_3_stacked_routine
 import torch
 import logging
 from datetime import datetime
@@ -29,6 +30,18 @@ def run_single_config(config: dict, file_handler: logging.FileHandler):
         step_4_routine(config, file_handler)
     else:
         raise ValueError(f"Step {step} not supported")
+
+
+def run_stacked_process_with_id(configs: list[dict], file_handler: logging.FileHandler):
+    assert len(configs) > 1, "Need at least 2 configs to run stacked process"
+    assert all(
+        config["step"] == configs[0]["step"] for config in configs
+    ), "All configs must have the same step"
+    step = configs[0]["step"]
+    if step == 3:
+        step_3_stacked_routine(configs, file_handler)
+    else:
+        raise ValueError(f"Step {step} not supported for stacked process")
 
 
 def run_process_with_id(args):

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime
 import pathlib
 import random
@@ -96,6 +97,66 @@ def test_select_random_true_elements():
             select_random_true_elements(idx, ratio, seed),
             select_random_true_elements(idx, ratio, seed),
         ), f"The function should be deterministic given the same seed for seed {seed}"
+
+
+def validate_consistent_hparams(
+    hparams: list[dict], critical_hparams: list[str] | None = None
+):
+    """
+    Validates that critical hyperparameters are consistent across all FvT classifiers.
+
+    Args:
+        tinfos: List of TrainingInfo instances
+        critical_hparams: List of hyperparameter paths to check (dot notation for nested params)
+                         If None, checks a default set of parameters
+
+    Returns:
+        dict: Dictionary with results {'consistent': bool, 'mismatches': list}
+    """
+    if len(hparams) <= 1:
+        return {"consistent": True, "mismatches": []}
+
+    mismatches = []
+
+    for param_path in critical_hparams:
+        values = []
+        param_parts = param_path.split(".")
+
+        # Extract value for each classifier
+        for i, hparam in enumerate(deepcopy(hparams)):
+            try:
+                for part in param_parts:
+                    if isinstance(hparam, dict):
+                        hparam = hparam[part]
+                    else:
+                        hparam = getattr(hparam, part)
+                values.append((i, hparam))
+            except (KeyError, AttributeError) as e:
+                mismatches.append(
+                    f"TrainingInfo {i} missing param {param_path}: {str(e)}"
+                )
+
+        # Compare values if we got at least two
+        if len(values) >= 2:
+            consistent, msg = compare_values(values)
+            if not consistent:
+                mismatches.append(f"Parameter {param_path} mismatch: {msg}")
+
+    return {"consistent": len(mismatches) == 0, "mismatches": mismatches}
+
+
+def compare_values(values: list[tuple[int, any]]):
+    _, reference_value = values[0]
+    for idx, value in values[1:]:
+        if isinstance(reference_value, list):
+            if len(reference_value) != len(value):
+                return False, f"Length mismatch: {len(reference_value)} != {len(value)}"
+            for r, v in zip(reference_value, value):
+                if r != v:
+                    return False, f"Value mismatch: {r} != {v}"
+        elif reference_value != value:
+            return False, f"Value mismatch: {reference_value} != {value}"
+    return True
 
 
 if __name__ == "__main__":

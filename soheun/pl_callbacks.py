@@ -3,6 +3,8 @@ from events_data import EventsData
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 import numpy as np
+import pathlib
+import torch
 
 from plots import calibration_plot, hist_events_by_labels, plot_reweighted_samples
 
@@ -129,3 +131,38 @@ class ReweightedPlotCallback(Callback):
         )
         plt.show()
         plt.close("all")
+
+
+class SaveIndividualClassifierCallback(pl.Callback):
+    def __init__(self, save_dir: str, run_names: list[str], monitor_metrics: list[str]):
+        super().__init__()
+        self.save_dir = pathlib.Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        assert len(run_names) == len(monitor_metrics)
+        self.run_names = run_names
+        self.monitor_metrics = monitor_metrics
+        self.best_scores = {metric: float("inf") for metric in monitor_metrics}
+
+    def on_validation_epoch_end(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ):
+        for i, (run_name, metric) in enumerate(
+            zip(self.run_names, self.monitor_metrics)
+        ):
+            current_score = trainer.callback_metrics.get(metric, None)
+            if current_score is None:
+                continue
+
+            # Convert from tensor if needed
+            if hasattr(current_score, "item"):
+                current_score = current_score.item()
+
+            # Save if better than previous best
+            if current_score < self.best_scores[metric]:
+                self.best_scores[metric] = current_score
+                save_path = self.save_dir / f"{run_name}_best.pt"
+                torch.save(pl_module.fvt_classifiers[i].state_dict(), save_path)
+
+            # Always save latest
+            save_path = self.save_dir / f"{run_name}_last.pt"
+            torch.save(pl_module.fvt_classifiers[i].state_dict(), save_path)

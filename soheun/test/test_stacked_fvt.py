@@ -130,7 +130,7 @@ def make_tinfos(
 
 def run_multitask_test():
     # Use the logger instance obtained above
-    logger.info("--- Starting Multi-Task Test --- ")
+    logger.info("--- Starting Test --- ")
     log_file = "test_stacked_fvt.log"
     # Setup file logging specifically for this test run
     file_handler = logging.FileHandler(
@@ -189,7 +189,7 @@ def run_multitask_test():
             "min_lr": 0.0002,
         },
         "dataloader": {
-            "batch_size": 1024,
+            "batch_size": 2**18,
             "batch_size_multiplier": 2,
             "batch_size_milestones": [1, 3, 6, 10, 15],
             # Add num_workers, pin_memory etc here if needed by model.fit's datamodule
@@ -260,7 +260,8 @@ def run_multitask_test():
         "dim_input_jet_features": dim_input_jet_features,
         "dim_dijet_features": base_fvt_hparams["dim_dijet_features"],
         "dim_quadjet_features": base_fvt_hparams["dim_quadjet_features"],
-        "run_name": "test_stacked_fvt_run",
+        "run_names": [f"test_stacked_fvt_run_{i}" for i in range(len(seeds))],
+        "stacked_run_name": "test_stacked_fvt_run",
         "depth": base_fvt_hparams["depth"],
         "repr_norm": base_fvt_hparams["repr_norm"],
         # Ensure device is passed if model __init__ expects it explicitly

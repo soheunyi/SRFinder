@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition statds
+#SBATCH --partition phil_condo
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=8G
