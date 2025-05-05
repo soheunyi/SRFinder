@@ -1,3 +1,4 @@
+import datetime
 import logging
 import torch
 import torch.nn as nn
@@ -9,7 +10,6 @@ from utils import require_keys
 import torch.optim as optim
 from torch.utils.data import TensorDataset
 import pathlib
-import os
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
@@ -75,13 +75,21 @@ class StackedFvTClassifier(pl.LightningModule):
         self.optimizer_config = None
         self.lr_scheduler_config = None
 
-        self.avg_train_losses = torch.tensor([])
+        self.train_losses_per_stack = torch.tensor([], dtype=torch.float32).view(
+            0, self.num_stacks
+        )
+        self.train_weights_per_stack = torch.tensor([], dtype=torch.float32).view(
+            0, self.num_stacks
+        )
+        self.train_batch_sizes = torch.tensor([])
+
         self.val_losses_per_stack = torch.tensor([], dtype=torch.float32).view(
             0, self.num_stacks
         )
         self.val_weights_per_stack = torch.tensor([], dtype=torch.float32).view(
             0, self.num_stacks
         )
+        self.val_batch_sizes = torch.tensor([])
         self.best_val_loss = torch.inf
 
         self.history: list[dict] = []
@@ -103,14 +111,14 @@ class StackedFvTClassifier(pl.LightningModule):
             ]
         )
 
-        # Use CrossEntropyLoss like the original FvTClassifier example
-        # Assumes integer class labels for y
-        self.ce_loss = nn.CrossEntropyLoss(reduction="none")
-
         self.to(device)
 
         # Disable automatic optimization for learning rate scheduling per stack
         self.automatic_optimization = False
+
+    def ce_loss(self, y_logits: torch.Tensor, y_labels: torch.Tensor, reduction="none"):
+        # y_pred: logits, y_labels: labels
+        return F.cross_entropy(y_logits, y_labels, reduction=reduction)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -173,21 +181,24 @@ class StackedFvTClassifier(pl.LightningModule):
         return torch.stack(losses_per_stack)
 
     def training_step(self, batch, batch_idx):
-        optimizers = self.optimizers()
+        optimizers: list[torch.optim.Optimizer] = self.optimizers()
         x, y, w = batch  # Assumes standard batch structure
         x, y, w = (
             x.to(self.device),
             y.to(self.device),
             w.to(self.device),
         )
+        self.train_batch_sizes = torch.cat(
+            (self.train_batch_sizes, torch.tensor([y.size(0)]))
+        )
 
         # Track individual losses for logging
-        all_losses = []
+        batch_losses = []
+        batch_weights = []
 
         # Process each classifier independently with its own forward/backward pass
         for i, fvt in enumerate(self.fvt_classifiers):
-            optimizer = optimizers[i]
-            optimizer.zero_grad()
+            optimizers[i].zero_grad()
 
             # Extract this stack's input and targets
             stack_input = x[:, i, :]
@@ -203,33 +214,36 @@ class StackedFvTClassifier(pl.LightningModule):
 
             # Backward pass and optimizer step
             self.manual_backward(loss)
-            optimizer.step()
+            optimizers[i].step()
 
-            all_losses.append(loss.detach())
+            batch_losses.append(loss.detach())
+            batch_weights.append(stack_w.sum())
 
         # Stack losses for logging
-        stacked_losses = torch.stack(all_losses)
-        avg_loss = torch.mean(stacked_losses)
+        stacked_losses = torch.stack(batch_losses)
+        stacked_weights = torch.stack(batch_weights)
 
-        self.avg_train_losses = torch.cat(
-            (self.avg_train_losses, avg_loss.to("cpu").view(1))
+        self.train_losses_per_stack = torch.cat(
+            (
+                self.train_losses_per_stack,
+                stacked_losses.detach().to("cpu").view(1, -1),
+            ),
+            dim=0,
         )
-
-        # Log training loss
-        self.log(
-            "avg_train_loss",
-            avg_loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
+        self.train_weights_per_stack = torch.cat(
+            (
+                self.train_weights_per_stack,
+                stacked_weights.detach().to("cpu").view(1, -1),
+            ),
+            dim=0,
         )
-
-        return avg_loss
 
     def validation_step(self, batch, batch_idx):
         x, y, w = batch
         x, y, w = x.to(self.device), y.to(self.device), w.to(self.device)
+        self.val_batch_sizes = torch.cat(
+            (self.val_batch_sizes, torch.tensor([y.size(0)]))
+        )
 
         # Calculate individual losses for each stack
         batch_losses = []
@@ -271,7 +285,10 @@ class StackedFvTClassifier(pl.LightningModule):
         )  # [number of batches, num_stacks]
 
     def on_train_epoch_end(self):
-        avg_loss = torch.mean(self.avg_train_losses)
+        avg_losses = torch.sum(
+            self.train_losses_per_stack * self.train_batch_sizes.view(-1, 1), dim=0
+        ) / torch.sum(self.train_weights_per_stack, dim=0)
+        avg_loss = torch.mean(avg_losses)
         avg_loss_first_digits = (
             int(avg_loss.item() * 1000) if not torch.isnan(avg_loss) else 0
         )
@@ -295,13 +312,33 @@ class StackedFvTClassifier(pl.LightningModule):
             prog_bar=True,
         )
 
-        self.avg_train_losses = torch.tensor([])
-
         self.nan_check()
+
+        # Correctly iterate through scheduler configurations
+        scheduler_configs = self.trainer.lr_scheduler_configs
+        if scheduler_configs:  # Check if list is not empty
+            assert len(scheduler_configs) == self.num_stacks
+            for i, config in enumerate(scheduler_configs):
+                scheduler = config.scheduler
+                monitor = f"val_loss_stack_{i}"
+                if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                    if monitor not in self.trainer.callback_metrics:
+                        logging.warning(
+                            f"Metric '{monitor}' not found in callback_metrics at epoch {self.current_epoch}. Skipping ReduceLROnPlateau step."
+                        )
+                        continue
+                    metric_value = self.trainer.callback_metrics[monitor]
+                    scheduler.step(metric_value)
+                else:
+                    scheduler.step()
+
+        self.train_losses_per_stack = torch.tensor([]).view(0, self.num_stacks)
+        self.train_weights_per_stack = torch.tensor([]).view(0, self.num_stacks)
+        self.train_batch_sizes = torch.tensor([])
 
     def on_validation_epoch_end(self):
         avg_losses = torch.sum(
-            self.val_losses_per_stack * self.val_weights_per_stack, dim=0
+            self.val_losses_per_stack * self.val_batch_sizes.view(-1, 1), dim=0
         ) / torch.sum(self.val_weights_per_stack, dim=0)
         avg_loss = torch.mean(avg_losses)
         avg_loss_first_digits = (
@@ -361,11 +398,20 @@ class StackedFvTClassifier(pl.LightningModule):
 
         if avg_loss < self.best_val_loss:
             self.best_val_loss = avg_loss
-        self.avg_val_losses = torch.tensor([])
+
         self.val_losses_per_stack = torch.tensor([]).view(0, self.num_stacks)
         self.val_weights_per_stack = torch.tensor([]).view(0, self.num_stacks)
+        self.val_batch_sizes = torch.tensor([])
 
         self.nan_check()
+
+    def on_validation_epoch_start(self):
+        print(
+            "Current time:",
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            flush=True,
+        )
+        print(self.trainer.lr_scheduler_configs, flush=True)
 
     def update_history(self, kv: dict[str, float]):
         saved_epochs = [h["epoch"] for h in self.history]
@@ -410,15 +456,13 @@ class StackedFvTClassifier(pl.LightningModule):
         optimizers = []
         schedulers = []
 
-        for i, classifier in enumerate(self.fvt_classifiers):
-            # You can customize optimizer settings per classifier if needed
+        for i, fvt in enumerate(self.fvt_classifiers):
+            # You can customize optimizer settings per fvt if needed
             if self.optimizer_config["type"] == "Adam":
-                # Can customize lr or other parameters per classifier
-                opt = optim.Adam(
-                    classifier.parameters(), lr=self.optimizer_config["lr"]
-                )
+                # Can customize lr or other parameters per fvt
+                opt = optim.Adam(fvt.parameters(), lr=self.optimizer_config["lr"])
             elif self.optimizer_config["type"] == "SGD":
-                opt = optim.SGD(classifier.parameters(), lr=self.optimizer_config["lr"])
+                opt = optim.SGD(fvt.parameters(), lr=self.optimizer_config["lr"])
             else:
                 raise ValueError(
                     f"Invalid optimizer type: {self.optimizer_config['type']}"
@@ -438,10 +482,8 @@ class StackedFvTClassifier(pl.LightningModule):
                         cooldown=self.lr_scheduler_config["cooldown"],
                         min_lr=self.lr_scheduler_config["min_lr"],
                     )
-                    # Monitor the specific loss for this stack
-                    schedulers.append(
-                        {"scheduler": scheduler, "monitor": f"val_loss_stack_{i}"}
-                    )
+                    # Monitor the specific loss for this stack are set in on_train_epoch_end
+                    schedulers.append(scheduler)
 
         # Return in the format expected by PyTorch Lightning
         if self.lr_scheduler_config["type"] == "none":
@@ -489,11 +531,13 @@ class StackedFvTClassifier(pl.LightningModule):
             loggers.append(file_logger)
 
         progress_bar = TQDMProgressBar(
-            # refresh_rate=(
-            #     max(1, (len(train_datasets[0]) // dataloader_config["batch_size"]) // 4)
-            #     if progress_bar_epochs is None
-            #     else progress_bar_epochs
-            # )
+            refresh_rate=(
+                max(
+                    1, (len(train_datasets[0]) // dataloader_config["batch_size"]) // 32
+                )
+                if progress_bar_epochs is None
+                else progress_bar_epochs
+            )
         )
         callbacks = callbacks + [progress_bar]
 
@@ -501,22 +545,17 @@ class StackedFvTClassifier(pl.LightningModule):
             raise NotImplementedError("Early stopping not implemented for stacked FvT")
 
         if save_checkpoint:
-            delete_existing_checkpoints = False
             checkpoint_dir = pathlib.Path(f"./data/checkpoints/")
         else:
-            delete_existing_checkpoints = True
             checkpoint_dir = pathlib.Path(f"./data/tmp/checkpoints/")
 
-        for mode in ["best", "last"]:
-            callbacks.append(
-                SaveIndividualClassifierCallback(
-                    save_dir=checkpoint_dir,
-                    run_names=self.run_names,
-                    monitor_metrics=[
-                        f"val_loss_stack_{i}" for i in range(self.num_stacks)
-                    ],
-                )
+        callbacks.append(
+            SaveIndividualClassifierCallback(
+                save_dir=checkpoint_dir,
+                run_names=self.run_names,
+                monitor_metrics=[f"val_loss_stack_{i}" for i in range(self.num_stacks)],
             )
+        )
 
         trainer = pl.Trainer(
             max_epochs=max_epochs,
@@ -529,8 +568,8 @@ class StackedFvTClassifier(pl.LightningModule):
         torch.autograd.set_detect_anomaly(True)
 
         num_workers = dataloader_config.get("num_workers", 0)
-        pin_mem = dataloader_config.get("pin_memory", True)
-        persist = dataloader_config.get("persistent_workers", True)
+        pin_mem = dataloader_config.get("pin_memory", False)
+        persist = dataloader_config.get("persistent_workers", False)
         self.datamodule = StackedFvTDataModule(
             train_datasets,
             val_datasets,

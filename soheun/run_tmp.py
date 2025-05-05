@@ -1,240 +1,99 @@
 import numpy as np
+from constants import FEATURES
 from dataset import MotherSamples
+from ks_test import max_cdf_diff
+from signal_region import compute_sr_stats, get_SR_CR_cut
 from training_info import TrainingInfo
-from events_data import EventsData, get_is_signal
-import pickle
+from events_data import events_from_scdinfo
 import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
-
-features = [
-    "sym_Jet0_pt",
-    "sym_Jet1_pt",
-    "sym_Jet2_pt",
-    "sym_Jet3_pt",
-    "sym_Jet0_eta",
-    "sym_Jet1_eta",
-    "sym_Jet2_eta",
-    "sym_Jet3_eta",
-    "sym_Jet0_phi",
-    "sym_Jet1_phi",
-    "sym_Jet2_phi",
-    "sym_Jet3_phi",
-    "sym_Jet0_m",
-    "sym_Jet1_m",
-    "sym_Jet2_m",
-    "sym_Jet3_m",
-]
-
+from constants import FEATURES
 
 path_3b = Path("../events/MG3/dataframes/threeTag_picoAOD.h5")
 path_4b = Path("../events/MG3/dataframes/fourTag_10x_picoAOD.h5")
-path_signal_resonant = Path("../events/MG3/dataframes/HH4b_resonant_picoAOD_v1.h5")
-path_signal = Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+path_hh4b = Path("../events/MG3/dataframes/HH4b_picoAOD.h5")
+path_hh4b_400 = Path("../events/MG3/dataframes/HH4b_400.h5")
+path_hh4b_800 = Path("../events/MG3/dataframes/HH4b_800.h5")
+
 df_3b = pd.read_hdf(path_3b)
 df_bg4b = pd.read_hdf(path_4b)
-df_signal = pd.read_hdf(path_signal)
-df_hh4b_resonant = pd.read_hdf(
-    Path("../events/MG3/dataframes/HH4b_resonant_picoAOD_v1.h5")
-)
+df_hh4b = pd.read_hdf(path_hh4b)
+df_hh4b_400 = pd.read_hdf(path_hh4b_400)
+df_hh4b_800 = pd.read_hdf(path_hh4b_800)
+
 df_3b["signal"] = False
 df_bg4b["signal"] = False
-df_signal["signal"] = True
-df_hh4b_resonant["signal"] = True
+df_hh4b["signal"] = True
+df_hh4b_400["signal"] = True
+df_hh4b_800["signal"] = True
+
 loaded_df = {
     path_3b: df_3b,
     path_4b: df_bg4b,
-    path_signal: df_signal,
-    path_signal_resonant: df_hh4b_resonant,
+    path_hh4b: df_hh4b,
+    path_hh4b_400: df_hh4b_400,
+    path_hh4b_800: df_hh4b_800,
 }
 
-from utils import safe_dict
-from events_data import get_is_signal
-from fvt_classifier import AttentionClassifier, FvTClassifier
+experiment_name = "CR_fvt_training_ensemble_max_HH4b_800"
+hashes = TrainingInfo.find({"experiment_name": experiment_name})
 
-experiment_name = "smeared_fvt_training_ensemble_HH4b_resonant"
-signal_ratios = [0.005]
-dataset_seeds = range(50)
+for hash_ in tqdm(hashes):
+    CR_fvt_tinfo = TrainingInfo.load(hash_)
+    SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
+    ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
+    stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
+    seed = CR_fvt_tinfo.hparams["dataset"]["seed"]
+    signal_ratio = CR_fvt_tinfo.hparams["dataset"]["signal_ratio"]
+    signal_filename = CR_fvt_tinfo.hparams["dataset"]["signal_filename"]
 
-hparams_filter = {
-    "experiment_name": experiment_name,
-    "dataset": lambda x: (
-        safe_dict(x, "signal_ratio") in signal_ratios
-        and safe_dict(x, "seed") in dataset_seeds
-    ),
-}
-hashes = TrainingInfo.find(hparams_filter)
-
-
-for hash in tqdm(hashes):
-    smeared_fvt_tinfo = TrainingInfo.load(hash)
-    base_fvt_info = TrainingInfo.load(smeared_fvt_tinfo.hparams["encoder_hash"])
-    signal_filename = smeared_fvt_tinfo.hparams["dataset"]["signal_filename"]
-    ms_hash = smeared_fvt_tinfo.ms_hash
-    ms_idx = smeared_fvt_tinfo.ms_idx
-    msamples = MotherSamples.load(ms_hash)
-    tst_scdinfo = msamples.scdinfo[~ms_idx]
-    df_tst = tst_scdinfo.fetch_data(loaded_df)
-    df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
-    events_tst = EventsData.from_dataframe(df_tst, features)
-
-    print(smeared_fvt_tinfo.aux_info.keys())
-
-    base_fvt_model = base_fvt_info.load_trained_model("best")
-    base_fvt_model: FvTClassifier
-    base_fvt_model.eval()
-    base_fvt_score, base_q_repr = base_fvt_model.predict_and_representations(
-        events_tst.X_torch
+    SR_stats_train, SR_stats_tst = compute_sr_stats(
+        SR_stats_hashes,
+        signal_filename,
+        ensemble_mode,
+        stats_type,
     )
-    base_q_repr = base_q_repr.numpy()
-    base_fvt_score = base_fvt_score[:, 1].numpy()
-    base_fvt_info.aux_info.update(
-        {
-            "base_fvt_score": base_fvt_score,
-        }
+
+    smeared_tinfo = TrainingInfo.load(SR_stats_hashes[0])
+    if CR_fvt_tinfo.hparams["signal_region"]["stats_type"] == "smeared":
+        noise_scale = smeared_tinfo.hparams["smearing"]["noise_scale"]
+    else:
+        noise_scale = np.inf
+    msamples = MotherSamples.load(smeared_tinfo.ms_hash)
+    events_train = events_from_scdinfo(
+        msamples.scdinfo[smeared_tinfo.ms_idx], FEATURES, signal_filename
     )
-    base_fvt_info.save()
-
-    smeared_fvt_model = smeared_fvt_tinfo.load_trained_model("best")
-    smeared_fvt_model: AttentionClassifier
-    smeared_fvt_model.eval()
-    smeared_fvt_score = smeared_fvt_model.predict(base_q_repr)[:, 1].numpy()
-    smeared_fvt_tinfo.aux_info.update(
-        {
-            "smeared_fvt_score": smeared_fvt_score,
-        }
+    events_tst = events_from_scdinfo(
+        msamples.scdinfo[~smeared_tinfo.ms_idx], FEATURES, signal_filename
     )
-    smeared_fvt_tinfo.save()
+    SR_cut, CR_cut = get_SR_CR_cut(
+        SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]
+    )
+    SR_idx = SR_stats_tst >= SR_cut
 
-    gamma = base_fvt_score / (1 - base_fvt_score)
-    gamma_smeared = smeared_fvt_score / (1 - smeared_fvt_score)
+    # SR_stats_tst_SR = SR_stats_tst[SR_idx]
+    # events_tst_SR = events_tst[SR_idx]
+    # fvt_scores_tst_SR = CR_fvt_tinfo.aux_info["fvt_scores_tst_SR"]
+    # reweights_tst_SR = fvt_scores_tst_SR / (1 - fvt_scores_tst_SR)
+    # rw_tst_SR = np.where(
+    #     events_tst_SR.is_4b,
+    #     events_tst_SR.weights,
+    #     reweights_tst_SR * events_tst_SR.weights,
+    # )
+    # is_4b_tst_SR = events_tst_SR.is_4b
 
+    # max_diff = max_cdf_diff(
+    #     SR_stats_tst_SR[is_4b_tst_SR],
+    #     SR_stats_tst_SR[~is_4b_tst_SR],
+    #     rw_tst_SR[is_4b_tst_SR],
+    #     rw_tst_SR[~is_4b_tst_SR],
+    # )
 
-# experiment_name = "CR_fvt_training_ensemble_max_smeared"
-# n_3b = 100_0000
-# ratio_4b = 0.5
-# signal_filename = "HH4b_picoAOD.h5"
-# nbins_list = [4, 8, 16, 32, 64]
-# pull_dict = []
-# hists_dicts_loaded = [
-#     pickle.load(
-#         open(
-#             f"./data/tmp/test_info_by_hashes_order_{correction_order}_mi_test.pkl", "rb"
-#         )
-#     )
-#     for correction_order in [0, 1, 2]
-# ]
+    events_tst_SR = events_tst[SR_idx]
+    N_3b_SR = np.sum(events_tst_SR.is_3b)
+    N_4b_SR = np.sum(events_tst_SR.is_4b)
 
-# for SR_size in [0.05, 0.1, 0.15, 0.2]:
-#     CR_size = 1 - SR_size
-#     for signal_ratio in [0.0, 0.005, 0.0075, 0.01, 0.02]:
-#         hparams_filter = {
-#             "experiment_name": experiment_name,
-#             "aux_info_step": 3,
-#             "dataset": lambda x: (
-#                 x["n_3b"] == n_3b
-#                 and x["ratio_4b"] == ratio_4b
-#                 and x["signal_filename"] == signal_filename
-#                 and x["signal_ratio"] == signal_ratio
-#             ),
-#             "signal_region": lambda x: (
-#                 x["4b_in_SR"] == SR_size and x["4b_in_CR"] == CR_size
-#             ),
-#         }
-#         CR_fvt_hashes = TrainingInfo.find(hparams_filter)
-#         for CR_fvt_hash in tqdm(CR_fvt_hashes):
-#             CR_fvt_tinfo = TrainingInfo.load(CR_fvt_hash)
-#             SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
-#             ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
-#             stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
-#             signal_filename = CR_fvt_tinfo.hparams["dataset"]["signal_filename"]
-
-#             ms_idx = TrainingInfo.load(SR_stats_hashes[0]).ms_idx
-#             msamples = MotherSamples.load(CR_fvt_tinfo.ms_hash)
-#             train_scdinfo = msamples.scdinfo[ms_idx]
-#             tst_scdinfo = msamples.scdinfo[~ms_idx]
-
-#             df_train = train_scdinfo.fetch_data(loaded_df)
-#             df_train["signal"] = get_is_signal(train_scdinfo, signal_filename)
-#             events_train = EventsData.from_dataframe(df_train, features)
-
-#             df_tst = tst_scdinfo.fetch_data(loaded_df)
-#             df_tst["signal"] = get_is_signal(tst_scdinfo, signal_filename)
-#             events_tst = EventsData.from_dataframe(df_tst, features)
-
-#             SR_stats_train, SR_stats_tst = compute_sr_stats(
-#                 SR_stats_hashes,
-#                 signal_filename,
-#                 ensemble_mode,
-#                 stats_type,
-#                 loaded_df,
-#             )
-
-#             SR_cut, CR_cut = get_SR_CR_cut(
-#                 SR_stats_train, events_train, CR_fvt_tinfo.hparams["signal_region"]
-#             )
-#             # SR_idx = SR_stats_tst >= SR_cut
-#             CR_idx = (SR_stats_tst < SR_cut) & (SR_stats_tst >= CR_cut)
-#             events_tst_CR = events_tst[CR_idx]
-#             weights_4b_tst_CR = events_tst_CR.total_weight_4b
-#             weights_3b_tst_CR = (
-#                 events_tst_CR.total_weight - events_tst_CR.total_weight_4b
-#             )
-
-#             mi_test_hashes = TrainingInfo.find({"CR_fvt_hash": CR_fvt_hash})
-#             for mi_test_hash in mi_test_hashes:
-#                 mi_test_tinfo = TrainingInfo.load(mi_test_hash)
-#                 batch_size = mi_test_tinfo.hparams["dataloader"]["batch_size"]
-#                 for correction_order in [0, 1, 2]:
-#                     hists_dict = hists_dicts_loaded[correction_order]
-#                     if mi_test_hash not in hists_dict:
-#                         continue
-#                     hists = hists_dict[mi_test_hash]["hists"]
-#                     corrections = hists_dict[mi_test_hash]["corrections"]
-
-#                     for nbins in nbins_list:
-#                         hist_3b_corrected = hists[nbins]["3b_corrected"]
-#                         hist_4b = hists[nbins]["4b"]
-#                         hist_4b_sq = hists[nbins]["4b_sq"]
-#                         hist_3b_sq = hists[nbins]["3b_corrected_sq"]
-#                         hist_signal = hists[nbins]["signal"]
-#                         hist_bg4b = hists[nbins]["bg4b"]
-#                         n_bins_eff = corrections[nbins][0][2]
-
-#                         v_no_shape = hist_4b_sq + hist_3b_sq
-#                         pull_no_shape = (hist_4b - hist_3b_corrected) / np.sqrt(
-#                             v_no_shape
-#                         )
-#                         v_shape = (
-#                             v_no_shape
-#                             + (1 / weights_3b_tst_CR + 1 / weights_4b_tst_CR)
-#                             * hist_3b_corrected**2
-#                         )
-#                         pull_shape = (hist_4b - hist_3b_corrected) / np.sqrt(v_shape)
-#                         pull_bg4b = (hist_bg4b - hist_3b_corrected) / np.sqrt(
-#                             v_no_shape
-#                         )
-#                         pull_signal = hist_signal / np.sqrt(v_no_shape)
-#                         mean_pull_sq_no_shape = np.sqrt(np.mean(pull_no_shape**2))
-#                         mean_pull_sq_shape = np.sqrt(np.mean(pull_shape**2))
-
-#                         pull_dict.append(
-#                             {
-#                                 "mi_test_hash": mi_test_hash,
-#                                 "SR_size": SR_size,
-#                                 "signal_ratio": signal_ratio,
-#                                 "batch_size": batch_size,
-#                                 "nbins": nbins,
-#                                 "mean_pull_sq_no_shape": mean_pull_sq_no_shape,
-#                                 "mean_pull_sq_shape": mean_pull_sq_shape,
-#                                 "n_bins_eff": n_bins_eff,
-#                                 "correction_order": correction_order,
-#                                 "pull_signal": pull_signal,
-#                                 "pull_bg4b": pull_bg4b,
-#                                 "pull_no_shape": pull_no_shape,
-#                                 "pull_shape": pull_shape,
-#                             }
-#                         )
-
-# with open(f"./data/tmp/pull_dict_mi_test.pkl", "wb") as f:
-#     pickle.dump(pull_dict, f)
+    # CR_fvt_tinfo.aux_info.update({"max_cdf_diff": max_diff})
+    CR_fvt_tinfo.aux_info.update({"N_3b_SR": N_3b_SR, "N_4b_SR": N_4b_SR})
+    CR_fvt_tinfo.save()

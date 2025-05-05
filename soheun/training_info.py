@@ -76,9 +76,32 @@ class TrainingInfo:
         name = f"{self._hash}_{mode}.ckpt"
 
         if self.model == "FvTClassifier":
-            return FvTClassifier.load_from_checkpoint(ckpt_dir / name)
+            try:
+                return FvTClassifier.load_from_checkpoint(ckpt_dir / name)
+            except FileNotFoundError:
+                name = f"{self._hash}_{mode}.pt"
+                model = FvTClassifier(
+                    num_classes=2,
+                    dim_input_jet_features=4,
+                    dim_dijet_features=self.hparams["dim_dijet_features"],
+                    dim_quadjet_features=self.hparams["dim_quadjet_features"],
+                    run_name=self._hash,
+                    depth=self.hparams["depth"],
+                )
+                model.load_state_dict(torch.load(ckpt_dir / name))
+                return model
         elif self.model == "AttentionClassifier":
-            return AttentionClassifier.load_from_checkpoint(ckpt_dir / name)
+            try:
+                return AttentionClassifier.load_from_checkpoint(ckpt_dir / name)
+            except FileNotFoundError:
+                name = f"{self._hash}_{mode}.pt"
+                model = AttentionClassifier(
+                    dim_q=self.hparams["dim_quadjet_features"],
+                    num_classes=2,
+                    depth=self.hparams["depth"],
+                )
+                model.load_state_dict(torch.load(ckpt_dir / name))
+                return model
         else:
             raise ValueError(f"Model {self.model} not found")
 

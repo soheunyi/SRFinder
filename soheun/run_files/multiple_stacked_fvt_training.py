@@ -1,9 +1,14 @@
+from copy import deepcopy
+import datetime
+import hashlib
+import json
 import os
 import stat
 import time
 import numpy as np
 import sys
 import logging
+import pandas as pd
 from get_configs_to_run import write_and_get_configs_to_run
 
 # Configure logging
@@ -25,15 +30,23 @@ TrainingInfo.update_metadata()
 PROB_STATDS = 0.7
 PROB_PHIL = 0.0
 N_RUNFILES = 10
-NPROCS = 10
-RUN_IN_STACKS = True
+
 
 STEP = 3
+GROUP_KEYS = [
+    "signal_region.4b_in_SR",
+    "signal_region.4b_in_CR",
+    "smearing.noise_scale",
+    "dataset.signal_ratio",
+    "CR_fvt.train_seed",
+    "CR_fvt.model_seed",
+    "CR_fvt.data_seed",
+]
 EXPERIMENT_NAME = "CR_fvt_training_ensemble_mean"
 BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 config_filenames, configs_to_run = write_and_get_configs_to_run(
-    STEP, EXPERIMENT_NAME, BASE_CONFIG_FILENAME
+    STEP, EXPERIMENT_NAME, BASE_CONFIG_FILENAME, use_cached_configs=True
 )
 critical_hparams = [
     "model",
@@ -62,9 +75,43 @@ critical_hparams = [
     "encoder_mode",
     "repr_norm",
 ]
-CONFIG_CHUNKS = {i: [] for i in range(N_RUNFILES)}
-for i, config_string in enumerate(CONFIG_STRINGS):
-    CONFIG_CHUNKS[i % N_RUNFILES].append(config_string)
+
+
+def get_values_to_group(config: dict[str, any], group_keys: list[str]):
+    result = {}
+    for key in group_keys:
+        config_iter = deepcopy(config)
+        gkeys = key.split(".")
+        for gkey in gkeys:
+            try:
+                config_iter = config_iter[gkey]
+            except KeyError:
+                raise KeyError(f"Key {key} not found in config {config}")
+        result[key] = config_iter
+    return result
+
+
+def group_configs(configs: list[dict[str, any]], group_keys: list[str]):
+    configs_to_group = pd.DataFrame(
+        [get_values_to_group(config, group_keys) for config in configs],
+        index=config_filenames,
+    )
+    gpby = configs_to_group.groupby(group_keys)
+    grouped_config_filenames = []
+    for gkeys in gpby.groups:
+        grouped_config_filenames.append(gpby.get_group(gkeys).index.tolist())
+    return grouped_config_filenames
+
+
+grouped_config_filenames = group_configs(configs_to_run, group_keys=GROUP_KEYS)
+n_groups = len(grouped_config_filenames)
+groups_alloc = {i: {"groups": [], "config_filenames": []} for i in range(N_RUNFILES)}
+for i in range(n_groups):
+    runfile_idx = i % N_RUNFILES
+    group = grouped_config_filenames[i]
+    groups_alloc[runfile_idx]["groups"].extend([i] * len(group))
+    groups_alloc[runfile_idx]["config_filenames"].extend(group)
+
 
 RUN_PARTITIONS = []
 for _ in range(N_RUNFILES):
@@ -75,33 +122,39 @@ for _ in range(N_RUNFILES):
     else:
         RUN_PARTITIONS.append("cmist_condo")
 
-logging.info(
-    f"n_tasks (runfiles) {len(CONFIG_CHUNKS)}, max n_tasks per runfile {max([len(chunk) for chunk in CONFIG_CHUNKS.values()])}"
-)
 logging.info(f"Partitions: {RUN_PARTITIONS}")
 # Get input
 input("Press Enter to continue...")
 
 
-for k, config_strings in CONFIG_CHUNKS.items():
-    if len(config_strings) == 0:
+for k, v in groups_alloc.items():
+    config_filenames = v["config_filenames"]
+    config_filenames = [f"configs/tmp/{cfg}" for cfg in config_filenames]
+    groups = v["groups"]
+    if len(config_filenames) == 0:
         continue
 
+    # get timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # create hash from timestamp
+    hash = hashlib.sha256(timestamp.encode()).hexdigest()[:8]
     RUN_PARTITION = RUN_PARTITIONS[k]
-    RUN_FILENAME = f"run_{EXPERIMENT_NAME}_{k}.sh"
+    RUN_FILENAME = f"run_{EXPERIMENT_NAME}_{k}_{hash}.sh"
+    RUN_ARGS_FILENAME = f"run_{EXPERIMENT_NAME}_{k}_{hash}_args.json"
 
-    with open("run_multiple_configs_parallel.sh", "r") as f:
+    with open(f"args/{RUN_ARGS_FILENAME}", "w") as f:
+        json.dump({"config_filenames": config_filenames, "groups": groups}, f)
+
+    with open("run_stacked_configs.sh", "r") as f:
         run_script = f.read()
 
-    run_script = run_script.replace(
-        'CONFIGS_LIST=""', f'CONFIGS_LIST="{" ".join(config_strings)}"'
-    )
-    run_script = run_script.replace("NPROCS=4", f"NPROCS={NPROCS}")
     run_script = run_script.replace(
         "#SBATCH --partition statds",
         f"#SBATCH --partition {RUN_PARTITION}",
     )
-
+    run_script = run_script.replace(
+        'ARGS_FILENAME=""', f'ARGS_FILENAME="run_files/args/{RUN_ARGS_FILENAME}"'
+    )
     with open(RUN_FILENAME, "w") as f:
         f.write(run_script)
 
@@ -109,5 +162,5 @@ for k, config_strings in CONFIG_CHUNKS.items():
     st = os.stat(RUN_FILENAME)
     os.chmod(RUN_FILENAME, st.st_mode | stat.S_IEXEC)
     os.system(f"sbatch {RUN_FILENAME}")
-    time.sleep(0.5)
+    time.sleep(1)
     os.remove(RUN_FILENAME)

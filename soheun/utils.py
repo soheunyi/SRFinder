@@ -150,13 +150,19 @@ def compare_values(values: list[tuple[int, any]]):
     for idx, value in values[1:]:
         if isinstance(reference_value, list):
             if len(reference_value) != len(value):
-                return False, f"Length mismatch: {len(reference_value)} != {len(value)}"
-            for r, v in zip(reference_value, value):
+                return (
+                    False,
+                    f"Length mismatch at index {idx}: {len(reference_value)} != {len(value)}",
+                )
+            for i, (r, v) in enumerate(zip(reference_value, value)):
                 if r != v:
-                    return False, f"Value mismatch: {r} != {v}"
+                    return (
+                        False,
+                        f"Value mismatch at list element {i} for index {idx}: {r} != {v}",
+                    )
         elif reference_value != value:
-            return False, f"Value mismatch: {reference_value} != {value}"
-    return True
+            return False, f"Value mismatch at index {idx}: {reference_value} != {value}"
+    return True, ""
 
 
 if __name__ == "__main__":

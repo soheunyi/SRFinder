@@ -6,6 +6,7 @@ from dataset import MotherSamples
 from events_data import EventsData, events_from_scdinfo
 from constants import FEATURES
 from signal_region import get_SR_CR_cut, compute_sr_stats
+import time
 
 
 def get_step_3_tinfo_events(
@@ -64,6 +65,7 @@ def get_step_3_tinfo_events(
         ms_hash=tinfo_0.ms_hash,
         ms_idx=CR_ms_idx_bool,
     )
+
     return CR_fvt_tinfo, events_train, events_tst, SR_idx_train, SR_idx
 
 

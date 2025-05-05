@@ -1,22 +1,13 @@
 from copy import deepcopy
 import logging
 import torch
-import pandas as pd
-import numpy as np
 import pytorch_lightning as pl
-import click
-import yaml
 from torch.utils.data import TensorDataset
 
 
-from attention_classifier import AttentionClassifier
-from dataset import MotherSamples
-from events_data import EventsData, events_from_scdinfo
-from fvt_classifier import FvTClassifier
 from stacked_fvt import StackedFvTClassifier
 from training_info import TrainingInfo
-from utils import require_keys, validate_consistent_hparams
-from signal_region import get_SR_CR_cut, compute_sr_stats
+from utils import validate_consistent_hparams
 from constants import FEATURES
 
 
@@ -91,17 +82,54 @@ def train_stacked_fvt(
     }
 
     train_datasets = []
+    train_lengths = []
     val_datasets = []
+    val_lengths = []
     for tinfo in tinfos:
         train_dset, val_dset = tinfo.fetch_train_val_tensor_datasets(
             FEATURES, "fourTag", "weight"
         )
         train_datasets.append(train_dset)
+        train_lengths.append(len(train_dset))
         val_datasets.append(val_dset)
+        val_lengths.append(len(val_dset))
+
+    print(train_lengths, flush=True)
+    print(val_lengths, flush=True)
+    # assert their length is not so different
+    min_train_length = min(train_lengths)
+    min_val_length = min(val_lengths)
+    max_train_length = max(train_lengths)
+    max_val_length = max(val_lengths)
+    assert (
+        min_train_length / max_train_length > 0.975
+        and min_val_length / max_val_length > 0.975
+    ), " ".join(
+        [
+            "Train and val lengths are too different",
+            f"min_train_length: {min_train_length}",
+            f"max_train_length: {max_train_length}",
+            f"min_val_length: {min_val_length}",
+            f"max_val_length: {max_val_length}",
+        ]
+    )
+    # truncate the train and val datasets to the minimum length
+    print(f"Truncating train and val datasets to the minimum length", flush=True)
+    for i in range(num_stacks):
+        train_datasets[i] = TensorDataset(
+            train_datasets[i].tensors[0][:min_train_length],
+            train_datasets[i].tensors[1][:min_train_length],
+            train_datasets[i].tensors[2][:min_train_length],
+        )
+        val_datasets[i] = TensorDataset(
+            val_datasets[i].tensors[0][:min_val_length],
+            val_datasets[i].tensors[1][:min_val_length],
+            val_datasets[i].tensors[2][:min_val_length],
+        )
+
     max_epochs = tinfos[0].hparams["max_epochs"]
     train_seed = tinfos[0].hparams["train_seed"]
     experiment_name = tinfos[0].hparams["experiment_name"]
-    step = tinfos[0].hparams["step"]
     optimizer_config = tinfos[0].hparams["optimizer"]
     lr_scheduler_config = tinfos[0].hparams["lr_scheduler"]
     early_stop_patience = tinfos[0].hparams["early_stop_patience"]

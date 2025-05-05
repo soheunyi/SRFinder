@@ -26,7 +26,7 @@ PROB_STATDS = 0.7
 PROB_PHIL = 0.0
 N_RUNFILES = 10
 NPROCS = 10
-RUN_IN_STACKS = True
+
 
 # STEP = 1
 # EXPERIMENT_NAME = "base_fvt_training_ensemble"

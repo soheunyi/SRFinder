@@ -836,3 +836,10 @@ def plot_rewighted_samples_by_model_v2(
     )
     plt.show()
     plt.close("all")
+
+
+def plot_cdf(ax, stats: np.ndarray, weights: np.ndarray, **kwargs):
+    wsum = np.sum(weights)
+    sorted_idx = np.argsort(stats)
+    cdf = np.cumsum(weights[sorted_idx]) / wsum
+    ax.plot(stats[sorted_idx], cdf, **kwargs)

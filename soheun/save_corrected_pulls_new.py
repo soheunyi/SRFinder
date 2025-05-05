@@ -327,7 +327,7 @@ def save_pulls(
             "dataset": lambda x: x["n_3b"] == n_3b
             and x["signal_ratio"] in signal_ratios,
             "aux_info_step": 3,
-            "signal_region": lambda x: x["stats_type"] == "fvt",
+            # "signal_region": lambda x: x["stats_type"] == "fvt",
         },
         return_hparams=True,
     )
