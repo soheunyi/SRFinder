@@ -1,7 +1,11 @@
 import numpy as np
 from constants import FEATURES
 from dataset import MotherSamples
-from ks_test import max_cdf_diff
+from ks_test import (
+    max_cdf_diff,
+    max_cdf_diff_tilted,
+    tilt_correction_via_first_order_approximation,
+)
 from signal_region import compute_sr_stats, get_SR_CR_cut
 from training_info import TrainingInfo
 from events_data import events_from_scdinfo
@@ -36,7 +40,7 @@ loaded_df = {
     path_hh4b_800: df_hh4b_800,
 }
 
-experiment_name = "CR_fvt_training_ensemble_max_HH4b_800"
+experiment_name = "CR_fvt_training_ensemble_max"
 hashes = TrainingInfo.find({"experiment_name": experiment_name})
 
 for hash_ in tqdm(hashes):
@@ -72,16 +76,33 @@ for hash_ in tqdm(hashes):
     )
     SR_idx = SR_stats_tst >= SR_cut
 
-    # SR_stats_tst_SR = SR_stats_tst[SR_idx]
-    # events_tst_SR = events_tst[SR_idx]
-    # fvt_scores_tst_SR = CR_fvt_tinfo.aux_info["fvt_scores_tst_SR"]
-    # reweights_tst_SR = fvt_scores_tst_SR / (1 - fvt_scores_tst_SR)
-    # rw_tst_SR = np.where(
-    #     events_tst_SR.is_4b,
-    #     events_tst_SR.weights,
-    #     reweights_tst_SR * events_tst_SR.weights,
+    SR_stats_tst_SR = SR_stats_tst[SR_idx]
+    events_tst_SR = events_tst[SR_idx]
+    fvt_scores_tst_SR = CR_fvt_tinfo.aux_info["fvt_scores_tst_SR"]
+    reweights_tst_SR = fvt_scores_tst_SR / (1 - fvt_scores_tst_SR)
+    rw_tst_SR = np.where(
+        events_tst_SR.is_4b,
+        events_tst_SR.weights,
+        reweights_tst_SR * events_tst_SR.weights,
+    )
+    is_4b_tst_SR = events_tst_SR.is_4b
+
+    # theta = tilt_correction_via_first_order_approximation(
+    #     SR_stats_tst_SR[is_4b_tst_SR],
+    #     SR_stats_tst_SR[~is_4b_tst_SR],
+    #     rw_tst_SR[is_4b_tst_SR],
+    #     rw_tst_SR[~is_4b_tst_SR],
+    #     verbose=False,
     # )
-    # is_4b_tst_SR = events_tst_SR.is_4b
+    # corrections = np.exp(theta * SR_stats_tst_SR)
+    # max_diff_tilted = max_cdf_diff_tilted(
+    #     SR_stats_tst_SR[is_4b_tst_SR],
+    #     SR_stats_tst_SR[~is_4b_tst_SR],
+    #     rw_tst_SR[is_4b_tst_SR],
+    #     rw_tst_SR[~is_4b_tst_SR],
+    #     theta,
+    #     mode="exponential",
+    # )
 
     # max_diff = max_cdf_diff(
     #     SR_stats_tst_SR[is_4b_tst_SR],
@@ -90,10 +111,25 @@ for hash_ in tqdm(hashes):
     #     rw_tst_SR[~is_4b_tst_SR],
     # )
 
-    events_tst_SR = events_tst[SR_idx]
-    N_3b_SR = np.sum(events_tst_SR.is_3b)
-    N_4b_SR = np.sum(events_tst_SR.is_4b)
+    # events_tst_SR = events_tst[SR_idx]
+    # N_3b_SR = np.sum(events_tst_SR.is_3b)
+    # N_4b_SR = np.sum(events_tst_SR.is_4b)
+    W_3b_SR = np.sum(rw_tst_SR[events_tst_SR.is_3b])
+    W_4b_SR = np.sum(rw_tst_SR[events_tst_SR.is_4b])
+    W2_3b_SR = np.sum(rw_tst_SR[events_tst_SR.is_3b] ** 2)
+    W2_4b_SR = np.sum(rw_tst_SR[events_tst_SR.is_4b] ** 2)
 
     # CR_fvt_tinfo.aux_info.update({"max_cdf_diff": max_diff})
-    CR_fvt_tinfo.aux_info.update({"N_3b_SR": N_3b_SR, "N_4b_SR": N_4b_SR})
+    # CR_fvt_tinfo.aux_info.update({"N_3b_SR": N_3b_SR, "N_4b_SR": N_4b_SR})
+    CR_fvt_tinfo.aux_info.update(
+        {
+            "W_3b_SR": W_3b_SR,
+            "W_4b_SR": W_4b_SR,
+            "W2_3b_SR": W2_3b_SR,
+            "W2_4b_SR": W2_4b_SR,
+        }
+    )
+    # CR_fvt_tinfo.aux_info.update(
+    #     {"tilt_correction": theta, "max_diff_tilted": max_diff_tilted}
+    # )
     CR_fvt_tinfo.save()

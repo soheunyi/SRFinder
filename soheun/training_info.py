@@ -341,8 +341,9 @@ class TrainingInfo:
     def update_aux_info(self, **kwargs):
         self._aux_info.update(kwargs)
 
-    def save(self):
-        logger.info(f"Saving Training Info: {self.hash}")
+    def save(self, disable_logger=False):
+        if not disable_logger:
+            logger.info(f"Saving Training Info: {self.hash}")
         with open(self.SAVE_DIR / self.hash, "wb") as f:
             pickle.dump(self, f)
 

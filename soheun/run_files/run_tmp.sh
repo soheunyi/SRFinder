@@ -19,12 +19,12 @@
 
 ## Choose one:
 
-RUN_FILENAME="run_tmp.py"
+RUN_FILENAME="affine_correction_and_ks_bootstrap.py"
 CONDA_ENV_NAME="coffea_torch"
-# ARGS="--bin_stats_type fvt --bin_ensemble_mode mean --experiment_name CR_fvt_training_ensemble_mean"
+ARGS="--experiment_name CR_fvt_training_ensemble_max --n_samples 2000 --n_reps 1000"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 
 # to run a Python script in a Conda environment called ENV
 cd ..
-srun $PYTHON $RUN_FILENAME
+srun $PYTHON $RUN_FILENAME $ARGS
