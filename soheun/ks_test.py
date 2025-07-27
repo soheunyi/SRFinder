@@ -31,6 +31,25 @@ def max_cdf_diff(
     return max_diff
 
 
+def mean_cdf_diff(
+    stats_1: np.ndarray,
+    stats_2: np.ndarray,
+    weights_1: np.ndarray,
+    weights_2: np.ndarray,
+):
+    stats_merged = np.concatenate([stats_1, stats_2])
+    weights_merged = np.concatenate([normalize(weights_1), normalize(weights_2)])
+    labels_merged = np.concatenate([-np.ones_like(weights_1), np.ones_like(weights_2)])
+    sorted_idx = np.argsort(stats_merged)
+    weights_merged = weights_merged[sorted_idx]
+    labels_merged = labels_merged[sorted_idx]
+
+    cdf_diff = np.cumsum(weights_merged * labels_merged)
+    mean_diff = np.mean(np.abs(cdf_diff))
+
+    return mean_diff
+
+
 def normalize(weights: np.ndarray):
     return weights / np.sum(weights)
 
@@ -359,6 +378,7 @@ def affine_correction(
     weights_3b: np.ndarray,
     weights_4b: np.ndarray,
     grid_size: float = 0.001,
+    cdf_mode: Literal["max", "mean"] = "max",
 ):
 
     # 1. Center stats_3b
@@ -384,15 +404,25 @@ def affine_correction(
             int(correction_slope_max / grid_size) + 1,
         )
     ]
-    max_cdf_diff_grid = np.zeros(len(correction_grid))
+    cdf_diff_grid = np.zeros(len(correction_grid))
     for i, correction_slope in enumerate(correction_grid):
-        max_cdf_diff_grid[i] = max_cdf_diff(
-            stats_3b,
-            stats_4b,
-            affine_tilt(stats_3b_centered, weights_3b, correction_slope, 1),
-            weights_4b,
-        )
-    min_idx = np.argmin(max_cdf_diff_grid)
+        if cdf_mode == "max":
+            cdf_diff_grid[i] = max_cdf_diff(
+                stats_3b,
+                stats_4b,
+                affine_tilt(stats_3b_centered, weights_3b, correction_slope, 1),
+                weights_4b,
+            )
+        elif cdf_mode == "mean":
+            cdf_diff_grid[i] = mean_cdf_diff(
+                stats_3b,
+                stats_4b,
+                affine_tilt(stats_3b_centered, weights_3b, correction_slope, 1),
+                weights_4b,
+            )
+        else:
+            raise ValueError(f"Invalid cdf_mode: {cdf_mode}")
+    min_idx = np.argmin(cdf_diff_grid)
     correction_slope = correction_grid[min_idx]
 
     final_slope = correction_slope / std_3b

@@ -1,5 +1,3 @@
-from typing import Literal
-import warnings
 import numpy as np
 from tqdm import tqdm
 from ks_test import max_cdf_diff

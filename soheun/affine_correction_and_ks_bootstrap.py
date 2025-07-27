@@ -13,17 +13,19 @@ from tqdm import tqdm
 @click.command()
 @click.option("--experiment_name", type=str)
 @click.option("--n_reps", type=int)
-def main(experiment_name: str, n_reps: int):
-
+@click.option("--signal_ratio", type=float)
+@click.option("--cdf_mode", type=str)
+def main(experiment_name: str, n_reps: int, signal_ratio: float, cdf_mode: str):
+    print(f"experiment_name: {experiment_name}, signal_ratio: {signal_ratio}")
     hashes = TrainingInfo.find(
         {
             "experiment_name": experiment_name,
-            "dataset": lambda x: x["signal_ratio"] != 0.0,
+            "dataset": lambda x: x["signal_ratio"] == signal_ratio,
         }
     )
 
     random_seed = 0
-    grid_size = 0.001
+    grid_size = 0.005
 
     np.random.seed(random_seed)
 
@@ -75,7 +77,12 @@ def main(experiment_name: str, n_reps: int):
         weights_4b_rw = rw_tst_SR[is_4b_tst_SR]
 
         correction_slope, correction_intercept = affine_correction(
-            stats_3b, stats_4b, weights_3b_rw, weights_4b_rw, grid_size=grid_size
+            stats_3b,
+            stats_4b,
+            weights_3b_rw,
+            weights_4b_rw,
+            grid_size=grid_size,
+            cdf_mode=cdf_mode,
         )
 
         stats_3b_mean = np.sum(weights_3b_rw * stats_3b) / np.sum(weights_3b_rw)
@@ -91,21 +98,38 @@ def main(experiment_name: str, n_reps: int):
             "stats_3b_std": stats_3b_std,
         }
 
-        null_max_cdf_diffs = null_max_cdf_diff_bootstrap(
+        null_max_cdf_diffs_no_correction = null_max_cdf_diff_bootstrap(
             stats_3b,
             stats_4b,
-            affine_tilt(
-                stats_3b, weights_3b_rw, correction_slope, correction_intercept
-            ),
+            normalize(weights_3b_rw),
             normalize(weights_4b_rw),
-            n_samples_1=n_samples,
-            n_samples_2=n_samples,
             n_reps=n_reps,
             random_seed=random_seed,
             do_tqdm=False,
+            n_jobs=4,
         )
 
-        alt_max_cdf_diff = max_cdf_diff(
+        alt_max_cdf_diff_no_correction = max_cdf_diff(
+            stats_3b,
+            stats_4b,
+            normalize(weights_3b_rw),
+            normalize(weights_4b_rw),
+        )
+
+        null_max_cdf_diffs_correction = null_max_cdf_diff_bootstrap(
+            stats_3b,
+            stats_4b,
+            affine_tilt(
+                stats_3b, weights_3b_rw, correction_slope, correction_intercept
+            ),
+            normalize(weights_4b_rw),
+            n_reps=n_reps,
+            random_seed=random_seed,
+            do_tqdm=False,
+            n_jobs=4,
+        )
+
+        alt_max_cdf_diff_correction = max_cdf_diff(
             stats_3b,
             stats_4b,
             affine_tilt(
@@ -114,16 +138,26 @@ def main(experiment_name: str, n_reps: int):
             normalize(weights_4b_rw),
         )
 
-        results["alt_value"] = alt_max_cdf_diff
-        results["null_values"] = null_max_cdf_diffs
+        results["alt_value_no_correction"] = alt_max_cdf_diff_no_correction
+        results["alt_value_correction"] = alt_max_cdf_diff_correction
+        results["null_values_no_correction"] = null_max_cdf_diffs_no_correction
+        results["null_values_correction"] = null_max_cdf_diffs_correction
 
-        p_value = np.sum(null_max_cdf_diffs >= alt_max_cdf_diff) / len(
-            null_max_cdf_diffs
-        )
-        results["p_value"] = p_value
+        p_value_no_correction = np.sum(
+            null_max_cdf_diffs_no_correction >= alt_max_cdf_diff_no_correction
+        ) / len(null_max_cdf_diffs_no_correction)
+        p_value_correction = np.sum(
+            null_max_cdf_diffs_correction >= alt_max_cdf_diff_correction
+        ) / len(null_max_cdf_diffs_correction)
+
+        print(f"p_value_no_correction: {p_value_no_correction}")
+        print(f"p_value_correction: {p_value_correction}")
+
+        results["p_value_no_correction"] = p_value_no_correction
+        results["p_value_correction"] = p_value_correction
 
         CR_fvt_tinfo.aux_info[
-            f"affine_correction_and_ks_poisson_bootstrap_n_reps={n_reps}"
+            f"affine_correction_and_ks_poisson_bootstrap_n_reps={n_reps}_cdf_mode={cdf_mode}"
         ] = results
         CR_fvt_tinfo.save()
 
