@@ -96,8 +96,6 @@ def main(experiment_name: str, n_reps: int, signal_ratio: float, cdf_mode: str):
             "correction_intercept": correction_intercept,
             "stats_3b_mean": stats_3b_mean,
             "stats_3b_std": stats_3b_std,
-            "stats_3b_min": np.min(stats_3b),
-            "stats_3b_max": np.max(stats_3b),
         }
 
         null_max_cdf_diffs_no_correction = null_max_cdf_diff_bootstrap(

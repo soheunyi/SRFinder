@@ -546,8 +546,17 @@ def plot_cluster_1d(ax0, ax1, q_repr, is_3b, is_bg4b, is_signal, weights):
 
 
 def hist_events_by_labels(
-    events: EventsData, values: np.ndarray, bins, ax, errorbar=False, **hist_kwargs
+    events: EventsData,
+    values: np.ndarray,
+    bins,
+    ax,
+    errorbar=False,
+    labels={"3b": "3b", "bg4b": "bg4b", "signal": "signal"},
+    **hist_kwargs,
 ):
+    assert "3b" in labels
+    assert "bg4b" in labels
+    assert "signal" in labels
     assert len(values) == len(events)
     color_3b = hist_kwargs.pop("color_3b", plt.get_cmap("tab10").colors[0])
     color_4b = hist_kwargs.pop("color_4b", plt.get_cmap("tab10").colors[1])
@@ -558,7 +567,7 @@ def hist_events_by_labels(
         values[events.is_3b],
         bins=bins,
         histtype="step",
-        label="3b",
+        label=labels["3b"],
         weights=events.weights[events.is_3b],
         color=color_3b,
         **hist_kwargs,
@@ -567,7 +576,7 @@ def hist_events_by_labels(
         values[events.is_bg4b],
         bins=bins,
         histtype="step",
-        label="bg4b",
+        label=labels["bg4b"],
         weights=events.weights[events.is_bg4b],
         color=color_4b,
         **hist_kwargs,
@@ -576,7 +585,7 @@ def hist_events_by_labels(
         values[events.is_signal],
         bins=bins,
         histtype="step",
-        label="signal",
+        label=labels["signal"],
         weights=events.weights[events.is_signal],
         color=color_signal,
         **hist_kwargs,
@@ -727,11 +736,11 @@ def plot_samples_raw(
         ax.stairs(
             hist_3b,
             bins,
-            label="Reweighted 3b",
+            label=r"Reweighted $3b$",
             color=plt.get_cmap("tab10").colors[0],
         )
     if not no_4b:
-        ax.stairs(hist_4b, bins, label="4b", color=plt.get_cmap("tab10").colors[1])
+        ax.stairs(hist_4b, bins, label=r"$4b$", color=plt.get_cmap("tab10").colors[1])
     if errorbar == "4b":
         ax.errorbar(
             midpoints,
@@ -741,7 +750,7 @@ def plot_samples_raw(
             capsize=3,
             fmt="o",
             markersize=2,
-            label="Std. of 4b",
+            label=r"Std. of $4b$",
         )
     elif errorbar == "3b":
         ax.errorbar(
@@ -752,7 +761,7 @@ def plot_samples_raw(
             capsize=3,
             fmt="o",
             markersize=2,
-            label="Std. of reweighted 3b",
+            label=r"Std. of reweighted $3b$",
         )
     elif errorbar is False:
         pass

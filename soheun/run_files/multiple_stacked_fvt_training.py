@@ -27,10 +27,31 @@ TrainingInfo.update_metadata()
 ######################### Set Experiment Name and N Runfiles #########################
 ######################################################################################
 
-PROB_STATDS = 0.7
-PROB_PHIL = 0.0
-N_RUNFILES = 10
+N_STATDS = 4
+N_PHIL = 0
+N_RUNFILES = 8
 
+
+# STEP = 1
+# GROUP_KEYS = [
+#     "dataset.signal_ratio",
+#     "base_fvt.model_seed",
+#     "base_fvt.train_seed",
+#     "base_fvt.data_seed",
+# ]
+# EXPERIMENT_NAME = "base_fvt_training_ensemble_ZH4b"
+# BASE_CONFIG_FILENAME = "better_fvt_training.yml"
+
+# STEP = 2
+# GROUP_KEYS = [
+#     "dataset.signal_ratio",
+#     "smeared_fvt.model_seed",
+#     "smeared_fvt.train_seed",
+#     "smeared_fvt.data_seed",
+#     "smearing.noise_scale",
+# ]
+# EXPERIMENT_NAME = "smeared_fvt_training_ensemble"
+# BASE_CONFIG_FILENAME = "smeared_fvt_training.yml"
 
 STEP = 3
 GROUP_KEYS = [
@@ -42,39 +63,12 @@ GROUP_KEYS = [
     "CR_fvt.model_seed",
     "CR_fvt.data_seed",
 ]
-EXPERIMENT_NAME = "CR_fvt_training_ensemble_mean"
+EXPERIMENT_NAME = "CR_fvt_training_ensemble_max"
 BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"
 
 config_filenames, configs_to_run = write_and_get_configs_to_run(
-    STEP, EXPERIMENT_NAME, BASE_CONFIG_FILENAME, use_cached_configs=True
+    STEP, EXPERIMENT_NAME, BASE_CONFIG_FILENAME
 )
-critical_hparams = [
-    "model",
-    "dim_dijet_features",
-    "dim_quadjet_features",
-    "depth.encoder",
-    "depth.decoder",
-    "fit_batch_size",
-    "model_seed",
-    "train_seed",
-    "data_seed",
-    "max_epochs",
-    "val_ratio",
-    "early_stop_patience",
-    "optimizer.type",
-    "optimizer.lr",
-    "lr_scheduler.type",
-    "lr_scheduler.factor",
-    "lr_scheduler.threshold",
-    "lr_scheduler.patience",
-    "lr_scheduler.cooldown",
-    "lr_scheduler.min_lr",
-    "dataloader.batch_size",
-    "dataloader.batch_size_multiplier",
-    "dataloader.batch_size_milestones",
-    "encoder_mode",
-    "repr_norm",
-]
 
 
 def get_values_to_group(config: dict[str, any], group_keys: list[str]):
@@ -113,14 +107,11 @@ for i in range(n_groups):
     groups_alloc[runfile_idx]["config_filenames"].extend(group)
 
 
-RUN_PARTITIONS = []
-for _ in range(N_RUNFILES):
-    if np.random.rand() < PROB_STATDS:
-        RUN_PARTITIONS.append("statds")
-    elif np.random.rand() < PROB_PHIL + PROB_STATDS:
-        RUN_PARTITIONS.append("phil_condo")
-    else:
-        RUN_PARTITIONS.append("cmist_condo")
+RUN_PARTITIONS = (
+    ["statds"] * N_STATDS
+    + ["phil_condo"] * N_PHIL
+    + ["cmist_condo"] * (N_RUNFILES - N_STATDS - N_PHIL)
+)
 
 logging.info(f"Partitions: {RUN_PARTITIONS}")
 # Get input

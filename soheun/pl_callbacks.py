@@ -134,7 +134,14 @@ class ReweightedPlotCallback(Callback):
 
 
 class SaveIndividualClassifierCallback(pl.Callback):
-    def __init__(self, save_dir: str, run_names: list[str], monitor_metrics: list[str]):
+    def __init__(
+        self,
+        save_dir: str,
+        run_names: list[str],
+        monitor_metrics: list[str],
+        model="FvTClassifier",
+    ):
+        assert model in ["FvTClassifier", "AttentionClassifier"]
         super().__init__()
         self.save_dir = pathlib.Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -142,6 +149,7 @@ class SaveIndividualClassifierCallback(pl.Callback):
         self.run_names = run_names
         self.monitor_metrics = monitor_metrics
         self.best_scores = {metric: float("inf") for metric in monitor_metrics}
+        self.model = model
 
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
@@ -161,8 +169,20 @@ class SaveIndividualClassifierCallback(pl.Callback):
             if current_score < self.best_scores[metric]:
                 self.best_scores[metric] = current_score
                 save_path = self.save_dir / f"{run_name}_best.pt"
-                torch.save(pl_module.fvt_classifiers[i].state_dict(), save_path)
+                if self.model == "FvTClassifier":
+                    torch.save(pl_module.fvt_classifiers[i].state_dict(), save_path)
+                elif self.model == "AttentionClassifier":
+                    torch.save(
+                        pl_module.attention_classifiers[i].state_dict(), save_path
+                    )
+                else:
+                    raise ValueError(f"Invalid model: {self.model}")
 
             # Always save latest
             save_path = self.save_dir / f"{run_name}_last.pt"
-            torch.save(pl_module.fvt_classifiers[i].state_dict(), save_path)
+            if self.model == "FvTClassifier":
+                torch.save(pl_module.fvt_classifiers[i].state_dict(), save_path)
+            elif self.model == "AttentionClassifier":
+                torch.save(pl_module.attention_classifiers[i].state_dict(), save_path)
+            else:
+                raise ValueError(f"Invalid model: {self.model}")

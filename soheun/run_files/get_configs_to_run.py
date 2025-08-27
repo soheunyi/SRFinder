@@ -69,14 +69,28 @@ def check_dataset_conditions(
     )
 
 
-def step_1_get_configs_to_run(
-    EXPERIMENT_NAME: str, base_config: dict, use_cached_configs: bool = False
-):
-    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
-    signal_ratios = [0.005, 0.0075, 0.01, 0.02]
-    dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
+def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
+
+    dataset_seeds = range(100)
     ensemble_seeds = range(15)
-    signal_filename = "HH4b_800.h5"
+
+    if EXPERIMENT_NAME == "base_fvt_training_ensemble":
+        signal_filename = "HH4b_picoAOD.h5"
+        signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "base_fvt_training_ensemble_HH4b_400":
+        signal_filename = "HH4b_400.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "base_fvt_training_ensemble_HH4b_800":
+        signal_filename = "HH4b_800.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "base_fvt_training_ensemble_ZH4b":
+        signal_filename = "ZH4b_picoAOD_cleaned.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "base_fvt_training_ensemble_ZZ4b":
+        signal_filename = "ZZ4b_picoAOD_cleaned.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    else:
+        raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
 
     hparams_filter = {
         "experiment_name": EXPERIMENT_NAME,
@@ -132,11 +146,16 @@ def step_1_get_configs_to_run(
     return config_filenames, configs_to_run
 
 
-def step_2_get_configs_to_run(
-    EXPERIMENT_NAME: str, base_config: dict, use_cached_configs: bool = False
-):
+def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     ensemble_seeds = range(15)
-    dataset_seeds = range(50)  # start with ten seeds, will be increased to fifty later
+    dataset_seeds = range(50, 100)
+    # noise_scales = [0.5, 1.0]
+    # noise_scales = [2.0, 3.0]
+    noise_scales = [0.5, 1.0, 2.0, 3.0]
+
+    # ensemble_seeds = range(1)
+    # dataset_seeds = range(50, 100)
+    # noise_scales = [2.0]
 
     # signal_ratios = [0.005, 0.0075, 0.01, 0.02]
     # noise_scales = [0.5, 1.0, 2.0, 3.0]
@@ -146,9 +165,9 @@ def step_2_get_configs_to_run(
 
     # noise_scales = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
     # noise_scales = [0.5, 1.0]
-    noise_scales = [2.0, 3.0]
+    # noise_scales = [2.0, 3.0]
     # base_experiment_name = "base_fvt_training_ensemble"
-    signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+    # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
     # signal_filename = "HH4b_picoAOD.h5"
 
     if EXPERIMENT_NAME == "smeared_fvt_training_ensemble":
@@ -241,10 +260,8 @@ def step_2_get_configs_to_run(
     return config_filenames, configs_to_run
 
 
-def step_3_get_configs_to_run(
-    EXPERIMENT_NAME: str, base_config: dict, use_cached_configs: bool = False
-):
-    dataset_seeds = range(50)
+def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
+    dataset_seeds = range(50, 100)
     ensemble_seeds = range(1)
     SR_CR_sizes = [
         (0.05, 0.95),
@@ -369,10 +386,6 @@ def step_3_get_configs_to_run(
         postfixs.append(postfix)
         config_filename = f"{EXPERIMENT_NAME}_{postfix}.yml"
         config_filenames.append(config_filename)
-        if use_cached_configs:
-            config = yaml.safe_load(open(f"../configs/tmp/{config_filename}", "r"))
-            configs_to_run.append(config)
-            continue
 
         config = deepcopy(base_config)
         config["experiment_name"] = EXPERIMENT_NAME
@@ -447,9 +460,7 @@ def step_3_get_configs_to_run(
     return config_filenames, configs_to_run
 
 
-def step_4_get_configs_to_run(
-    EXPERIMENT_NAME: str, base_config: dict, use_cached_configs: bool = False
-):
+def step_4_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
     dataset_seeds = range(50)
     SR_CR_sizes = [(0.05, 0.95), (0.1, 0.9), (0.15, 0.85), (0.2, 0.8)]
@@ -506,27 +517,24 @@ def step_4_get_configs_to_run(
 
 
 def write_and_get_configs_to_run(
-    STEP: int,
-    EXPERIMENT_NAME: str,
-    BASE_CONFIG_FILENAME: str,
-    use_cached_configs: bool = False,
+    STEP: int, EXPERIMENT_NAME: str, BASE_CONFIG_FILENAME: str
 ):
     base_config = get_base_config(BASE_CONFIG_FILENAME)
     if STEP == 1:
         config_filenames, configs_to_run = step_1_get_configs_to_run(
-            EXPERIMENT_NAME, base_config, use_cached_configs
+            EXPERIMENT_NAME, base_config
         )
     elif STEP == 2:
         config_filenames, configs_to_run = step_2_get_configs_to_run(
-            EXPERIMENT_NAME, base_config, use_cached_configs
+            EXPERIMENT_NAME, base_config
         )
     elif STEP == 3:
         config_filenames, configs_to_run = step_3_get_configs_to_run(
-            EXPERIMENT_NAME, base_config, use_cached_configs
+            EXPERIMENT_NAME, base_config
         )
     elif STEP == 4:
         config_filenames, configs_to_run = step_4_get_configs_to_run(
-            EXPERIMENT_NAME, base_config, use_cached_configs
+            EXPERIMENT_NAME, base_config
         )
     else:
         raise ValueError(f"Unsupported step: {STEP}")

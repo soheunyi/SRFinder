@@ -41,6 +41,9 @@ def symmetrize_df(df: pd.DataFrame):
         df[f"sym_Jet{i}_pt"] = df[f"Jet{i}_pt"]
         df[f"sym_Jet{i}_m"] = df[f"Jet{i}_m"]
 
+    # normalize weights to be similar to HH4b
+    df["weight"] = df["weight"] * (1.069797 / df["weight"].mean())
+
     return df
 
 

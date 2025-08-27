@@ -2,6 +2,8 @@ import json
 import os
 import click
 import yaml
+from step_1_stacked_base_fvt_training import routine as step_1_stacked_routine
+from step_2_stacked_smeared_fvt_training import routine as step_2_stacked_routine
 from step_3_stacked_define_CR_and_train_fvt import routine as step_3_stacked_routine
 import logging
 from training_info import TrainingInfo
@@ -24,7 +26,11 @@ def run_stacked_process_with_id(configs: list[dict]):
     file_handler.setFormatter(formatter)
     logging.getLogger().addHandler(file_handler)
 
-    if step == 3:
+    if step == 1:
+        step_1_stacked_routine(configs, file_handler)
+    elif step == 2:
+        step_2_stacked_routine(configs, file_handler)
+    elif step == 3:
         step_3_stacked_routine(configs, file_handler)
     else:
         raise ValueError(f"Step {step} not supported for stacked process")

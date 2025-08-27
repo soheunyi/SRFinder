@@ -5,10 +5,12 @@ import pytorch_lightning as pl
 from torch.utils.data import TensorDataset
 
 
-from stacked_fvt import StackedFvTClassifier
+from stacked_attention_classifier import StackedAttentionClassifier
 from training_info import TrainingInfo
 from utils import validate_consistent_hparams
 from constants import FEATURES
+
+DIM_Q = 6
 
 
 ###########################################################################################
@@ -17,7 +19,7 @@ from constants import FEATURES
 ###########################################################################################
 
 
-def train_stacked_fvt(
+def train_stacked_attention_classifiers(
     tinfos: list[TrainingInfo],
     file_handler: logging.FileHandler | None = None,
 ):
@@ -26,10 +28,8 @@ def train_stacked_fvt(
         "experiment_name",
         "step",
         "model",
-        "dim_dijet_features",
         "dim_quadjet_features",
-        "depth.encoder",
-        "depth.decoder",
+        "depth",
         "fit_batch_size",
         "model_seed",
         "train_seed",
@@ -49,7 +49,6 @@ def train_stacked_fvt(
         "dataloader.batch_size_multiplier",
         "dataloader.batch_size_milestones",
         "encoder_mode",
-        "repr_norm",
     ]
 
     num_stacks = len(tinfos)
@@ -62,22 +61,16 @@ def train_stacked_fvt(
         raise ValueError(f"Critical hyperparameters are not consistent: {mismatches}")
 
     model_seed = tinfos[0].hparams["model_seed"]
-    dim_dijet_features = tinfos[0].hparams["dim_dijet_features"]
-    dim_quadjet_features = tinfos[0].hparams["dim_quadjet_features"]
     depth = tinfos[0].hparams["depth"]
-    repr_norm = tinfos[0].hparams["repr_norm"]
     run_names = [tinfo.hash for tinfo in tinfos]
 
     stacked_hparams = {
         "num_stacks": num_stacks,  # Use actual number of seeds
         "num_classes": 2,
-        "dim_input_jet_features": 4,
-        "dim_dijet_features": dim_dijet_features,
-        "dim_quadjet_features": dim_quadjet_features,
+        "dim_quadjet_features": DIM_Q,
         "run_names": run_names,
         "stacked_run_name": "_".join([run_names[0], str(num_stacks)]),
         "depth": depth,
-        "repr_norm": repr_norm,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     }
 
@@ -86,7 +79,7 @@ def train_stacked_fvt(
     val_datasets = []
     val_lengths = []
     for tinfo in tinfos:
-        train_dset, val_dset = tinfo.fetch_train_val_tensor_datasets(
+        train_dset, val_dset = tinfo.fetch_train_val_smeared_features(
             FEATURES, "fourTag", "weight"
         )
         train_datasets.append(train_dset)
@@ -102,8 +95,8 @@ def train_stacked_fvt(
     max_train_length = max(train_lengths)
     max_val_length = max(val_lengths)
     assert (
-        min_train_length / max_train_length > 0.95
-        and min_val_length / max_val_length > 0.95
+        min_train_length / max_train_length > 0.975
+        and min_val_length / max_val_length > 0.975
     ), " ".join(
         [
             "Train and val lengths are too different",
@@ -152,13 +145,13 @@ def train_stacked_fvt(
     }
 
     pl.seed_everything(model_seed)
-    stacked_model = StackedFvTClassifier(**stacked_hparams)
+    stacked_model = StackedAttentionClassifier(**stacked_hparams)
     stacked_model.fit(**fit_args)
 
     stacked_model.eval()
     stacked_model.to(
         torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     )
-    stacked_model: StackedFvTClassifier
+    stacked_model: StackedAttentionClassifier
 
     return stacked_model

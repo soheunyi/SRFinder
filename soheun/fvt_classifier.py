@@ -135,13 +135,20 @@ class FvTClassifier(pl.LightningModule):
         q = self.encoder(x)
         class_score = self.attention_classifier(q)
 
+        if torch.isnan(q).any():
+            print("NaN found in forward: q")
+            print("x", x)
+            print("q", q)
+
+            raise ValueError("NaN found in forward: q")
+
         if torch.isnan(class_score).any():
-            print("NaN found in forward")
+            print("NaN found in forward: class_score")
             print("x", x)
             print("q", q)
             print("class_score", class_score)
 
-            raise ValueError("NaN found in forward")
+            raise ValueError("NaN found in forward: class_score")
 
         return class_score
 

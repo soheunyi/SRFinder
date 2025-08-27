@@ -21,7 +21,7 @@ def get_M01(
 ):
     E0 = PtEtaPhiM_to_E(Pt0, Eta0, Phi0, m0)
     E1 = PtEtaPhiM_to_E(Pt1, Eta1, Phi1, m1)
-    return (
+    M01_sq = (
         m0**2
         + m1**2
         + 2
@@ -29,7 +29,9 @@ def get_M01(
             E0 * E1
             - Pt0 * Pt1 * (torch.cos(Phi0 - Phi1) + torch.sinh(Eta0) * torch.sinh(Eta1))
         )
-    ) ** 0.5
+    )
+    # return torch.sqrt(torch.clamp(M01_sq, min=0.0))
+    return torch.sqrt(M01_sq)
 
 
 def PtEtaPhi_to_PxPyPz(Pt, Eta, Phi):

@@ -15,6 +15,7 @@ smearing:
   scale_mode: std
 smeared_fvt:
   model: AttentionClassifier
+  dim_quadjet_features: 6
   depth: 8
   fit_batch_size: 1024
   model_seed: 0

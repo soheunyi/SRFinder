@@ -21,7 +21,9 @@
 
 RUN_FILENAME="affine_correction_and_ks_bootstrap.py"
 CONDA_ENV_NAME="coffea_torch"
-ARGS="--experiment_name CR_fvt_training_ensemble_max --n_reps 1000 --signal_ratio 0.0 --cdf_mode mean"
+ARGS="--n_reps 1000 --cdf_mode mean"
+ARGS="$ARGS --experiment_name CR_fvt_training_ensemble_max_HH4b_800"	
+ARGS="$ARGS --signal_ratio 0.005"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 

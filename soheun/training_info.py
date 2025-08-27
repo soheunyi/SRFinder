@@ -99,6 +99,7 @@ class TrainingInfo:
                     dim_q=self.hparams["dim_quadjet_features"],
                     num_classes=2,
                     depth=self.hparams["depth"],
+                    run_name=self._hash,
                 )
                 model.load_state_dict(torch.load(ckpt_dir / name))
                 return model
