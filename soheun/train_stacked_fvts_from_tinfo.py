@@ -102,8 +102,8 @@ def train_stacked_fvt(
     max_train_length = max(train_lengths)
     max_val_length = max(val_lengths)
     assert (
-        min_train_length / max_train_length > 0.95
-        and min_val_length / max_val_length > 0.95
+        min_train_length / max_train_length > 0.9
+        and min_val_length / max_val_length > 0.9
     ), " ".join(
         [
             "Train and val lengths are too different",

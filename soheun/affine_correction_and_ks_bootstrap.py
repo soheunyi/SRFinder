@@ -1,3 +1,4 @@
+from typing import Literal
 import numpy as np
 from constants import FEATURES
 from dataset import MotherSamples
@@ -15,14 +16,20 @@ from tqdm import tqdm
 @click.option("--n_reps", type=int)
 @click.option("--signal_ratio", type=float)
 @click.option("--cdf_mode", type=str)
-def main(experiment_name: str, n_reps: int, signal_ratio: float, cdf_mode: str):
+def main(
+    experiment_name: str,
+    n_reps: int,
+    signal_ratio: float,
+    cdf_mode: Literal["max", "mean"],
+):
     print(f"experiment_name: {experiment_name}, signal_ratio: {signal_ratio}")
     hashes = TrainingInfo.find(
         {
             "experiment_name": experiment_name,
-            "dataset": lambda x: x["signal_ratio"] == signal_ratio,
+            "dataset": (lambda x: x["signal_ratio"] == signal_ratio),
         }
     )
+    # assert isinstance(hashes, list), "Expected list return type"
 
     random_seed = 0
     grid_size = 0.005
@@ -31,6 +38,13 @@ def main(experiment_name: str, n_reps: int, signal_ratio: float, cdf_mode: str):
 
     for hash_ in tqdm(hashes):
         CR_fvt_tinfo = TrainingInfo.load(hash_)
+
+        if (
+            f"affine_correction_and_ks_poisson_bootstrap_n_reps={n_reps}_cdf_mode={cdf_mode}"
+            in CR_fvt_tinfo.aux_info
+        ):
+            continue
+
         SR_stats_hashes = CR_fvt_tinfo.hparams["signal_region"]["SR_stats_hashes"]
         ensemble_mode = CR_fvt_tinfo.hparams["signal_region"]["ensemble_mode"]
         stats_type = CR_fvt_tinfo.hparams["signal_region"]["stats_type"]
@@ -165,4 +179,4 @@ def main(experiment_name: str, n_reps: int, signal_ratio: float, cdf_mode: str):
 
 
 if __name__ == "__main__":
-    main()
+    main()  # type: ignore

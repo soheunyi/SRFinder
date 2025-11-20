@@ -14,8 +14,11 @@
 		"config/**",
 		"tb_logs/**",
 	],
+	"typeCheckingMode": "off",
 	"ignore": [
-		"**/*.pyc"
+		"**/*.pyc",
+		"notebooks/**",
+		"**/.ipynb_checkpoints/**"
 	],
 	"reportMissingImports": true,
 	"reportMissingTypeStubs": false,

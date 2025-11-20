@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Any
 import tqdm
 import yaml
 from itertools import product
@@ -85,7 +86,7 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         signal_ratios = [0.005, 0.0075, 0.01, 0.02]
     elif EXPERIMENT_NAME == "base_fvt_training_ensemble_ZH4b":
         signal_filename = "ZH4b_picoAOD_cleaned.h5"
-        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02, 0.03, 0.05]
     elif EXPERIMENT_NAME == "base_fvt_training_ensemble_ZZ4b":
         signal_filename = "ZZ4b_picoAOD_cleaned.h5"
         signal_ratios = [0.005, 0.0075, 0.01, 0.02]
@@ -148,10 +149,10 @@ def step_1_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     ensemble_seeds = range(15)
-    dataset_seeds = range(50, 100)
+    dataset_seeds = range(100)
     # noise_scales = [0.5, 1.0]
     # noise_scales = [2.0, 3.0]
-    noise_scales = [0.5, 1.0, 2.0, 3.0]
+    noise_scales = [0.1, 0.5, 1.0, 2.0, 3.0]
 
     # ensemble_seeds = range(1)
     # dataset_seeds = range(50, 100)
@@ -173,7 +174,8 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     if EXPERIMENT_NAME == "smeared_fvt_training_ensemble":
         base_experiment_name = "base_fvt_training_ensemble"
         signal_filename = "HH4b_picoAOD.h5"
-        signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+        # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+        signal_ratios = [0.0, 0.01, 0.02]
     elif EXPERIMENT_NAME == "smeared_fvt_training_ensemble_HH4b_400":
         base_experiment_name = "base_fvt_training_ensemble_HH4b_400"
         signal_filename = "HH4b_400.h5"
@@ -181,6 +183,14 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     elif EXPERIMENT_NAME == "smeared_fvt_training_ensemble_HH4b_800":
         base_experiment_name = "base_fvt_training_ensemble_HH4b_800"
         signal_filename = "HH4b_800.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+    elif EXPERIMENT_NAME == "smeared_fvt_training_ensemble_ZH4b":
+        base_experiment_name = "base_fvt_training_ensemble_ZH4b"
+        signal_filename = "ZH4b_picoAOD_cleaned.h5"
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02, 0.03, 0.05]
+    elif EXPERIMENT_NAME == "smeared_fvt_training_ensemble_ZZ4b":
+        base_experiment_name = "base_fvt_training_ensemble_ZZ4b"
+        signal_filename = "ZZ4b_picoAOD_cleaned.h5"
         signal_ratios = [0.005, 0.0075, 0.01, 0.02]
     else:
         raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
@@ -261,7 +271,7 @@ def step_2_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 
 def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
-    dataset_seeds = range(50, 100)
+    dataset_seeds = range(100)
     ensemble_seeds = range(1)
     SR_CR_sizes = [
         (0.05, 0.95),
@@ -269,7 +279,9 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         (0.15, 0.85),
         (0.2, 0.8),
     ]
-    noise_scales = [0.5, 1.0, 2.0, 3.0, np.inf]
+    # noise_scales = [0.5, 1.0, 2.0, 3.0, np.inf]
+    noise_scales = [0.1]
+    # noise_scales = [1.0, 2.0, 3.0, np.inf]
     # noise_scales = [0.5]
     # noise_scales = [0.5, 1.0, np.inf]
     # noise_scales = [2.0, 3.0]
@@ -290,11 +302,17 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
         "CR_fvt_training_ensemble_mean_HH4b_800",
     ]:
         previous_step_experiment_name = "smeared_fvt_training_ensemble_HH4b_800"
+    elif EXPERIMENT_NAME in [
+        "CR_fvt_training_ensemble_max_ZH4b",
+        "CR_fvt_training_ensemble_mean_ZH4b",
+    ]:
+        previous_step_experiment_name = "smeared_fvt_training_ensemble_ZH4b"
     else:
         raise ValueError(f"Unknown experiment name: {EXPERIMENT_NAME}")
 
     if previous_step_experiment_name == "smeared_fvt_training_ensemble":
-        signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+        # signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
+        signal_ratios = [0.0, 0.01, 0.02]
         signal_filename = "HH4b_picoAOD.h5"
     elif previous_step_experiment_name == "smeared_fvt_training_ensemble_HH4b_400":
         signal_ratios = [0.005, 0.0075, 0.01, 0.02]
@@ -302,6 +320,12 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
     elif previous_step_experiment_name == "smeared_fvt_training_ensemble_HH4b_800":
         signal_ratios = [0.005, 0.0075, 0.01, 0.02]
         signal_filename = "HH4b_800.h5"
+    elif previous_step_experiment_name == "smeared_fvt_training_ensemble_ZH4b":
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02, 0.03, 0.05]
+        signal_filename = "ZH4b_picoAOD_cleaned.h5"
+    elif previous_step_experiment_name == "smeared_fvt_training_ensemble_ZZ4b":
+        signal_ratios = [0.005, 0.0075, 0.01, 0.02]
+        signal_filename = "ZZ4b_picoAOD_cleaned.h5"
     else:
         raise ValueError(
             f"Unknown previous step experiment name: {previous_step_experiment_name}"
@@ -430,12 +454,14 @@ def step_3_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
             "CR_fvt_training_ensemble_max",
             "CR_fvt_training_ensemble_max_HH4b_400",
             "CR_fvt_training_ensemble_max_HH4b_800",
+            "CR_fvt_training_ensemble_max_ZH4b",
         ]:
             config["signal_region"]["ensemble_mode"] = "max"
         elif EXPERIMENT_NAME in [
             "CR_fvt_training_ensemble_mean",
             "CR_fvt_training_ensemble_mean_HH4b_400",
             "CR_fvt_training_ensemble_mean_HH4b_800",
+            "CR_fvt_training_ensemble_mean_ZH4b",
         ]:
             config["signal_region"]["ensemble_mode"] = "mean"
         else:
@@ -518,7 +544,7 @@ def step_4_get_configs_to_run(EXPERIMENT_NAME: str, base_config: dict):
 
 def write_and_get_configs_to_run(
     STEP: int, EXPERIMENT_NAME: str, BASE_CONFIG_FILENAME: str
-):
+) -> tuple[list[str], list[dict[str, Any]]]:
     base_config = get_base_config(BASE_CONFIG_FILENAME)
     if STEP == 1:
         config_filenames, configs_to_run = step_1_get_configs_to_run(

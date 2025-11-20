@@ -27,18 +27,18 @@ TrainingInfo.update_metadata()
 ######################### Set Experiment Name and N Runfiles #########################
 ######################################################################################
 
-N_STATDS = 4
+N_STATDS = 2
 N_PHIL = 0
-N_RUNFILES = 8
+N_RUNFILES = 6
 
 
 # STEP = 1
 # GROUP_KEYS = [
-#     "dataset.signal_ratio",
-#     "base_fvt.model_seed",
-#     "base_fvt.train_seed",
-#     "base_fvt.data_seed",
-# ]
+#      "dataset.signal_ratio",
+#      "base_fvt.model_seed",
+#      "base_fvt.train_seed",
+#      "base_fvt.data_seed",
+#  ]
 # EXPERIMENT_NAME = "base_fvt_training_ensemble_ZH4b"
 # BASE_CONFIG_FILENAME = "better_fvt_training.yml"
 
@@ -55,13 +55,13 @@ N_RUNFILES = 8
 
 STEP = 3
 GROUP_KEYS = [
-    "signal_region.4b_in_SR",
-    "signal_region.4b_in_CR",
-    "smearing.noise_scale",
-    "dataset.signal_ratio",
-    "CR_fvt.train_seed",
-    "CR_fvt.model_seed",
-    "CR_fvt.data_seed",
+     "signal_region.4b_in_SR",
+     "signal_region.4b_in_CR",
+     "smearing.noise_scale",
+     "dataset.signal_ratio",
+     "CR_fvt.train_seed",
+     "CR_fvt.model_seed",
+     "CR_fvt.data_seed",
 ]
 EXPERIMENT_NAME = "CR_fvt_training_ensemble_max"
 BASE_CONFIG_FILENAME = "CR_fvt_training_original_features.yml"

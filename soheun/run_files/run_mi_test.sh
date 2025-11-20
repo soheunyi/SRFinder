@@ -4,8 +4,7 @@
 #SBATCH --ntasks 1
 
 # number of CPUs and amount of memory you need:
-#SBATCH --cpus-per-task 8
-#SBATCH --mem-per-cpu 8G
+#SBATCH --cpus-per-task 8 --mem=56G
 
 # number of GPUs you need
 #SBATCH --gres=gpu:1

@@ -175,6 +175,7 @@ def compute_sr_stats(
     signal_filename: str,
     ensemble_mode: Literal["mean", "max"] = "max",
     stats_type: Literal["fvt", "smeared"] = "smeared",
+    use_logits: bool = True,
 ):
     smeared_tinfo_0 = TrainingInfo.load(hashes[0])
     smeared_tinfo_list: list[TrainingInfo] = []
@@ -226,6 +227,10 @@ def compute_sr_stats(
             SR_stats_tst = base_fvt_logit_tst
         else:
             raise ValueError(f"stats_type {stats_type} not supported")
+
+        if not use_logits:
+            SR_stats_train = 1 / (1 + np.exp(-SR_stats_train))
+            SR_stats_tst = 1 / (1 + np.exp(-SR_stats_tst))
 
         SR_stats_train_list.append(SR_stats_train)
         SR_stats_tst_list.append(SR_stats_tst)

@@ -1,0 +1,7 @@
+,reject_null_correction,reject_null_correction,reject_null_correction,reject_null_correction,reject_null_correction,reject_null_correction
+signal_ratio,0.005,0.0075,0.01,0.02,0.03,0.05
+SR_size,,,,,,
+0.05,0.0,0.0,0.04,0.06,0.94,1.0
+0.1,0.01,0.0,0.02,0.19,0.99,1.0
+0.15,0.01,0.0,0.03,0.26,1.0,1.0
+0.2,0.01,0.02,0.01,0.29,1.0,1.0

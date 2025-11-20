@@ -266,8 +266,6 @@ def save_pulls(
     n_3b = 100_0000
     signal_ratios = [0.0, 0.005, 0.0075, 0.01, 0.02]
 
-    # TrainingInfo.update_metadata()
-
     print(
         f"Configs: nbins_list={nbins_list}, bin_stats_type={bin_stats_type}, bin_ensemble_mode={bin_ensemble_mode}, experiment_name={experiment_name}, n_3b={n_3b}, signal_ratios={signal_ratios}"
     )

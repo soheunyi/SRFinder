@@ -1,11 +1,10 @@
 #!/bin/bash
 # specify partition to run in (statds or phil)
-#SBATCH --partition phil_condo
+#SBATCH --partition statds
 #SBATCH --ntasks 1
 
 # number of CPUs and amount of memory you need:
-#SBATCH --cpus-per-task 16
-#SBATCH --mem-per-cpu 8G
+#SBATCH --cpus-per-task 8 --mem=48G
 
 # number of GPUs you need
 #SBATCH --gres=gpu:0
@@ -22,8 +21,8 @@
 RUN_FILENAME="affine_correction_and_ks_bootstrap.py"
 CONDA_ENV_NAME="coffea_torch"
 ARGS="--n_reps 1000 --cdf_mode mean"
-ARGS="$ARGS --experiment_name CR_fvt_training_ensemble_max_HH4b_800"	
-ARGS="$ARGS --signal_ratio 0.005"
+ARGS="$ARGS --experiment_name CR_fvt_training_ensemble_max_ZH4b"	
+ARGS="$ARGS --signal_ratio 0.05"
 
 PYTHON="/home/export/soheuny/.conda/envs/$CONDA_ENV_NAME/bin/python"
 
