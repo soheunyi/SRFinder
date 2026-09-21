@@ -122,7 +122,7 @@ def routine(config: dict, file_handler: logging.FileHandler | None = None):
     mother_samples = MotherSamples.load(ms_hash)
 
     # 2. Split the mother dataset into train and test
-    # Train -- validation split will be done by TrainingInfoV2
+    # Train -- validation split will be done by TrainingInfo
 
     ms_len = len(mother_samples.scdinfo)
     ms_idx = np.zeros(ms_len, dtype=bool)

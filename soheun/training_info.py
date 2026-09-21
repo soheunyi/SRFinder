@@ -88,7 +88,9 @@ class TrainingInfo:
                     run_name=self._hash,
                     depth=self.hparams["depth"],
                 )
-                model.load_state_dict(torch.load(ckpt_dir / name))
+                model.load_state_dict(
+                    torch.load(ckpt_dir / name, map_location="cpu")
+                )
                 return model
         elif self.model == "AttentionClassifier":
             try:
@@ -101,7 +103,9 @@ class TrainingInfo:
                     depth=self.hparams["depth"],
                     run_name=self._hash,
                 )
-                model.load_state_dict(torch.load(ckpt_dir / name))
+                model.load_state_dict(
+                    torch.load(ckpt_dir / name, map_location="cpu")
+                )
                 return model
         else:
             raise ValueError(f"Model {self.model} not found")
