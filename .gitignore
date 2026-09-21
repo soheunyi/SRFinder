@@ -18,3 +18,7 @@ metadata/
 MotherSamples/
 tmp/
 TrainingInfo/
+
+# issue #2 phase 1 fingerprint runs
+soheun/phase1_runs/
+phase1_baseline-*.out
