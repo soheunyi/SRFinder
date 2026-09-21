@@ -28,6 +28,7 @@ DATA_REPO = Path(
     os.environ.get("SRFINDER_DATA_REPO", "/home/export/soheuny/SRFinder/soheun")
 )
 OUT = DATA_REPO / "data/refit_bootstrap/calibration_seed_sweep_v1"
+CAMPAIGN_NAME = "calibration_seed_sweep_v1"
 SEEDS = list(range(0, 100, 5))
 ETAS = [np.inf, 2.0, 0.1]
 SIGNAL_RATIO = 0.0
@@ -35,6 +36,16 @@ SR_SIZE = 0.20
 EXPERIMENT = "CR_fvt_training_ensemble_max"
 SIGNAL_FILENAME = "HH4b_picoAOD.h5"
 N_BINS = 50
+
+
+def seed_description() -> str:
+    if SEEDS == list(range(SEEDS[0], SEEDS[-1] + 1)):
+        return f"seeds {SEEDS[0]},...,{SEEDS[-1]}"
+    if len(SEEDS) > 2:
+        differences = np.diff(SEEDS)
+        if np.all(differences == differences[0]):
+            return f"seeds {SEEDS[0]},{SEEDS[1]},...,{SEEDS[-1]}"
+    return f"{len(SEEDS)} selected seeds"
 
 
 def configure_data_paths():
@@ -182,7 +193,7 @@ def prepare() -> None:
     (OUT / "manifest_audit.json").write_text(
         json.dumps(
             {
-                "campaign": "calibration_seed_sweep_v1",
+                "campaign": CAMPAIGN_NAME,
                 "seeds": SEEDS,
                 "noise_scales": ["infinity", 2.0, 0.1],
                 "signal_ratio": SIGNAL_RATIO,
@@ -294,7 +305,7 @@ def aggregate() -> None:
             np.median(stacked_y, axis=0),
             color="#1f77b4",
             linewidth=2.2,
-            label="20-seed median",
+            label=f"{len(SEEDS)}-seed median",
         )
         lower = min(np.min(stacked_x), np.min(stacked_y))
         upper = max(np.max(stacked_x), np.max(stacked_y))
@@ -306,7 +317,7 @@ def aggregate() -> None:
     axes[0].set_ylabel(r"$\widehat\gamma_{\rm CR}$")
     axes[-1].legend(fontsize=8)
     fig.suptitle(
-        "CR-to-SR calibration curves across seeds 0,5,...,95\n"
+        f"CR-to-SR calibration curves across {seed_description()}\n"
         "50 equal-count bins; physical-event-weighted bin means"
     )
     fig.tight_layout()
