@@ -5,6 +5,7 @@ figures
 *.npy
 *.root
 *.log
+*.so
 
 reducers/
 embeddings/
