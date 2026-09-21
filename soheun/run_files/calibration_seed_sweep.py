@@ -321,8 +321,9 @@ def aggregate() -> None:
         "50 equal-count bins; physical-event-weighted bin means"
     )
     fig.tight_layout()
-    fig.savefig(OUT / "calibration_curves_20_seed_overlay.png", dpi=180, bbox_inches="tight")
-    fig.savefig(OUT / "calibration_curves_20_seed_overlay.pdf", bbox_inches="tight")
+    curve_stem = f"calibration_curves_{len(SEEDS)}_seed_overlay"
+    fig.savefig(OUT / f"{curve_stem}.png", dpi=180, bbox_inches="tight")
+    fig.savefig(OUT / f"{curve_stem}.pdf", bbox_inches="tight")
 
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
     for ax, eta in zip(axes, ETAS):
@@ -339,8 +340,9 @@ def aggregate() -> None:
     axes[0].set_ylabel("seed count")
     axes[-1].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(OUT / "calibration_error_20_seed_histograms.png", dpi=180, bbox_inches="tight")
-    fig.savefig(OUT / "calibration_error_20_seed_histograms.pdf", bbox_inches="tight")
+    error_stem = f"calibration_error_{len(SEEDS)}_seed_histograms"
+    fig.savefig(OUT / f"{error_stem}.png", dpi=180, bbox_inches="tight")
+    fig.savefig(OUT / f"{error_stem}.pdf", bbox_inches="tight")
     print(summary.to_string(index=False))
 
 
