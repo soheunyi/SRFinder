@@ -29,6 +29,10 @@ CAMPAIGN=${CAMPAIGN:-phase3_resume}
 NUM_STACKS=${NUM_STACKS:-5}
 MAX_EPOCHS=${MAX_EPOCHS:-20}
 STOP_AFTER=${STOP_AFTER:-7}
+LR_PATIENCE=${LR_PATIENCE:-}
+
+PATIENCE_ARG=""
+if [ -n "$LR_PATIENCE" ]; then PATIENCE_ARG="--lr-patience $LR_PATIENCE"; fi
 
 cd "$SRFINDER"
 
@@ -43,21 +47,23 @@ nvidia-smi --query-gpu=name --format=csv,noheader
 echo "=== uninterrupted reference ==="
 srun "$PYTHON" phase3/run_resumable.py \
     --campaign-id "$CAMPAIGN" --group-id whole \
-    --num-stacks "$NUM_STACKS" --max-epochs "$MAX_EPOCHS"
+    --num-stacks "$NUM_STACKS" --max-epochs "$MAX_EPOCHS" $PATIENCE_ARG
 
 echo "=== segment 1: stop after epoch $STOP_AFTER ==="
 srun "$PYTHON" phase3/run_resumable.py \
     --campaign-id "$CAMPAIGN" --group-id split \
     --num-stacks "$NUM_STACKS" --max-epochs "$MAX_EPOCHS" \
-    --stop-after-epoch "$STOP_AFTER"
+    --stop-after-epoch "$STOP_AFTER" $PATIENCE_ARG
 
 echo "=== segment 2: resume ==="
 srun "$PYTHON" phase3/run_resumable.py \
     --campaign-id "$CAMPAIGN" --group-id split \
     --num-stacks "$NUM_STACKS" --max-epochs "$MAX_EPOCHS" \
-    --resume
+    --resume $PATIENCE_ARG
 
 echo "=== comparison ==="
+REQUIRE_LR=""
+if [ -n "$LR_PATIENCE" ]; then REQUIRE_LR="--require-lr-change"; fi
 "$PYTHON" phase3/compare_resume.py \
-    "training_runs/$CAMPAIGN/whole" "training_runs/$CAMPAIGN/split" \
+    "training_runs/$CAMPAIGN/whole" "training_runs/$CAMPAIGN/split" $REQUIRE_LR \
     | tee "training_runs/$CAMPAIGN/phase3_report.txt"

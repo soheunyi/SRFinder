@@ -98,10 +98,30 @@ belongs to a later phase.
 - [x] Match final predictions within deterministic tolerance
 - [x] Preserve best checkpoints across interruption
 
-The scheduler comparison is meaningful even though no LR reduction fires within
-20 epochs: `ReduceLROnPlateau` accumulates `best`, `num_bad_epochs` and
-`cooldown_counter` every epoch, so a scheduler that failed to restore would show
-`num_bad_epochs` reset to 0 and the comparison would fail.
+With the shipped config (`patience: 10`) no LR reduction fires inside 20
+epochs, so that gate passes without ever exercising a reduction. The scheduler
+check still has teeth — `ReduceLROnPlateau` accumulates `best`,
+`num_bad_epochs` and `cooldown_counter` every epoch, and a scheduler that
+failed to restore would show `num_bad_epochs` reset to 0 — but `factor=0.5`
+reaching `param_groups`, the reduced LR surviving in `optimizer_states`, and
+the cooldown path were all untested.
+
+`--lr-patience` overrides the patience so reductions fire and straddle the
+resume point, and `--require-lr-change` makes the comparator **fail** unless
+one actually did. The sbatch passes it whenever `LR_PATIENCE` is set. With
+`patience=2`, interrupt after epoch 7:
+
+```
+PASS  3d. an LR reduction actually fired     distinct LRs: [0.00125, 0.0025, 0.005, 0.01]
+PASS  3e. LR trajectory matches every epoch
+PASS  3c. validation losses match every epoch   max |diff| = 0.000e+00 over 20 epochs
+PASS  4.  final predictions match               max |diff| = 0.000e+00 over 5 estimators
+PASS  5b. best checkpoints identical            all match
+```
+
+The override is test-only and is recorded in `manifest.json` as
+`lr_patience_override`, so a run carries evidence of what it tested. Both sides
+of a comparison must use the same value.
 
 ## Running
 
@@ -112,6 +132,10 @@ CAMPAIGN=phase3_smoke NUM_STACKS=2 MAX_EPOCHS=5 STOP_AFTER=2 \
 
 # full gate
 CAMPAIGN=phase3_full NUM_STACKS=5 MAX_EPOCHS=20 STOP_AFTER=7 \
+    sbatch phase3/submit_resume_test.sbatch
+
+# scheduler gate: force LR reductions across the resume point
+CAMPAIGN=phase3_lrsched NUM_STACKS=5 MAX_EPOCHS=20 STOP_AFTER=7 LR_PATIENCE=2 \
     sbatch phase3/submit_resume_test.sbatch
 ```
 

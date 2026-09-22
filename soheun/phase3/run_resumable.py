@@ -105,6 +105,16 @@ def main() -> None:
     ap.add_argument("--stop-after-epoch", type=int, default=None)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--probe-size", type=int, default=20000)
+    ap.add_argument(
+        "--lr-patience",
+        type=int,
+        default=None,
+        help="override ReduceLROnPlateau patience. Test-only: the shipped "
+             "config has patience 10, which never fires a reduction inside "
+             "20 epochs, so a resume test cannot show that a reduction "
+             "survives a restart. Both sides of a comparison must use the "
+             "same value.",
+    )
     args = ap.parse_args()
 
     dirs = group_dirs(SOHEUN / args.out_root, args.campaign_id, args.group_id)
@@ -126,6 +136,8 @@ def main() -> None:
         with open(SOHEUN / CONFIG_PATTERN.format(seed=s)) as f:
             cfg = yaml.safe_load(f)
         cfg["CR_fvt"]["max_epochs"] = args.max_epochs
+        if args.lr_patience is not None:
+            cfg["CR_fvt"]["lr_scheduler"]["patience"] = args.lr_patience
         configs.append(cfg)
 
     identities = [identity_from_step3_config(c) for c in configs]
@@ -167,6 +179,7 @@ def main() -> None:
         "started_parts": part + 1,
         "resumed": bool(args.resume),
         "stop_after_epoch": args.stop_after_epoch,
+        "lr_patience_override": args.lr_patience,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

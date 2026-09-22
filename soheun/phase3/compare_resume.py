@@ -60,6 +60,13 @@ def main() -> int:
     ap.add_argument("whole", type=pathlib.Path, help="uninterrupted reference group")
     ap.add_argument("split", type=pathlib.Path, help="interrupted and resumed group")
     ap.add_argument("--pred-tol", type=float, default=0.0)
+    ap.add_argument(
+        "--require-lr-change",
+        action="store_true",
+        help="fail unless an LR reduction actually fired. Without this the "
+             "scheduler checks can pass while no reduction ever happened, "
+             "which leaves the interesting case untested.",
+    )
     args = ap.parse_args()
 
     wm, wc, wp, wpred = load_group(args.whole)
@@ -139,6 +146,35 @@ def main() -> int:
                 f"max |diff| = {d:.3e} over {len(common)} epochs",
             )
         )
+
+    # 3d ------------------------------------------- did a reduction fire?
+    def lr_trace(parts_):
+        out = {}
+        for p_ in parts_:
+            for e in p_["epochs"]:
+                out[int(e["epoch"])] = e["lrs"]
+        return out
+
+    wlr, slr = lr_trace(wp), lr_trace(sp)
+    distinct = sorted({v for lrs in wlr.values() for v in lrs})
+    fired = len(distinct) > 1
+    if args.require_lr_change:
+        rows.append(
+            (
+                "3d. an LR reduction actually fired",
+                fired,
+                f"distinct LRs in reference: {distinct}",
+            )
+        )
+    rows.append(
+        (
+            "3e. LR trajectory matches every epoch",
+            all(wlr[e] == slr.get(e) for e in wlr),
+            f"distinct LRs: {distinct}"
+            + ("" if fired else "   (no reduction fired; scheduler restore is "
+                                "only exercised through its counters)"),
+        )
+    )
 
     # 4 ------------------------------------------------------- predictions
     if wpred and spred and set(wpred) == set(spred):
