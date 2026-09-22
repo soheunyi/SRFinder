@@ -27,3 +27,7 @@ soheun/phase2_runs/
 phase2_permutation-*.out
 soheun/training_runs/
 phase3_resume-*.out
+soheun/data/artifacts_v2/
+soheun/phase5_runs/
+phase5_bench-*.out
+phase5_noanom-*.out
