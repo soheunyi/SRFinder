@@ -25,3 +25,5 @@ soheun/phase1_runs/
 phase1_baseline-*.out
 soheun/phase2_runs/
 phase2_permutation-*.out
+soheun/training_runs/
+phase3_resume-*.out
