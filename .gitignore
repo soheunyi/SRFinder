@@ -19,3 +19,15 @@ metadata/
 MotherSamples/
 tmp/
 TrainingInfo/
+
+# issue #2 phase 1 fingerprint runs
+soheun/phase1_runs/
+phase1_baseline-*.out
+soheun/phase2_runs/
+phase2_permutation-*.out
+soheun/training_runs/
+phase3_resume-*.out
+soheun/data/artifacts_v2/
+soheun/phase5_runs/
+phase5_bench-*.out
+phase5_noanom-*.out
