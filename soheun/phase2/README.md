@@ -61,14 +61,43 @@ shuffle — a supposedly position-independent change leaking into batch order.
 - [x] Stack permutation does not change estimator initialization
 - [x] Repeating a group reproduces its initial state exactly
 
-`test_identity.py` also asserts the *negative* control: that the unpatched
-production path **is** position dependent. If that assertion ever starts
-failing, the initialization path changed underneath and Phase 2's premise needs
-re-reading.
+`test_identity.py` carries two more checks that are not in the issue:
+
+* **Complete state transfer.** `apply_identities` copies a standalone estimator
+  into the stack with `load_state_dict`, which carries parameters and
+  *persistent* buffers only. FvT's GhostBatchNorm registers about twenty
+  buffers, and a random tensor held as a plain attribute would not appear in
+  `state_dict` at all. The test compares forward outputs in eval mode, not just
+  `state_dict` keys, so anything that failed to transfer shows up as diverging
+  outputs rather than as a silent match.
+* **A negative control**, asserting the unpatched production path **is**
+  position dependent. Without it the permutation test could pass vacuously: if
+  every member happened to be initialized identically, permuting them would
+  trivially change nothing. If this control ever starts failing, the
+  initialization path changed underneath and Phase 2's premise needs re-reading.
 
 The issue asks that reordering change neither initial parameters *nor
 predictions*. Initial parameters are covered by the unit gate; predictions need
-a real training run, which is what `submit_permutation.sbatch` does.
+a real training run. `submit_permutation.sbatch` does that, and the result on
+5 estimators x 20 epochs on one L40 is:
+
+```
+PASS  stack orders really differ             [0,1,2,3,4] vs [4,3,2,1,0]
+PASS  same group fingerprint                 2853b07104a5f002
+PASS  initial parameters equal per identity
+PASS  final parameters equal per identity
+PASS  derived seeds equal per identity
+PASS  predictions equal per identity         max |diff| = 0.000e+00 over 5 estimators
+
+  ms_seed=0  pos 0 -> 4   max|dpred| = 0.000e+00
+  ms_seed=1  pos 1 -> 3   max|dpred| = 0.000e+00
+  ms_seed=2  pos 2 -> 2   max|dpred| = 0.000e+00
+  ms_seed=3  pos 3 -> 1   max|dpred| = 0.000e+00
+  ms_seed=4  pos 4 -> 0   max|dpred| = 0.000e+00
+```
+
+Bitwise, not within tolerance. `ms_seed=2` is the fixed midpoint of a
+five-element reversal and does not move; the other four do.
 
 ## Running
 

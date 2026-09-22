@@ -40,7 +40,7 @@ from identity import (  # noqa: E402
     group_fingerprint,
     identity_from_step3_config,
 )
-from init_from_identity import apply_identities  # noqa: E402
+from init_from_identity import apply_identities, build_estimator  # noqa: E402
 
 CONFIG_PATTERN = (
     "configs/tmp/CR_fvt_training_ensemble_max_{seed}_0.0_0_0.1_0.2_0.8.yml"
@@ -189,6 +189,48 @@ def test_repeating_a_group_reproduces_initial_state():
     assert first == second
 
 
+def test_identity_overwrite_transfers_complete_state():
+    """The overwrite must carry everything that makes a model behave.
+
+    ``apply_identities`` builds a standalone estimator under its own seed and
+    copies it into the stack with ``load_state_dict``. That only transfers
+    parameters and *persistent* buffers. FvT's GhostBatchNorm registers about
+    twenty buffers, and a random tensor held as a plain attribute rather than a
+    buffer would not appear in ``state_dict`` at all.
+
+    Comparing forward outputs, not just ``state_dict`` keys, closes both gaps:
+    if anything that affects the computation failed to transfer, the outputs
+    diverge. Both models are put in eval mode so GhostBatchNorm uses its
+    running statistics instead of updating them.
+    """
+    configs = load_group(STACK_SIZE)
+    identities = [identity_from_step3_config(c) for c in configs]
+    hparams = [_hparams(c) for c in configs]
+
+    run_names = [i.fingerprint for i in identities]
+    stack = build_stack(hparams, run_names)
+    apply_identities(stack, identities, hparams)
+
+    g = torch.Generator().manual_seed(12345)
+    x = torch.randn(64, 16, generator=g)
+
+    for k, ident in enumerate(identities):
+        standalone = build_estimator(
+            hparams[k], ident.fingerprint, ident.seed("model_init"), device="cpu"
+        )
+        standalone.eval()
+        member = stack.fvt_classifiers[k]
+        member.eval()
+
+        assert state_digest(standalone) == state_digest(member), (
+            f"state_dict differs at position {k}"
+        )
+        with torch.no_grad():
+            a = standalone(x)
+            b = member(x)
+        assert torch.equal(a, b), f"forward output differs at position {k}"
+
+
 def test_current_code_does_depend_on_stack_position():
     """Records the defect Phase 2 removes. If this ever stops holding, the
     production initialization path changed and Phase 2's premise needs a
@@ -225,7 +267,9 @@ TESTS = [
      test_stack_permutation_does_not_change_initialization),
     ("repeating a group reproduces its initial state",
      test_repeating_a_group_reproduces_initial_state),
-    ("(baseline) current code DOES depend on stack position",
+    ("identity overwrite transfers complete state (params, buffers, outputs)",
+     test_identity_overwrite_transfers_complete_state),
+    ("(control) unpatched path is position dependent, as expected pre-Phase-2",
      test_current_code_does_depend_on_stack_position),
 ]
 
