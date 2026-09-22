@@ -171,6 +171,24 @@ def main() -> None:
              "results at all.",
     )
     ap.add_argument("--tag", default="", help="suffix for the output directory")
+    ap.add_argument(
+        "--cudagraphs",
+        action="store_true",
+        help="wrap each stacked estimator in torch.compile(backend='cudagraphs'). "
+             "No Triton needed. Also strips the two data-dependent "
+             "`if torch.isnan(...)` branches from FvTClassifier.forward, which "
+             "are graph breaks. NOTE: CUDA graphs re-capture on every new input "
+             "shape, and the batch-size milestones give six sizes (plus a "
+             "smaller final batch each epoch), so capture cost may dominate.",
+    )
+    ap.add_argument(
+        "--fast-reinforce",
+        action="store_true",
+        help="replace the slice-and-cat interleave in DijetReinforceLayer "
+             "and QuadjetReinforceLayer with the equivalent reshape. "
+             "Verified bitwise identical in forward and gradients by "
+             "phase5/slice_rewrite.py.",
+    )
     args = ap.parse_args()
 
     # Patch rather than edit: intercept the call fit() makes and force it off.
@@ -183,6 +201,22 @@ def main() -> None:
         torch.autograd.set_detect_anomaly = _forced_off
         torch.autograd.set_detect_anomaly(False)
         print("[phase5] anomaly detection forced OFF", flush=True)
+
+    if args.fast_reinforce:
+        sys.path.insert(0, str(HERE))
+        from slice_rewrite import patch as _patch_reinforce
+
+        _patch_reinforce()
+        print("[phase5] reinforce-layer reshape rewrite ENABLED", flush=True)
+
+    if args.cudagraphs:
+        import fvt_classifier as _fc
+
+        _fc.FvTClassifier.forward = (
+            lambda self, _x: self.attention_classifier(self.encoder(_x))
+        )
+        print("[phase5] cudagraphs backend ENABLED (isnan branches stripped)",
+              flush=True)
 
     K = args.num_stacks
     name = f"K{K:03d}" + (f"_{args.tag}" if args.tag else "")
@@ -225,6 +259,13 @@ def main() -> None:
     orig_fit = StackedFvTClassifier.fit
 
     def wrapped_fit(self, *a, **kw):
+        if args.cudagraphs:
+            for i in range(len(self.fvt_classifiers)):
+                self.fvt_classifiers[i] = torch.compile(
+                    self.fvt_classifiers[i], backend="cudagraphs"
+                )
+            print(f"[phase5] wrapped {len(self.fvt_classifiers)} estimators "
+                  f"in cudagraphs", flush=True)
         kw["callbacks"] = list(kw.get("callbacks") or []) + [timer]
         with pushd(workdir):
             return orig_fit(self, *a, **kw)
@@ -280,6 +321,8 @@ def main() -> None:
     record = {
         "K": K,
         "anomaly_detection": not args.no_anomaly,
+        "fast_reinforce": bool(args.fast_reinforce),
+        "cudagraphs": bool(args.cudagraphs),
         "tag": args.tag,
         "max_epochs": args.max_epochs,
         "env": env_record(),
