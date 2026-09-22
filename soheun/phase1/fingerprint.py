@@ -9,8 +9,11 @@ deterministic fingerprint:
   batch-size schedule),
 * per-epoch per-estimator validation losses, learning rates and batch size,
 * the ``callback_metrics`` snapshot that ``SaveIndividualClassifierCallback``
-  and the ``ReduceLROnPlateau`` step actually consume, which is one epoch
-  stale because Lightning runs callbacks before the LightningModule hook,
+  actually consumes, which is one epoch stale because Lightning runs callbacks
+  before the LightningModule hook that logs ``val_loss_stack_i``.  The
+  per-stack ``ReduceLROnPlateau`` step is *not* affected: it runs in the
+  module's ``on_train_epoch_end``, which fires after the validation loop, so
+  it reads the current epoch's value.  Verified on lightning 2.2.1,
 * per-estimator best score and best epoch as selected by the existing saver.
 
 Phase 1 of the stacked-training issue requires two runs of the same
@@ -160,7 +163,9 @@ class FingerprintCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Runs BEFORE the LightningModule hook, i.e. the same stale view of
-        ``callback_metrics`` that the saver and the LR scheduler consume."""
+        ``callback_metrics`` that ``SaveIndividualClassifierCallback`` consumes.
+        The LR scheduler steps later, in the module's ``on_train_epoch_end``,
+        and does not see this stale value."""
         if trainer.sanity_checking:
             return
         stale = self._stale_metrics(trainer)

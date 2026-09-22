@@ -25,9 +25,20 @@ Two extra things are recorded because they matter for later phases:
 * `val_epochs[].val_loss_per_stack_as_seen_by_saver` — the `callback_metrics`
   snapshot visible while callbacks run. Lightning runs callbacks *before* the
   `LightningModule` hook that logs `val_loss_stack_i`, so this is the previous
-  epoch's value. It is what `SaveIndividualClassifierCallback` compares against
-  and what `ReduceLROnPlateau` steps on. Phase 1 records the staleness; it does
-  not fix it.
+  epoch's value, and it is what `SaveIndividualClassifierCallback` compares
+  against. `{run}_best.pt` therefore holds epoch-N weights selected using
+  epoch-(N-1)'s loss, and nothing is saved at all at epoch 0, where the metric
+  is still absent. Phase 1 records the staleness; it does not fix it.
+
+  The per-stack `ReduceLROnPlateau` is **not** affected, contrary to the
+  "scheduler updates appear to consume stale validation metrics" item in the
+  issue. It steps in the module's `on_train_epoch_end`, which fires after the
+  validation loop, so it reads the current epoch's value. Verified on
+  lightning 2.2.1 by instrumenting the hook order:
+
+      ep2 CALLBACK.on_validation_epoch_end   sees 1.0   <- saver, stale
+      ep2 MODULE.on_validation_epoch_end     logs  2.0
+      ep2 MODULE.on_train_epoch_end          sees 2.0   <- scheduler, current
 * `env` — torch/cuDNN versions, GPU model, TF32 and matmul-precision flags,
   which bound how much bitwise agreement is reasonable to expect.
 
