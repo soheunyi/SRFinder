@@ -261,7 +261,10 @@ def main() -> None:
 
     # ------------------------------------------------------------- exports
     dm = stacked_model.datamodule
-    x_val = dm.stacked_val_dataset.tensors[0]
+    from independent_data import validation_probe, row_counts
+    probe_dataset = validation_probe(dm, args.probe_size)
+    train_counts, val_counts = row_counts(dm, True), row_counts(dm, False)
+    x_val = probe_dataset.tensors[0]
     n_probe = min(args.probe_size, x_val.shape[0])
     probe_x = x_val[:n_probe].contiguous()
 

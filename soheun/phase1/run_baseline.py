@@ -159,16 +159,21 @@ def main():
 
     # ------------------------------------------------------------- probe set
     dm = stacked_model.datamodule
-    x_val = dm.stacked_val_dataset.tensors[0]
-    y_val = dm.stacked_val_dataset.tensors[1]
-    w_val = dm.stacked_val_dataset.tensors[2]
+    from independent_data import validation_probe, row_counts
+    probe_dataset = validation_probe(dm, args.probe_size)
+    train_counts, val_counts = row_counts(dm, True), row_counts(dm, False)
+    x_val = probe_dataset.tensors[0]
+    y_val = probe_dataset.tensors[1]
+    w_val = probe_dataset.tensors[2]
     n_probe = min(args.probe_size, x_val.shape[0])
     probe_x = x_val[:n_probe].contiguous()
 
     probe_info = {
         "n_probe": int(n_probe),
-        "val_rows": int(x_val.shape[0]),
-        "train_rows": int(dm.stacked_train_dataset.tensors[0].shape[0]),
+        "val_rows": val_counts[0] if len(set(val_counts)) == 1 else None,
+        "train_rows": train_counts[0] if len(set(train_counts)) == 1 else None,
+        "train_rows_per_estimator": train_counts,
+        "val_rows_per_estimator": val_counts,
         "probe_x_digest": tensor_digest(probe_x),
         "val_y_digest": tensor_digest(y_val[:n_probe]),
         "val_w_digest": tensor_digest(w_val[:n_probe]),

@@ -8,12 +8,8 @@ deterministic fingerprint:
 * per-epoch minibatch digests (captures shuffle order, batch order and the
   batch-size schedule),
 * per-epoch per-estimator validation losses, learning rates and batch size,
-* the ``callback_metrics`` snapshot that ``SaveIndividualClassifierCallback``
-  actually consumes, which is one epoch stale because Lightning runs callbacks
-  before the LightningModule hook that logs ``val_loss_stack_i``.  The
-  per-stack ``ReduceLROnPlateau`` step is *not* affected: it runs in the
-  module's ``on_train_epoch_end``, which fires after the validation loop, so
-  it reads the current epoch's value.  Verified on lightning 2.2.1,
+* current metrics consumed by the corrected saver in on_validation_end, plus
+  the pre-module-hook snapshot for diagnosing historical stale selection,
 * per-estimator best score and best epoch as selected by the existing saver.
 
 Phase 1 of the stacked-training issue requires two runs of the same
@@ -91,6 +87,7 @@ class FingerprintCallback(pl.Callback):
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.record: dict = {
+            "checkpoint_selection": "current_epoch_on_validation_end",
             "num_stacks": num_stacks,
             "env": {},
             "init_param_digests": None,
@@ -101,7 +98,7 @@ class FingerprintCallback(pl.Callback):
             "saver_best_scores": None,
         }
 
-        # mirror of SaveIndividualClassifierCallback's selection rule
+        # Mirror the saver's current-epoch selection rule
         self._best_scores = [float("inf")] * num_stacks
         self._best_epochs = [-1] * num_stacks
 
@@ -122,13 +119,25 @@ class FingerprintCallback(pl.Callback):
         self._epoch_running = hashlib.sha256()
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        x, y, w = batch
         h = hashlib.sha256()
-        for t in (x, y, w):
-            h.update(tensor_digest(t).encode())
+        if isinstance(batch, dict):
+            sizes = []
+            for member in batch['members']:
+                if member is None:
+                    h.update(b'inactive')
+                    sizes.append(0)
+                else:
+                    sizes.append(len(member[1]))
+                    for t in member:
+                        h.update(tensor_digest(t).encode())
+        else:
+            x, y, w = batch
+            sizes = int(y.shape[0])
+            for t in (x, y, w):
+                h.update(tensor_digest(t).encode())
         d = h.hexdigest()
         self._epoch_batches.append(d)
-        self._epoch_batch_sizes.append(int(y.shape[0]))
+        self._epoch_batch_sizes.append(sizes)
         self._epoch_running.update(d.encode())
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -151,7 +160,7 @@ class FingerprintCallback(pl.Callback):
 
     # ------------------------------------------------------------------- val
 
-    def _stale_metrics(self, trainer) -> list[float | None]:
+    def _read_metrics(self, trainer) -> list[float | None]:
         out = []
         for i in range(self.num_stacks):
             v = trainer.callback_metrics.get(f"val_loss_stack_{i}", None)
@@ -162,32 +171,29 @@ class FingerprintCallback(pl.Callback):
         return out
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Runs BEFORE the LightningModule hook, i.e. the same stale view of
-        ``callback_metrics`` that ``SaveIndividualClassifierCallback`` consumes.
-        The LR scheduler steps later, in the module's ``on_train_epoch_end``,
-        and does not see this stale value."""
+        """Keep the historical pre-module snapshot as a diagnostic only."""
         if trainer.sanity_checking:
             return
-        stale = self._stale_metrics(trainer)
+        stale = self._read_metrics(trainer)
         self._pending_stale = stale
-        for i, v in enumerate(stale):
-            if v is not None and v < self._best_scores[i]:
-                self._best_scores[i] = v
-                self._best_epochs[i] = int(trainer.current_epoch)
 
     def on_validation_end(self, trainer, pl_module):
         """Runs after the LightningModule hook, so metrics are current."""
         if trainer.sanity_checking:
             return
-        fresh = self._stale_metrics(trainer)
+        fresh = self._read_metrics(trainer)
+        for i, v in enumerate(fresh):
+            if v is not None and v < self._best_scores[i]:
+                self._best_scores[i] = v
+                self._best_epochs[i] = int(trainer.current_epoch)
+
         dm = getattr(pl_module, "datamodule", None)
         self.record["val_epochs"].append(
             {
                 "epoch": int(trainer.current_epoch),
                 "val_loss_per_stack": fresh,
-                "val_loss_per_stack_as_seen_by_saver": getattr(
-                    self, "_pending_stale", None
-                ),
+                "val_loss_per_stack_as_seen_by_saver": fresh,
+                "val_loss_before_module_hook": getattr(self, "_pending_stale", None),
                 "lrs": [
                     float(opt.param_groups[0]["lr"]) for opt in trainer.optimizers
                 ],
@@ -204,10 +210,17 @@ class FingerprintCallback(pl.Callback):
             "epochs": self._best_epochs,
         }
         for cb in trainer.callbacks:
-            if type(cb).__name__.endswith("SaveIndividualClassifierCallback"):
+            if hasattr(cb, "best_scores") and hasattr(cb, "monitor_metrics"):
                 self.record["saver_best_scores"] = [
                     cb.best_scores[m] for m in cb.monitor_metrics
                 ]
+                if hasattr(cb, "best_epochs"):
+                    # A resumed segment may never beat a pre-interruption best.
+                    self.record["best"] = {
+                        "scores": self.record["saver_best_scores"],
+                        "epochs": [cb.best_epochs[m] for m in cb.monitor_metrics],
+                    }
+                break
         self.dump()
 
     def dump(self):
