@@ -31,6 +31,25 @@ interpolates `c + k/batch` between the two measured batch sizes over the
 With all patches the GPU saturates at batch 32,768, so eight workers do not
 beat five there. Node-local checkpoints made no difference against NFS.
 
+## Step 2 (AttentionClassifier)
+
+Measured on 15 real prepared Step-2 members (depth 8, ~700k train rows each),
+one L40, three members per worker, 30-epoch schedule (same `c + k/batch`
+interpolation as above):
+
+| Configuration | members per GPU-hour | vs 1 worker |
+|---|---:|---:|
+| 1 worker, current | 72 | 1.0x |
+| 5 workers, current | 228 | 3.2x |
+| 5 workers + MPS + `nosync`,`fast_gbn` | 343 | 4.8x |
+| 5 workers + MPS + `nosync`,`fast_gbn`,`graphs` | 1,011 | 14.1x |
+
+Exactness: graphed vs eager on all 15 members for the full 30 epochs, with an
+interruption after epoch 16 and a resume, and five graphed MPS workers against
+eager, all identical. The artifact-path integration test
+(`phase5/test_speedup_integration.py`) passes. Peak GPU memory with graphs is
+0.52 GB per worker at batch 32,768.
+
 ## Exactness
 
 `compare.py` checks, per member, digests of final weights and running stats,
@@ -95,8 +114,8 @@ Step-3 identity under a benchmark-only experiment name.
 
 The integration copy adds strict member-set comparison, attention history
 flushing for nosync, portable reinforce functions, and a temporary
-speedups.scope.execution_patches context manager. CUDA graphs still apply to
-FvT training; attention stays eager. The scope restores imported aliases and
+speedups.scope.execution_patches context manager. CUDA graphs apply to both
+FvT (Steps 1 and 3) and the Step-2 AttentionClassifier. The scope restores imported aliases and
 class methods on exit, including exceptions. Keep production adoption opt-in
 until actual artifact-path resume, memory and provenance checks pass.
 
