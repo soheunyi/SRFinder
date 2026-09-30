@@ -42,6 +42,7 @@ def main():
         else:
             scope = parser.add_mutually_exclusive_group(required=True)
             scope.add_argument('--validation', action='store_true', help='A small explicitly selected engineering scope')
+            scope.add_argument('--pilot-tier',choices=['A','B','all'],help='Run only the approved pilot tier within the full prepared scope')
             scope.add_argument('--start-campaign', action='store_true', help='User-authorized campaign execution')
             parser.add_argument('--nproc', type=int, default=5)
             parser.add_argument('--resident', choices=['auto', 'true', 'false'], default='auto')
@@ -112,10 +113,15 @@ def main():
         if not (args.output / 'prepared.json').is_file():
             raise ValueError('Prepare and review this execution scope before starting')
         resident = args.resident if args.resident == 'auto' else args.resident == 'true'
+        work_cases=None
+        if args.pilot_tier:
+            from artifacts.campaign_scope import expected_cases
+            work_cases=sorted(expected_cases(plan,'pilot-'+args.pilot_tier))
+            if not work_cases:raise ValueError('Pilot selection is empty')
         result = run_campaign(store, plan, args.output, case_ids=args.case_ids, nproc=args.nproc,
             device=args.device, resident=resident, safety_bytes=args.safety_gib,
             compute_headroom_bytes=args.compute_headroom_gib, export_batch_size=args.export_batch_size,
-            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches, through_stage=args.through_stage)
+            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches, through_stage=args.through_stage, work_case_ids=work_cases)
     print(json.dumps(result, indent=2), flush=True)
 
 

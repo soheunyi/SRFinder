@@ -144,15 +144,15 @@ def main():
     recovered = run_campaign(store, plan, args.out / 'interrupted', case_ids=[first_case], nproc=1,
                              resume=True, **options)
     assert recovered['completion_ids'][first_case] == serial['completion_ids'][first_case]
-    prefix = run_campaign(store, plan, args.out / 'parallel', nproc=2, through_stage=1, **options)
-    assert set(prefix['completion_ids'])=={n['id'] for n in plan['nodes'] if n['stage']==1}
-    assert prefix['status'] == 'CAMPAIGN_PREFIX_COMPLETE' and len(prefix['completion_ids']) == 2
+    prefix = run_campaign(store, plan, args.out / 'parallel', nproc=2, through_stage=1, work_case_ids=[target], **options)
+    assert set(prefix['completion_ids'])=={n['id'] for n in closure if n['stage']==1}
+    assert prefix['status'] == 'CAMPAIGN_PREFIX_COMPLETE' and len(prefix['completion_ids']) == 1
     checkpoints = list((args.out / 'parallel' / 'tasks').glob('*/training/last.ckpt'))
-    assert len(checkpoints) == 2
+    assert len(checkpoints) == 1
     before = {p: p.stat().st_mtime_ns for p in checkpoints}
-    second = run_campaign(store, plan, args.out / 'parallel', nproc=1, resume=True, through_stage=2, **options)
+    second = run_campaign(store, plan, args.out / 'parallel', nproc=1, resume=True, through_stage=2, work_case_ids=[target], **options)
     assert second['status']=='CAMPAIGN_PREFIX_COMPLETE'
-    assert set(second['completion_ids'])=={n['id'] for n in plan['nodes'] if n['stage']<=2}
+    assert set(second['completion_ids'])=={n['id'] for n in closure if n['stage']<=2}
     parallel = run_campaign(store, plan, args.out / 'parallel', nproc=2, resume=True, through_stage=3, **options)
     assert parallel['max_in_flight'] <= 2
     assert parallel['completion_ids'] == serial['completion_ids']
@@ -209,7 +209,7 @@ def main():
     expect_error(lambda: registry.get(case))
     mother.write_bytes(raw)
     report = {'status': 'PASS', 'device': args.device, 'logical_cases': 8,
-        'serial_spawn_receipts_exact': True, 'staged_1_2_3_same_manifest_exact': True, 'prefix_resume_without_refit': True,
+        'serial_spawn_receipts_exact': True, 'staged_1_2_3_same_manifest_exact': True, 'pilot_subset_then_full_scope_reuses_results': True, 'prefix_resume_without_refit': True,
         'bounded_max_in_flight': parallel['max_in_flight'], 'completed_resume_without_workers': True,
         'frozen_optimizer_enforced': True, 'cached_dependency_mutation_rejected': True, 'epoch_interruption_recovery_exact': True,
         'cli_dry_run_no_writes': True, 'cli_status_fully_verified': True,

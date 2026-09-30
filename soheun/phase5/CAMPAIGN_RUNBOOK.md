@@ -36,6 +36,31 @@ command. It imports source descriptors and pins ownership, but creates no models
 and submits no job. Batch 32,768 is an explicit export choice; it does not change
 training batches. It was exact on the completed 37-model L40 native chain.
 
+## Pilot without changing the full execution scope
+
+Prepare the full manifest once using the commands above. After its prerequisites
+pass and the user-authorized pilot is ready, restrict scheduling to tier A:
+
+```bash
+export CAMPAIGN_PILOT_TIER=A
+export PILOT_LAUNCH_AUTHORIZED=yes
+bash phase5/campaign_allocated.sh 1
+bash phase5/campaign_allocated.sh 2
+bash phase5/campaign_allocated.sh 3
+```
+
+Tier A covers 50 base, 50 smeared and 100 CR ensembles (2,000 networks). It uses
+HH4b, the five declared signal ratios, eta 2/infinity, SR 0.2 and mother seeds
+0–9. `CAMPAIGN_PILOT_TIER=B` selects seeds 10–99; `all` selects 0–99. Advance only
+according to the pilot procedure. The same full manifest and store are reused.
+A completed tier is `CAMPAIGN_PREFIX_COMPLETE` with `selected_scope_complete`
+true, and each trained case has its own `STAGE_ARTIFACTS_COMPLETE` receipt.
+It does not claim the full campaign is complete.
+
+After the separate full-campaign launch decision, unset `CAMPAIGN_PILOT_TIER`
+and set `CAMPAIGN_LAUNCH_AUTHORIZED=yes`. Completed pilot cases are verified and
+reused; changing the scheduling subset does not change model identities.
+
 ## Staged training after the user's launch decision
 
 Use `all` for campaign sweeps/arrays. Standalone engineering tests may use
@@ -76,8 +101,7 @@ may also stop the private server and all clients; restart the allocation/server
 and recover every incomplete case. Fatal MPS fault injection remains untested.
 
 Use the same snapshot, plan, store, output, export profile and patch policy.
-Rerun the interrupted stage command. Recovery restores the last **completed
- epoch** checkpoint, optimizer, schedulers, selection history and RNG state;
+Rerun the interrupted stage command. Recovery restores the last **completed epoch** checkpoint, optimizer, schedulers, selection history and RNG state;
 work since that boundary is replayed. If no valid checkpoint exists, the case
 starts from its declared initialization. Mid-epoch cursor recovery is unsupported.
 A corrupt or mismatched checkpoint must be investigated, not silently discarded.
@@ -103,16 +127,80 @@ explicit case, then repeat with `--apply`. Keep incomplete checkpoints:
 "$PYTHON_BIN" phase5/campaign.py cleanup --output "$CAMPAIGN_OUTPUT" --case CASE_ID
 ```
 
-## Evaluation boundary still to finish
+## Evaluation after the user's aggregation decision
 
-The frozen specification uses upper-only clipping, the pinned continuous-affine
-kernels, B=1000 and alpha=0.05, with the signed-4b variant when required. All
-member scores remain available. The fixed comparison member is seed 0. The development set is the pilot null
-cells at eta 2/infinity and SR size 0.2, seeds 0–99. All three aggregation rules
-are reported, with advisory 5% shape/10% extension thresholds; the user makes
-the final aggregation/member-count decision before inspecting power results.
+The fixed comparison member is seed 0. The development set is the pilot null
+cells at eta 2/infinity and SR size 0.2, seeds 0–99. Count/shape diagnostics for
+all three aggregation rules inform the user decision; the 5%/10% thresholds are
+advisory. Run the pre-power diagnostics inside an allocation after the selected null
+models complete:
 
-A store-backed evaluation launcher and new-output-root table/figure adapters are
-still required before this runbook is complete. Do not execute the legacy master
-figure runner against the old cache as a substitute: its task paths target
-historical outputs. No evaluation launch command is claimed runnable yet.
+```bash
+"$PYTHON_BIN" phase5/diagnose_campaign_ensemble.py \
+  --execution "$CAMPAIGN_OUTPUT" --tier A --device cuda \
+  --output /absolute/new/null-development/tier-A
+```
+
+Use `--resume` after interruption and `--tier all` for the full 100-seed
+comparison. X1 CR predictions needed for the existing train-quantile binning are
+computed transiently from best weights; they do not expand permanent score
+storage. The output records all member errors, all rule metrics, correlations
+and the advisory choice. K=15 projections assume unchanged bias and an
+exchangeable linear-averaging variance model; the nonlinear aggregation rules
+make that approximation, not a measured guarantee.
+Do not inspect power to choose the primary aggregation rule.
+
+After the user chooses, record `primary_rule` and a `decision_reference` in a
+JSON file. The reference identifies the actual recorded decision; do not invent
+one. Choose from `single`, `mean_probability`, `mean_log_density_ratio`, or
+`mean_density_ratio`. Evaluation runs all four as primary/secondary comparisons
+unless an explicit smaller `--rules` list is requested.
+
+Build the pinned kernel inside an appropriate CPU allocation:
+
+```bash
+g++ -O2 -std=c++17 -fPIC -shared -fno-fast-math -ffp-contract=off \
+  run_files/affine_envelope_kernel.cpp -o run_files/affine_envelope_kernel.so
+
+"$PYTHON_BIN" phase5/select_campaign_scope.py --plan "$CAMPAIGN_PLAN" \
+  --scope pilot-A --output /absolute/new/pilot-A-cases.json
+
+"$PYTHON_BIN" phase5/evaluate_campaign.py --execution "$CAMPAIGN_OUTPUT" \
+  --case-file /absolute/new/pilot-A-cases.json \
+  --decision /absolute/path/to/recorded-user-decision.json \
+  --output /absolute/new/evaluation/pilot-A
+```
+
+Add `--resume` to reuse verified completed test records after interruption.
+Changing the decision, frozen recipe, NumPy version or compiled binary refuses
+reuse. The evaluation never changes model weights or stored score arrays.
+It applies upper-only clipping, B=1000, alpha=0.05, seed 1729, and automatically
+uses the signed-4b kernel when the retained physical weights require it.
+Input hashes, event order, normalization/clipping diagnostics, kernel hashes and
+maximizing nuisance intervals are retained with each result.
+
+Independent CPU jobs can use disjoint case lists and separate evaluation roots.
+Do not point concurrent evaluators at one output root. Merge all completed
+shards by repeating `--evaluation`:
+
+```bash
+"$PYTHON_BIN" phase5/summarize_campaign_evaluation.py \
+  --evaluation /absolute/new/evaluation/pilot-A \
+  --scope pilot-A --output /absolute/new/summaries/pilot-A
+
+"$PYTHON_BIN" phase5/render_campaign_power.py \
+  --summary /absolute/new/summaries/pilot-A \
+  --output /absolute/new/figures/pilot-A
+```
+
+The summary refuses duplicate, missing or extra cases/rules against the selected
+frozen scope. It writes all-rule summaries and primary-rule table cells/CSVs;
+infinity cells remain separate until manuscript placement is decided. Pilot
+power PDFs have a pilot prefix. These tools never write into the legacy figure
+or cache directories. Use `--tex` to enable the manuscript's external TeX fonts
+when that environment is available.
+
+The signal-concentration, pull and remaining illustration adapters and final
+measured resource settings are still
+needed before this runbook is complete. Do not substitute the legacy master
+figure runner, whose paths target historical outputs.

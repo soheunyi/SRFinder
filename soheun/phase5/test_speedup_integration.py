@@ -77,9 +77,17 @@ def main():
     assert all(m['execution_policy']['patches']==PATCHES for m in manifests)
     metrics=[json.loads(p.read_text()) for p in (args.out/'optimized/tasks').glob('*/execution-metrics.json')]
     assert any(m.get('cuda_graphs',{}).get('replays',0)>0 for m in metrics)
+    attention_cases=[n['id'] for n in plan['nodes'] if n['stage']==2 or n.get('input_space')=='base_encoder']
+    for key in attention_cases:
+        metric=json.loads((args.out/'optimized/tasks'/key/'execution-metrics.json').read_text())
+        assert metric['cuda_graphs']['captures']>0 and metric['cuda_graphs']['replays']>0
+    import stacked_attention_classifier as sa
+    original_attention=sa.independent_step
+    with execution_patches(PATCHES):assert sa.independent_step is not original_attention
+    assert sa.independent_step is original_attention
     result={'status':'PASS','cases':len(baseline['case_ids']),'receipts_exact':True,
             'model_optimizer_scheduler_history_exact':True,'epoch_resume_exact':True,
-            'attention_history_flush':True,'scope_restored':True,'execution_policy_recorded':True}
+            'attention_graph_replays_and_scope_restored':True,'attention_history_flush':True,'scope_restored':True,'execution_policy_recorded':True}
     (args.out/'report.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result),flush=True)
 

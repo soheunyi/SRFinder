@@ -99,13 +99,14 @@ def prepare_execution(store, plan, output, *, case_ids=None, device='cpu',
 
 def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                  resident='auto', safety_bytes=None, compute_headroom_bytes=None,
-                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=(), through_stage=3):
+                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=(), through_stage=3, work_case_ids=None):
     """Execute only a declared plan/closure with at most nproc tasks in flight.
 
     A max_new_cases prefix stops cleanly after complete training/export/registry
     transactions. It does not simulate mid-epoch recovery. Worker count and
     placement may change on resume; plan, scope, code and export profile may not.
-    through_stage bounds scheduling without changing the full declared scope.
+    through_stage and work_case_ids bound scheduling without changing the full
+    declared scope, so pilot results can be reused by the later full campaign.
     """
     if type(through_stage) is not int or through_stage not in (1,2,3):
         raise ValueError('through_stage must be 1, 2 or 3')
@@ -132,7 +133,11 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
             value = registry.get(node['id'])
             if value is not None:
                 done[node['id']] = value['completion_id']
-        remaining = [node for node in nodes if node['id'] not in done and node['stage']<=through_stage]
+        active_nodes=nodes if work_case_ids is None else selected_nodes(plan,work_case_ids)
+        if {n['id'] for n in active_nodes}-{n['id'] for n in nodes}:
+            raise ValueError('Work selection lies outside the prepared execution scope')
+        active_nodes=[n for n in active_nodes if n['stage']<=through_stage]
+        remaining = [node for node in active_nodes if node['id'] not in done]
         limit = len(remaining) if max_new_cases is None else min(max_new_cases, len(remaining))
         workers = min(nproc, max(1, limit))
         budget = None
@@ -149,7 +154,9 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                    'compute_headroom_bytes': compute_headroom_bytes,
                    'export_batch_size': export_batch_size, 'execution_patches': execution_patches}
         _atomic_json(root / 'latest-execution.json', {'requested_workers': nproc,
-            'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases, 'through_stage': through_stage})
+            'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases, 'through_stage': through_stage,
+            'work_case_ids':None if work_case_ids is None else sorted(work_case_ids),
+            'scheduled_case_count':len(active_nodes)})
         started = time.monotonic()
         new_count = 0
         in_flight = {}
@@ -201,7 +208,9 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
             status = 'CAMPAIGN_ARTIFACTS_COMPLETE' if len(done) == len(nodes) else 'CAMPAIGN_PREFIX_COMPLETE'
             result = {'status': status, 'plan_sha256': manifest['plan_sha256'],
                 'runtime_sha256': manifest['runtime_sha256'], 'case_ids': manifest['case_ids'],
-                'completion_ids': done, 'max_in_flight': max_in_flight}
+                'completion_ids': done, 'max_in_flight': max_in_flight,
+                'selected_scope_complete':all(n['id'] in done for n in active_nodes),
+                'scheduled_case_count':len(active_nodes)}
             _atomic_json(root / 'completion.json', result)
             progress(status)
             return result

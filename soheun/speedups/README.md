@@ -33,22 +33,29 @@ beat five there. Node-local checkpoints made no difference against NFS.
 
 ## Step 2 (AttentionClassifier)
 
-Measured on 15 real prepared Step-2 members (depth 8, ~700k train rows each),
-one L40, three members per worker, 30-epoch schedule (same `c + k/batch`
-interpolation as above):
+The full 30-epoch, 15-member single-worker comparison measured 661.26 s
+with `nosync,fast_gbn` and 314.20 s with graphs added: 2.10x faster fitting.
+Peak allocated memory was 1.66 GB eager and 2.25 GB graphed. States, histories,
+best weights and probe predictions were identical, including a fresh-process
+restart at epoch 16. The concurrent exactness check ran five workers, each
+repeating the same three-member subset; it did not test five 15-member ensembles.
 
-| Configuration | members per GPU-hour | vs 1 worker |
+Separate fixed-batch tests use 15 prepared members split three per worker on
+one L40. The rates below **project** the 30-epoch schedule using `c + k/batch`
+interpolation from batch sizes 1,024 and 32,768; they are not measured full-
+schedule rates for five production 15-member ensembles.
+
+| Configuration | projected members per GPU-hour | vs 1 worker |
 |---|---:|---:|
 | 1 worker, current | 72 | 1.0x |
 | 5 workers, current | 228 | 3.2x |
 | 5 workers + MPS + `nosync`,`fast_gbn` | 343 | 4.8x |
 | 5 workers + MPS + `nosync`,`fast_gbn`,`graphs` | 1,011 | 14.1x |
 
-Exactness: graphed vs eager on all 15 members for the full 30 epochs, with an
-interruption after epoch 16 and a resume, and five graphed MPS workers against
-eager, all identical. The artifact-path integration test
-(`phase5/test_speedup_integration.py`) passes. Peak GPU memory with graphs is
-0.52 GB per worker at batch 32,768.
+The 0.52 GB peak belongs to a three-member worker at fixed batch 32,768;
+do not use it as a 15-member production-worker memory bound. Actual artifact-
+path integration also passed on small attention tasks. Production group-size
+throughput and aggregate memory still need measurement.
 
 ## Exactness
 
