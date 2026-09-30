@@ -188,3 +188,24 @@ completed-prefix and interrupted-epoch recovery, completed reuse without workers
 frozen optimizer rejection, changed artifact/source rejection, seed-based score
 selection, explicit aggregation, and CLI dry-run/status behavior. These checks
 are implementation acceptance, not calibration results or campaign launch.
+
+
+## Optional execution optimizations
+
+The speedups module supplies nosync, fast_gbn, fast_reinforce and CUDA graphs
+through an explicit execution_patches argument. The campaign CLI accepts
+--execution-patches with the same comma-separated names. Defaults are empty.
+Prepare/run/resume must use the same named policy; ownership manifests record
+its implementation hashes and reject incompatible recovery. Graphs accelerate
+FvT forward/backward; Adam and attention-model training remain eager.
+
+The policy runs in a temporary process-local scope so reused workers restore
+their original functions afterward. The private MPS wrapper is optional and
+manages only its own server. A fatal MPS client failure still requires recovery
+of affected workers from completed-epoch checkpoints.
+
+Eight-case artifact-pipeline checks passed with and without MPS: baseline and
+optimized receipts, final/best model state, Adam/scheduler/history, and actual
+interrupted-epoch recovery agreed exactly. These checks use a small fixture.
+The reported 2.6x full-schedule throughput gain is a projection from fixed-batch
+proxy measurements; native full-schedule performance remains to be measured.

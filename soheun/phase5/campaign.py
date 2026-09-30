@@ -35,6 +35,7 @@ def main():
         parser.add_argument('--case', action='append', dest='case_ids')
         parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda')
         parser.add_argument('--export-batch-size', type=int, default=1024)
+        parser.add_argument('--execution-patches', default='', help='Optional comma-separated nosync,fast_gbn,fast_reinforce,graphs')
         if parser is prep:
             parser.add_argument('--dry-run', action='store_true')
             parser.add_argument('--resume', action='store_true')
@@ -72,12 +73,14 @@ def main():
         return
     if args.export_batch_size < 1:
         raise ValueError('Positive export batch size required')
+    from speedups.policy import normalize
+    patches = normalize(args.execution_patches.split(',') if args.execution_patches else [])
     plan = json.loads(args.plan.read_text())
     nodes = selected_nodes(plan, args.case_ids)
     if args.operation == 'prepare' and args.dry_run:
         # A shim prevents even creating store directories in this mode.
         manifest = execution_manifest(SimpleNamespace(root=args.store), plan, case_ids=args.case_ids,
-            device=args.device, export_batch_size=args.export_batch_size)
+            device=args.device, export_batch_size=args.export_batch_size, execution_patches=patches)
         print(json.dumps({'status': 'DRY_RUN_NO_WRITES_NO_SUBMISSION',
             'plan_sha256': manifest['plan_sha256'], 'runtime_sha256': manifest['runtime_sha256'],
             'cases': len(nodes), 'members_by_stage': {str(stage): sum(n['member_count'] for n in nodes if n['stage'] == stage)
@@ -90,7 +93,7 @@ def main():
     store = TrainingStore(args.store)
     if args.operation == 'prepare':
         result = prepare_execution(store, plan, args.output, case_ids=args.case_ids, device=args.device,
-            export_batch_size=args.export_batch_size, resume=args.resume)
+            export_batch_size=args.export_batch_size, resume=args.resume, execution_patches=patches)
     else:
         # Explicit run after prepare is a resume of ownership, not necessarily a resumed fit.
         if not (args.output / 'prepared.json').is_file():
@@ -99,7 +102,7 @@ def main():
         result = run_campaign(store, plan, args.output, case_ids=args.case_ids, nproc=args.nproc,
             device=args.device, resident=resident, safety_bytes=args.safety_gib,
             compute_headroom_bytes=args.compute_headroom_gib, export_batch_size=args.export_batch_size,
-            resume=True, max_new_cases=args.max_new_cases)
+            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches)
     print(json.dumps(result, indent=2), flush=True)
 
 
