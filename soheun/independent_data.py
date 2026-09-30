@@ -129,8 +129,10 @@ class IndependentStackedDataModule(pl.LightningDataModule):
     def validation_probe(self, limit):
         """Explicit common-prefix diagnostic only; training/evaluation loaders use all rows."""
         n = min(limit, *(len(d) for d in self.val_datasets))
-        return TensorDataset(*(torch.stack([d.tensors[j][:n] for d in self.val_datasets], 1).cpu()
-                               for j in range(len(self.val_datasets[0].tensors))))
+        members = [d.gather(torch.arange(n, device=d.device)) if hasattr(d, 'gather')
+                   else tuple(t[:n] for t in d.tensors) for d in self.val_datasets]
+        return TensorDataset(*(torch.stack([values[j] for values in members], 1).cpu()
+                               for j in range(len(members[0]))))
 
 
 def row_counts(dm, training):

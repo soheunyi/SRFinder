@@ -55,6 +55,19 @@ def stream_checks():
             for i,b in enumerate(batch['members']):
                 if b is not None:counts[i]+=len(b[1])
         assert counts==VAL_LENGTHS
+    class IndexedView:
+        def __init__(self, dataset):
+            self.dataset = dataset
+            self.device = dataset.tensors[0].device
+            self.indices = torch.arange(len(dataset)-1, -1, -1, device=self.device)
+        def __len__(self): return len(self.indices)
+        def gather(self, positions):
+            ids = self.indices.index_select(0, positions)
+            return tuple(t.index_select(0, ids) for t in self.dataset.tensors)
+    indexed = IndependentStackedDataModule(train, [IndexedView(d) for d in val], 64, shuffle_seeds=SEEDS)
+    probe = indexed.validation_probe(9)
+    for i in range(3):
+        assert torch.equal(probe.tensors[0][:,i], val[i].tensors[0].flip(0)[:9])
     partial=dm([0,1,2]);loader=partial.loader_for_epoch(0)
     partial.note_training_batch()
     try:partial.state_dict()
