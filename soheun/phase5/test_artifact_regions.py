@@ -6,7 +6,7 @@ import tempfile
 from types import SimpleNamespace
 import numpy as np
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
-from artifacts.training_store import TrainingStore
+from artifacts.training_store import TrainingStore,canonical
 from artifacts.regions import derive_region_scores,define_regions,classify_X2
 from signal_region import get_SR_CR_cut
 
@@ -51,12 +51,33 @@ def main():
         assert store.read(region)['payload']['log_tau_s']==float(cuts[0])
         before=store.storage_stats();groups=classify_X2(store,region,bp[1],sp[1]);assert store.storage_stats()==before
         np.testing.assert_array_equal(groups['SR'],expected[1]>=cuts[0])
-        np.testing.assert_array_equal(groups['CR'],(expected[1]>=cuts[1])&(expected[1]<cuts[0]))
+        np.testing.assert_array_equal(groups['CR'],expected[1]<cuts[0])
+        assert not groups['neither'].any()
+        assert store.read(region)['payload']['log_tau_c'] is None
+        assert store.read(region)['identity']['cr_lower_bound']=='none'
+        assert b'"log_tau_c":null' in canonical(store.read(region))
+        old=define_regions(store,bp[0],mid,sp[0],sr_fraction=.25,cr_fraction=.75,
+                           quantile_recipe='existing_get_SR_CR_cut_v1')
+        assert old!=region and store.read(old)['payload']['log_tau_c']==float(cuts[1])
+        legacy=classify_X2(store,old,bp[1],sp[1])
+        np.testing.assert_array_equal(legacy['CR'],(expected[1]>=cuts[1])&(expected[1]<cuts[0]))
+        assert legacy['neither'].any()
+        partial=define_regions(store,bp[0],mid,sp[0],sr_fraction=.25,cr_fraction=.5)
+        partial_cuts=get_SR_CR_cut(expected[0],Events(weights=metadata['weight'],is_4b=metadata['is_4b']),{'4b_in_SR':.25,'4b_in_CR':.5})
+        assert store.read(partial)['payload']['log_tau_c']==float(partial_cuts[1])
+        assert store.read(partial)['identity']['cr_lower_bound']=='finite'
+        positive=metadata.copy();positive['weight']=1.
+        positive_id=store.put_array('event_metadata',{'dataset_id':dataset,'split_id':splits[0],'fixture':'positive'},positive)
+        balanced=define_regions(store,bp[0],positive_id,sp[0],sr_fraction=.25,cr_fraction=.75)
+        threshold=store.read(balanced)['payload']['log_tau_s']
+        x1cr=expected[0]<threshold
+        assert positive['weight'][positive['is_4b'] & x1cr].sum()/positive['weight'][positive['is_4b']].sum()==.75
+        assert np.all(x1cr | (expected[0]>=threshold))
         assert np.all(groups['SR'].astype(int)+groups['CR']+groups['neither']==1)
         rejects(lambda:derive_region_scores(store,bp[0],sp[0][::-1]))
         rejects(lambda:define_regions(store,bp[1],mid,sp[1],sr_fraction=.25,cr_fraction=.75))
         rejects(lambda:classify_X2(store,region,bp[0],sp[0]))
-    print('PASS: paired raw scores, native thresholds, X1/X2 separation, complete partition and no derived-array writes')
+    print('PASS: complete complement CR, unchanged SR cuts, finite legacy/partial reads, canonical null and positive X1 weight fraction')
 
 
 if __name__=='__main__':main()

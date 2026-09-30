@@ -73,6 +73,8 @@ def fixture(output):
             'axes': {'mother_seed': mother, 'epsilon': '0', 'eta': '2.0', 'sr_fraction': '.05',
                      'model': 'AttentionClassifier'}, 'requires': [ids[1], ids[2]],
             'region_member_seeds': [1], 'input_space': 'base_encoder', 'purpose': 'original_vs_representation'})
+    for node in plan['nodes']:
+        if node['stage']==3:node['region_recipe']='sr_quantile_cr_complement_v2'
     plan['nodes'].sort(key=lambda node: node['stage'])
     return plan
 
@@ -142,12 +144,16 @@ def main():
     recovered = run_campaign(store, plan, args.out / 'interrupted', case_ids=[first_case], nproc=1,
                              resume=True, **options)
     assert recovered['completion_ids'][first_case] == serial['completion_ids'][first_case]
-    prefix = run_campaign(store, plan, args.out / 'parallel', nproc=2, max_new_cases=2, **options)
+    prefix = run_campaign(store, plan, args.out / 'parallel', nproc=2, through_stage=1, **options)
+    assert set(prefix['completion_ids'])=={n['id'] for n in plan['nodes'] if n['stage']==1}
     assert prefix['status'] == 'CAMPAIGN_PREFIX_COMPLETE' and len(prefix['completion_ids']) == 2
     checkpoints = list((args.out / 'parallel' / 'tasks').glob('*/training/last.ckpt'))
     assert len(checkpoints) == 2
     before = {p: p.stat().st_mtime_ns for p in checkpoints}
-    parallel = run_campaign(store, plan, args.out / 'parallel', nproc=2, resume=True, **options)
+    second = run_campaign(store, plan, args.out / 'parallel', nproc=1, resume=True, through_stage=2, **options)
+    assert second['status']=='CAMPAIGN_PREFIX_COMPLETE'
+    assert set(second['completion_ids'])=={n['id'] for n in plan['nodes'] if n['stage']<=2}
+    parallel = run_campaign(store, plan, args.out / 'parallel', nproc=2, resume=True, through_stage=3, **options)
     assert parallel['max_in_flight'] <= 2
     assert parallel['completion_ids'] == serial['completion_ids']
     assert all(p.stat().st_mtime_ns == stamp for p, stamp in before.items())
@@ -173,7 +179,8 @@ def main():
     expect_error(lambda: reader.member_score_ids(cr_case, 'X1'))
     expect_error(lambda: reader.member_score_ids(cr_case, 'X2', member_seeds=[99]))
     masks = reader.held_out_regions(cr_case)
-    assert np.all(masks['SR'] | masks['CR'] | masks['neither']) and not np.any(masks['SR'] & masks['CR'])
+    assert np.all(masks['SR'] | masks['CR']) and not np.any(masks['SR'] & masks['CR'])
+    assert not np.any(masks['neither'])
     bad = deepcopy(plan)
     bad['templates']['base']['optimizer']['lr'] = .001
     expect_error(lambda: run_campaign(store, bad, args.out / 'parallel', resume=True, **options))
@@ -202,7 +209,7 @@ def main():
     expect_error(lambda: registry.get(case))
     mother.write_bytes(raw)
     report = {'status': 'PASS', 'device': args.device, 'logical_cases': 8,
-        'serial_spawn_receipts_exact': True, 'prefix_resume_without_refit': True,
+        'serial_spawn_receipts_exact': True, 'staged_1_2_3_same_manifest_exact': True, 'prefix_resume_without_refit': True,
         'bounded_max_in_flight': parallel['max_in_flight'], 'completed_resume_without_workers': True,
         'frozen_optimizer_enforced': True, 'cached_dependency_mutation_rejected': True, 'epoch_interruption_recovery_exact': True,
         'cli_dry_run_no_writes': True, 'cli_status_fully_verified': True,

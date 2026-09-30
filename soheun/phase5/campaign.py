@@ -48,6 +48,8 @@ def main():
             parser.add_argument('--safety-gib', type=gib)
             parser.add_argument('--compute-headroom-gib', type=gib)
             parser.add_argument('--max-new-cases', type=int)
+            parser.add_argument('--through-stage',type=int,choices=[1,2,3],default=3,
+                                help='Run only through this stage, preserving the full prepared scope')
     status = sub.add_parser('status')
     status.add_argument('--output', type=Path, required=True)
     status.add_argument('--verify', action='store_true', help='Fully verify registered case results and source inputs')
@@ -113,7 +115,7 @@ def main():
         result = run_campaign(store, plan, args.output, case_ids=args.case_ids, nproc=args.nproc,
             device=args.device, resident=resident, safety_bytes=args.safety_gib,
             compute_headroom_bytes=args.compute_headroom_gib, export_batch_size=args.export_batch_size,
-            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches)
+            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches, through_stage=args.through_stage)
     print(json.dumps(result, indent=2), flush=True)
 
 

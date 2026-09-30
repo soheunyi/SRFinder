@@ -99,13 +99,16 @@ def prepare_execution(store, plan, output, *, case_ids=None, device='cpu',
 
 def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                  resident='auto', safety_bytes=None, compute_headroom_bytes=None,
-                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=()):
+                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=(), through_stage=3):
     """Execute only a declared plan/closure with at most nproc tasks in flight.
 
     A max_new_cases prefix stops cleanly after complete training/export/registry
     transactions. It does not simulate mid-epoch recovery. Worker count and
     placement may change on resume; plan, scope, code and export profile may not.
+    through_stage bounds scheduling without changing the full declared scope.
     """
+    if type(through_stage) is not int or through_stage not in (1,2,3):
+        raise ValueError('through_stage must be 1, 2 or 3')
     if type(nproc) is not int or nproc < 1:
         raise ValueError('Positive worker count required')
     if max_new_cases is not None and (type(max_new_cases) is not int or max_new_cases < 1):
@@ -129,7 +132,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
             value = registry.get(node['id'])
             if value is not None:
                 done[node['id']] = value['completion_id']
-        remaining = [node for node in nodes if node['id'] not in done]
+        remaining = [node for node in nodes if node['id'] not in done and node['stage']<=through_stage]
         limit = len(remaining) if max_new_cases is None else min(max_new_cases, len(remaining))
         workers = min(nproc, max(1, limit))
         budget = None
@@ -146,7 +149,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                    'compute_headroom_bytes': compute_headroom_bytes,
                    'export_batch_size': export_batch_size, 'execution_patches': execution_patches}
         _atomic_json(root / 'latest-execution.json', {'requested_workers': nproc,
-            'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases})
+            'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases, 'through_stage': through_stage})
         started = time.monotonic()
         new_count = 0
         in_flight = {}

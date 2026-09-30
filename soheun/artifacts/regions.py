@@ -65,8 +65,10 @@ def derive_region_scores(store, base_score_ids, smeared_score_ids=None, *, ensem
     return result,definition
 
 
-def define_regions(store, base_X1_scores, event_metadata_id, smeared_X1_scores=None, *, sr_fraction, cr_fraction, ensemble_mode='max'):
+def define_regions(store, base_X1_scores, event_metadata_id, smeared_X1_scores=None, *, sr_fraction, cr_fraction, ensemble_mode='max', quantile_recipe='sr_quantile_cr_complement_v2'):
     from signal_region import get_SR_CR_cut
+    if quantile_recipe not in ('existing_get_SR_CR_cut_v1','sr_quantile_cr_complement_v2'):
+        raise ValueError('Unsupported region quantile recipe')
     if not 0<sr_fraction<1 or not 0<cr_fraction<=1-sr_fraction+1e-12:
         raise ValueError('Invalid requested SR/CR fractions')
     values,definition=derive_region_scores(store,base_X1_scores,smeared_X1_scores,ensemble_mode=ensemble_mode)
@@ -86,13 +88,17 @@ def define_regions(store, base_X1_scores, event_metadata_id, smeared_X1_scores=N
     cuts=get_SR_CR_cut(values,_WeightedEvents(weights=weights,is_4b=labels),
                        {'4b_in_SR':sr_fraction,'4b_in_CR':cr_fraction})
     if not np.isfinite(cuts).all():raise ValueError('Nonfinite region thresholds')
+    complement=(quantile_recipe=='sr_quantile_cr_complement_v2'
+                and abs(cr_fraction-(1-sr_fraction))<=1e-12)
     identity={'definition':definition,'base_score_ids':list(base_X1_scores),
               'smeared_score_ids':list(smeared_X1_scores or []),'event_metadata_id':event_metadata_id,
               'requested_sr_fraction':sr_fraction,'requested_cr_fraction':cr_fraction,
-              'quantile_recipe':'existing_get_SR_CR_cut_v1',
+              'quantile_recipe':quantile_recipe,
               'quantile_code_sha256':hashlib.sha256(inspect.getsource(get_SR_CR_cut).encode()).hexdigest(),
               'quantile_fraction_clip':[.001,.999]}
-    return store._record('region',identity,{'log_tau_s':float(cuts[0]),'log_tau_c':float(cuts[1]),
+    if quantile_recipe=='sr_quantile_cr_complement_v2':
+        identity['cr_lower_bound']='none' if complement else 'finite'
+    return store._record('region',identity,{'log_tau_s':float(cuts[0]),'log_tau_c':None if complement else float(cuts[1]),
                                           'X1_4b_weight_total':total,'X1_rows':len(values)})
 
 
@@ -107,5 +113,5 @@ def classify_X2(store, region_id, base_X2_scores, smeared_X2_scores=None):
         raise ValueError('X2 scores do not match the frozen region definition')
     lower,upper=region['payload']['log_tau_c'],region['payload']['log_tau_s']
     sr=score>=upper
-    cr=(score>=lower)&~sr
+    cr=~sr if lower is None else (score>=lower)&~sr
     return {'log_psi':score,'SR':sr,'CR':cr,'neither':~(sr|cr),'region_id':region_id}

@@ -67,7 +67,8 @@ def materialize_task(store,node,source_pointer,members,parents,*,expected_datase
         fraction=Decimal(str(axes['sr_fraction']))
         region=define_regions(store,[m['scores']['X1'] for m in base],by_stage[1]['receipt']['event_metadata_ids']['X1'],
             [m['scores']['X1'] for m in smooth] if smooth else None,
-            sr_fraction=float(fraction),cr_fraction=float(1-fraction))
+            sr_fraction=float(fraction),cr_fraction=float(1-fraction),
+            quantile_recipe=node.get('region_recipe','existing_get_SR_CR_cut_v1'))
         upstream={'region_id':region,'base_X2_scores':[m['scores']['X2'] for m in base]}
         if smooth:upstream['smeared_X2_scores']=[m['scores']['X2'] for m in smooth]
         if members[0]['model']=='AttentionClassifier':
