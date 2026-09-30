@@ -109,8 +109,8 @@ a multi-pool sample. A three-estimator, 20-epoch residency comparison measured
 about 2.98x at batch 1,024 and 1.33x at batch 32,768, with exact checked outputs.
 These are scoped results; raw experimental history is excluded from this review.
 
-Full-schedule GPU comparisons, representative Step-2/CR measurements, GPU tests of
-the new stage APIs, measured headroom, real-data end-to-end export, full campaign
+The full serial/parallel comparison, representative-scale CR measurements, GPU
+tests of the new stage APIs, measured headroom, real-data end-to-end export, full campaign
 binding and scientific acceptance gates remain open in #4 and #6. Passing the
 CPU suite or merging this patch does not establish full-campaign readiness.
 
