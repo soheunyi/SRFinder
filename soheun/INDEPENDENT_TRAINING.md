@@ -87,3 +87,31 @@ ordering and the frozen X1-defined threshold. It uses a common log-domain scale
 for 3b weights and checks both endpoint normalizers. Synthetic agreement with
 the existing signed bootstrap reference is an interface check, not a claim of
 real-data calibration.
+
+
+## Source, region and member-split reconstruction
+
+The verified source adapter checks raw-pool and mother-selection fingerprints
+before reconstructing X1/X2 from the native seed recipe. The region adapter
+pairs base and smeared models, freezes thresholds from X1 scores, and checks
+X2 ordering before classifying SR/CR/neither. Original-feature Step-3 contexts
+select only frozen CR rows. Representation-based CR diagnostics remain separate
+integration work.
+
+Member splits reproduce each stage's native shuffle/split order, storing only
+recipes, counts and ordered fingerprints. Recipes pin implementation and library
+versions and exclude legacy auxiliary score arrays. Step-1/2 source/split checks
+also passed against a real multi-pool sample; this does not validate a complete
+real-data three-stage retraining workflow.
+
+The synthetic three-stage test trains two members for two epochs per stage,
+registers best weights and member scores, defines regions on X1, trains CR
+members, exports all X2 rows, and prepares test inputs without running bootstrap
+inference. It checks reconstructed rows against actual training tensors, caller
+RNG preservation and rejection of swapped split receipts across multiple pools.
+These interfaces do not yet provide a full campaign launcher or a validated
+cleanup/completion protocol.
+
+Additional tests: phase5/test_source_context.py,
+phase5/test_artifact_regions.py, phase5/test_artifact_step3_context.py and
+phase5/test_three_stage_artifacts.py (requires --out pointing to a new directory).
