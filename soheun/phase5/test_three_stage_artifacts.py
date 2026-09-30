@@ -10,6 +10,7 @@ import hashlib
 import pathlib
 import sys
 import json
+from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import torch
@@ -32,8 +33,12 @@ from artifacts.step2_context import ArtifactStep2Context
 from artifacts.step3_context import ArtifactStep3Context
 from artifacts.model_loading import load_model
 from artifacts.export_scores import export_member_scores
+from artifacts.export_stage import export_stage
 from artifacts.regions import define_regions,classify_X2
 from artifacts.affine_inputs import prepare_affine_inputs
+from artifacts.train_stage import train_stage, _TrainingHistory
+from artifacts.stage_completion import complete_stage,verify_stage_completion
+from artifacts.run_stage import run_stage
 
 N=2048
 
@@ -52,7 +57,7 @@ def hparams(stage,member):
             'smearing':{'noise_scale':2.,'seed':0,'hard_cutoff':False,'scale_mode':'std'}}
 
 
-def train(store,source,contexts,directory):
+def reference_train(store,source,contexts,directory):
     directory.mkdir(parents=True)
     stage=contexts[0].hparams['step'];hp=contexts[0].hparams
     names=[f'member-{i}' for i in range(len(contexts))]
@@ -77,7 +82,7 @@ def train(store,source,contexts,directory):
     saver=ResumableIndividualSaver(save_dir=directory/'models',run_names=names,
         monitor_metrics=[f'val_loss_stack_{i}' for i in range(len(contexts))],model=hp['model'])
     trainer=pl.Trainer(accelerator='cpu',devices=1,max_epochs=2,logger=False,
-        callbacks=[saver,ModelCheckpoint(dirpath=directory,save_last=True,save_top_k=0,save_on_train_epoch_end=True)],
+        callbacks=[saver,_TrainingHistory(),ModelCheckpoint(dirpath=directory,save_last=True,save_top_k=0,save_on_train_epoch_end=True)],
         plugins=[AtomicCheckpointIO()],num_sanity_val_steps=0,reload_dataloaders_every_n_epochs=1,
         enable_progress_bar=False,enable_model_summary=False)
     trainer.fit(model,datamodule=dm)
@@ -112,6 +117,61 @@ def train(store,source,contexts,directory):
     return ids
 
 
+def assert_tree_equal(left,right):
+    if isinstance(left,torch.Tensor):torch.testing.assert_close(left,right,rtol=0,atol=0)
+    elif isinstance(left,dict):
+        assert left.keys()==right.keys()
+        for key in left:assert_tree_equal(left[key],right[key])
+    elif isinstance(left,(list,tuple)):
+        assert len(left)==len(right)
+        for a,b in zip(left,right):assert_tree_equal(a,b)
+    else:assert left==right
+
+
+def train(store,source,contexts,directory):
+    reference=reference_train(store,source,contexts,directory/'reference')
+    output=directory/'worker'
+    prefix=train_stage(store,contexts,output,resident='auto',stop_after_completed_epochs=1)
+    assert prefix['memory_policy']['placement']=='cpu'
+    assert prefix['status']=='INTERRUPTED_RECOVERABLE' and prefix['completed_epochs']==1
+    assert not (output/'training-completion.json').exists()
+    result=train_stage(store,contexts,output,resume=True)
+    assert result['status']=='TRAINING_COMPLETE_EXPORT_PENDING' and result['completed_epochs']==2
+    assert result['shared_raw_banks']==(0 if contexts[0].hparams['step']==2 else 1)
+    for expected,actual in zip(reference,result['model_ids']):
+        assert_tree_equal(load_model(store,expected).state_dict(),load_model(store,actual).state_dict())
+        expected_recipe=store.read(expected,'model')['identity']['training_recipe']
+        actual_recipe=store.read(actual,'model')['identity']['training_recipe']
+        for key in ('best_epoch','best_val_loss'):
+            assert expected_recipe[key]==actual_recipe[key]
+    ref=torch.load(directory/'reference'/'last.ckpt',map_location='cpu',weights_only=False)
+    actual=torch.load(output/'last.ckpt',map_location='cpu',weights_only=False)
+    for name in ('state_dict','optimizer_states','lr_schedulers','artifact_training_history'):
+        assert_tree_equal(ref[name],actual[name])
+    with patch.object(pl.Trainer,'fit',side_effect=AssertionError('Completed training repeated')):
+        assert train_stage(store,contexts,output,resume=True)==result
+    changed=copy.copy(contexts[0]);changed._hparams=copy.deepcopy(contexts[0]._hparams)
+    changed._hparams['train_seed']+=1
+    try:train_stage(store,[changed,*contexts[1:]],output,resume=True)
+    except ValueError:pass
+    else:raise AssertionError('Changed training recipe accepted on resume')
+    coordinated=directory/'coordinated'
+    prefix=run_stage(store,contexts,source,coordinated,resident='auto',export_batch_size=128,stop_after_completed_epochs=1)
+    assert prefix['status']=='INTERRUPTED_RECOVERABLE'
+    with patch('artifacts.run_stage.export_stage',side_effect=RuntimeError('Synthetic export interruption')):
+        try:run_stage(store,contexts,source,coordinated,resume=True,export_batch_size=128)
+        except RuntimeError as exc:assert str(exc)=='Synthetic export interruption'
+        else:raise AssertionError('Expected interrupted export')
+    assert not (coordinated/'stage-completion.json').exists()
+    with patch.object(pl.Trainer,'fit',side_effect=AssertionError('Export retry retrained models')):
+        done=run_stage(store,contexts,source,coordinated,resume=True,export_batch_size=128)
+        assert run_stage(store,contexts,source,coordinated,resume=True,export_batch_size=128)==done
+    assert done['status']=='STAGE_ARTIFACTS_COMPLETE'
+    for expected,actual in zip(result['model_ids'],done['model_ids']):
+        assert_tree_equal(load_model(store,expected).state_dict(),load_model(store,actual).state_dict())
+    return result['model_ids']
+
+
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--out',type=pathlib.Path,required=True);args=ap.parse_args()
     args.out.mkdir(parents=True,exist_ok=False)
@@ -141,24 +201,68 @@ def main():
         a['is_4b']=frame.fourTag.values[rows];a['weight']=frame.weight.values[rows]
         event_ids[d]=store.put_array('event_metadata',{'dataset_id':dataset,'split_id':splits[d]},a)
     def export(models,domains,encoders=None):
-        result={d:[] for d in domains}
+        result=export_stage(store,models,source,batch_size=128)
+        assert set(result['score_ids'])==set(domains)
+        splits.update(result['evaluation_splits']);event_ids.update(result['event_metadata_ids'])
+        # Independent direct evaluation in the same fixed inference batches.
         for m,owner in enumerate(models):
+            model=load_model(store,owner)
             encoder=load_model(store,encoders[m]) if encoders is not None else None
-            for d in domains:
-                rows=source.indices(d)
-                features=torch.tensor(frame.iloc[rows][FEATURES].values,dtype=torch.float32)
-                if encoder is not None:
-                    with torch.inference_mode():features=encoder.encoder(features)
-                batches=[(rows[i:i+128],features[i:i+128]) for i in range(0,len(rows),128)]
-                result[d].append(export_member_scores(store,owner,splits[d],rows,batches))
-        return result
+            for domain in domains:
+                rows=source.indices(domain);predictions=[]
+                with torch.inference_mode():
+                    for begin in range(0,len(rows),128):
+                        x=torch.tensor(frame.iloc[rows[begin:begin+128]][FEATURES].values,dtype=torch.float32).contiguous()
+                        if encoder is not None:x=encoder.encoder(x).contiguous()
+                        logits=model(x);predictions.append((logits[:,1]-logits[:,0]).numpy())
+                np.testing.assert_array_equal(store.load_array(result['score_ids'][domain][m]),np.concatenate(predictions))
+                metadata=store.load_array(event_ids[domain])
+                assert len(metadata)==len(rows)
+                np.testing.assert_array_equal(metadata['weight'],frame.weight.values[rows])
+                np.testing.assert_array_equal(metadata['pool'],(rows>=733).astype(np.uint32))
+                np.testing.assert_array_equal(metadata['pool_row'],np.where(rows<733,rows,rows-733))
+        with patch.object(SCDatasetInfo,'fetch_data',side_effect=AssertionError('Cached export read raw features')), \
+             patch('artifacts.export_stage.export_member_scores',side_effect=AssertionError('Cached export ran inference')):
+            assert export_stage(store,models,source,batch_size=128)==result
+        return result['score_ids']
+    completions=[]
+    def finish(stage,scores):
+        result=json.loads((args.out/f'step{stage}'/'worker'/'training-completion.json').read_text())
+        domain_splits={domain:splits[domain] for domain in scores}
+        key=complete_stage(store,result,source,domain_splits,scores,{d:event_ids[d] for d in scores})
+        assert verify_stage_completion(store,key,source)
+        assert complete_stage(store,result,source,domain_splits,scores,{d:event_ids[d] for d in scores})==key
+        bad={domain:list(keys) for domain,keys in scores.items()}
+        bad['X2']=bad['X2'][:-1]
+        try:complete_stage(store,result,source,domain_splits,bad,{d:event_ids[d] for d in scores})
+        except ValueError:pass
+        else:raise AssertionError('Incomplete member predictions accepted')
+        partial=store.put_split(dataset,'X2',source.indices('X2')[:-1],
+            {'algorithm':'incomplete_fixture','version':1,'seed':7})
+        try:complete_stage(store,result,source,{**domain_splits,'X2':partial},scores,{d:event_ids[d] for d in scores})
+        except ValueError:pass
+        else:raise AssertionError('Incomplete X2 event coverage accepted')
+        path=store.records/(result['history_ids'][0]+'.json')
+        original=path.read_bytes()
+        try:
+            changed=json.loads(original);changed['payload'][0]['val_loss']+=1
+            path.write_text(json.dumps(changed))
+            try:verify_stage_completion(store,key,source)
+            except ValueError:pass
+            else:raise AssertionError('Corrupt training history accepted')
+        finally:path.write_bytes(original)
+        assert verify_stage_completion(store,key,source)
+        completions.append(key)
     base=train(store,source,[ArtifactStep1Context(source,hparams(1,m)) for m in range(2)],args.out/'step1')
     base_scores=export(base,('X1','X2'))
+    finish(1,base_scores)
     smooth=train(store,source,[ArtifactStep2Context(store,base[m],source,dataset,hparams(2,m)) for m in range(2)],args.out/'step2')
     smooth_scores=export(smooth,('X1','X2'),encoders=base)
+    finish(2,smooth_scores)
     region=define_regions(store,base_scores['X1'],event_ids['X1'],smooth_scores['X1'],sr_fraction=.2,cr_fraction=.8)
     cr=train(store,source,[ArtifactStep3Context(store,region,source,base_scores['X2'],smooth_scores['X2'],hparams(3,m)) for m in range(2)],args.out/'step3')
     cr_scores=export(cr,('X2',))
+    finish(3,cr_scores)
     ensemble=store.put_ensemble(cr,'mean_probability')
     before=store.storage_stats();log_ratio=store.aggregate_scores(ensemble,cr_scores['X2']);assert store.storage_stats()==before
     groups=classify_X2(store,region,base_scores['X2'],smooth_scores['X2'])
@@ -168,6 +272,8 @@ def main():
     assert audit['positive_normalizers'] and all(np.isfinite(v).all() for v in inputs)
     assert len(cr_scores['X2'])==2 and all(len(store.load_array(key))==len(rows) for key in cr_scores['X2'])
     result={'status':'PASS','scope':'synthetic CPU integration, two members and two epochs per stage; no bootstrap inference',
+            'stage_completion_ids':completions,'permanent_histories_verified':True,
+            'resumed_worker_matches_reference':True,'completed_training_reused':True,
             'models':{'step1':base,'step2':smooth,'step3':cr},'region':region,'all_X2_rows':len(rows),
             'test_input_counts':{'3b':audit['n3'],'4b':audit['n4']},'storage':store.storage_stats()}
     (args.out/'report.json').write_text(json.dumps(result,indent=2)+'\n')

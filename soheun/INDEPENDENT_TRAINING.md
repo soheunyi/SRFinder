@@ -115,3 +115,40 @@ cleanup/completion protocol.
 Additional tests: phase5/test_source_context.py,
 phase5/test_artifact_regions.py, phase5/test_artifact_step3_context.py and
 phase5/test_three_stage_artifacts.py (requires --out pointing to a new directory).
+
+
+## Resumable stage worker and export
+
+run_stage connects verified contexts to training, required-domain export and a
+checked stage-completion receipt. It does not select configurations, submit
+jobs or launch a campaign. Training and export can resume independently: a
+completed training group reuses its best models after an export failure. Output
+locks and recipe/source fingerprints reject concurrent or mismatched reuse.
+
+Steps 1/3 share raw tensor banks with member-specific index views; Step 2 keeps
+its member-specific transformed inputs. Checkpoints retain epoch-boundary state
+and history. Permanent per-member validation/LR records must agree with the
+selected best epoch/loss. Completion also verifies all required scores and
+physical event IDs and binds model, score and metadata payload checksums.
+Working checkpoints are retained; no cleanup of existing data is performed.
+
+The exporter keeps all X1/X2 scores for Steps 1/2 and all X2 for Step 3. It uses
+the recorded Step-2 encoder and explicit feature/code, batch-size and numerical
+profiles. Contiguous inference inputs remove a small float32 discrepancy found
+between different tensor layouts. Verified cache hits skip feature reads and
+inference. Signed physical weights and pool/raw-row IDs stay in shared metadata;
+raw member scores stay float32 and unaggregated.
+
+For CUDA, callers supply device_budget_bytes and compute_headroom_bytes.
+resident=True requires data to fit; resident='auto' stages data on CPU if it
+does not fit. worker_budgets divides one coordinator snapshot among five workers
+by default, after an explicit safety margin. These are admission estimates, not
+memory reservations. Headroom and fallback still need real GPU validation; no
+model identities, observations, batch sizes or schedules change with placement.
+The process-pool and full dependency-graph scheduler remain integration work.
+
+The expanded synthetic test checks all three stages against uninterrupted
+reference training, stops/restarts at an epoch boundary, interrupts export,
+forbids refitting on export retry, compares direct predictions exactly, and
+rejects incomplete coverage or corrupted histories. CPU checks do not establish
+GPU throughput, safe production headroom or statistical calibration.
