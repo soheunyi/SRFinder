@@ -1,8 +1,8 @@
 # Execution speedups for resident independent training (#4)
 
 Opt-in changes to how the PR #7 training path runs. None of them changes the
-recipe (float32, schedule, LR, Adam epsilon, architecture, loss), and each was
-checked to produce bit-identical results.
+recipe (float32, schedule, LR, Adam epsilon, architecture, loss), and the reported comparisons checked bit-identical finite results.
+Resume and full artifact-path acceptance are separate gates.
 
 | Change | Where | What it removes |
 |---|---|---|
@@ -81,3 +81,38 @@ before the model is built.
 - Graphs add ~0.5 GB of GPU memory per worker. Host RAM is ~1–2 GB per worker.
 - MPS: a fatal fault in one client can stop the server and every client on that
   GPU; treat it as recoverable for all of them.
+
+
+## Integration review
+
+The first extraction version omitted step from benchmark hparams, which made
+initialize_members select the Step-1/2 seed policy. It also uses a random
+CR-sized subset with physical weights, not the campaign's learned-region and
+weight-preparation pipeline. Historical measurements remain controlled execution
+proxy results; the 100-epoch throughput values are projections, not measured
+full-schedule campaign throughput. Newly extracted fixtures explicitly use a
+Step-3 identity under a benchmark-only experiment name.
+
+The integration copy adds strict member-set comparison, attention history
+flushing for nosync, portable reinforce functions, and a temporary
+speedups.scope.execution_patches context manager. CUDA graphs still apply to
+FvT training; attention stays eager. The scope restores imported aliases and
+class methods on exit, including exceptions. Keep production adoption opt-in
+until actual artifact-path resume, memory and provenance checks pass.
+
+
+## Explicit artifact API
+
+For new task roots, run_stage, run_tasks and run_campaign accept
+execution_patches=['nosync','fast_gbn','fast_reinforce','graphs'].
+The campaign CLI accepts --execution-patches with the same comma-separated
+names for prepare/run/resume. Defaults stay empty. Patch names, implementation
+hashes and the graph NaN-check timing are recorded in ownership manifests;
+resume rejects a different patch configuration. Existing active runs should
+continue using their original source snapshot.
+
+The MPS wrapper uses a fresh private temporary directory per invocation and
+requires one explicitly visible GPU. It propagates command failure and stops
+only its private server. Shell benchmark drivers propagate failed worker exit
+codes, and new benchmark runs reject an existing output directory. A completed
+or partial fingerprint must never stand in for a failed rerun.

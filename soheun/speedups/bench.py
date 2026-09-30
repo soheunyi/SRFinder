@@ -93,7 +93,7 @@ def main() -> None:
     from artifacts.runtime_policy import runtime_policy
 
     out = pathlib.Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=args.resume)
     root = pathlib.Path(args.ckpt_root) if args.ckpt_root else out / 'ckpt'
     root.mkdir(parents=True, exist_ok=True)
 
@@ -115,6 +115,8 @@ def main() -> None:
     records = [torch.load(pathlib.Path(args.data) / f'member_{i:03d}.pt', weights_only=False) for i in idx]
     hps = [r['hparams'] for r in records]
     hp = hps[0]
+    if any(h.get('step') != 3 for h in hps):
+        raise ValueError('Old proxy records lack Step-3 identity; extract into a new directory')
 
     class EpochClock(pl.Callback):
         def __init__(self):

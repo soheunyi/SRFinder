@@ -1,26 +1,31 @@
-"""Compare fingerprints of bench.py runs against the first one."""
+"""Compare complete per-member fingerprints, rejecting missing/duplicate members."""
 import json
 import pathlib
 import sys
 
-runs = [pathlib.Path(p) for p in sys.argv[1:]]
-ref = json.loads((runs[0] / 'fingerprint.json').read_text())
-ok = True
-for run in runs[1:]:
-    try:
-        fp = json.loads((run / 'fingerprint.json').read_text())
-    except FileNotFoundError:
-        print(f'{run.name}: NO FINGERPRINT (failed run)'); ok = False; continue
-    diffs = []
-    for a, b in zip(ref['members'], fp['members']):
-        for k in a:
-            if a[k] != b[k]:
-                diffs.append(f"{a['name']}.{k}")
-    print(f"{run.name}: {'IDENTICAL' if not diffs else 'DIFFERS ' + ', '.join(diffs)}")
-    ok &= not diffs
-for run in runs:
-    t = run / 'timing.json'
-    if t.exists():
-        d = json.loads(t.read_text())
-        print(f"  {run.name:16s} fit {d['fit_s']:7.1f}s  ckpt {d['checkpoint_write_s']:6.1f}s in {d['checkpoint_writes']} writes")
-sys.exit(0 if ok else 1)
+def differences(reference, candidate):
+    def indexed(value):
+        rows=value['members']
+        by_name={r['name']:r for r in rows}
+        if not rows or len(by_name)!=len(rows):raise ValueError('Empty or duplicate member list')
+        return by_name
+    a,b=indexed(reference),indexed(candidate)
+    if a.keys()!=b.keys():return ['member_set']
+    return [f'{name}.{key}' for name in sorted(a)
+            for key in sorted(a[name].keys()|b[name].keys())
+            if key not in a[name] or key not in b[name] or a[name][key]!=b[name][key]]
+
+def main():
+    runs=[pathlib.Path(p) for p in sys.argv[1:]]
+    if len(runs)<2:raise SystemExit('Provide a reference and at least one candidate')
+    ref=json.loads((runs[0]/'fingerprint.json').read_text())
+    ok=True
+    for run in runs[1:]:
+        try:diffs=differences(ref,json.loads((run/'fingerprint.json').read_text()))
+        except (FileNotFoundError,ValueError,KeyError) as exc:
+            print(f'{run.name}: INVALID FINGERPRINT: {exc}');ok=False;continue
+        print(f"{run.name}: {'IDENTICAL' if not diffs else 'DIFFERS '+', '.join(diffs)}")
+        ok &= not diffs
+    sys.exit(0 if ok else 1)
+
+if __name__=='__main__':main()

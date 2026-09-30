@@ -67,20 +67,24 @@ def selected_nodes(plan, case_ids=None):
 
 
 
-def execution_manifest(store, plan, *, case_ids=None, device='cpu', export_batch_size=1024):
+def execution_manifest(store, plan, *, case_ids=None, device='cpu', export_batch_size=1024, execution_patches=()):
     nodes = selected_nodes(plan, case_ids)
     snapshot = runtime_snapshot()
-    return {'schema': 1, 'plan_sha256': sha(canonical(plan)),
+    result = {'schema': 1, 'plan_sha256': sha(canonical(plan)),
         'runtime_sha256': sha(canonical(snapshot)), 'runtime_files': snapshot,
         'store': str(store.root.resolve()), 'case_ids': sorted(n['id'] for n in nodes),
         'device': device, 'export_batch_size': export_batch_size}
+    if execution_patches:
+        from speedups.policy import descriptor
+        result['execution_policy']=descriptor(execution_patches)
+    return result
 
 
 def prepare_execution(store, plan, output, *, case_ids=None, device='cpu',
-                      export_batch_size=1024, resume=False):
+                      export_batch_size=1024, resume=False, execution_patches=()):
     """Freeze input/ownership and import descriptors; no model, CUDA or job start."""
     manifest = execution_manifest(store, plan, case_ids=case_ids, device=device,
-                                  export_batch_size=export_batch_size)
+                                  export_batch_size=export_batch_size, execution_patches=execution_patches)
     root = Path(output)
     with _owned_run(root, manifest, resume):
         imported = import_sources(store, plan)
@@ -95,7 +99,7 @@ def prepare_execution(store, plan, output, *, case_ids=None, device='cpu',
 
 def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                  resident='auto', safety_bytes=None, compute_headroom_bytes=None,
-                 export_batch_size=1024, resume=False, max_new_cases=None):
+                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=()):
     """Execute only a declared plan/closure with at most nproc tasks in flight.
 
     A max_new_cases prefix stops cleanly after complete training/export/registry
@@ -111,7 +115,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
     nodes = selected_nodes(plan, case_ids)
     root = Path(output)
     manifest = execution_manifest(store, plan, case_ids=case_ids, device=device,
-                                  export_batch_size=export_batch_size)
+                                  export_batch_size=export_batch_size, execution_patches=execution_patches)
     snapshot = manifest['runtime_files']
     with _owned_run(root, manifest, resume):
         if (root / 'frozen-plan.json').is_file():
@@ -140,7 +144,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                 raise MemoryError('Worker headroom exceeds its allocation budget')
         options = {'device': device, 'resident': resident, 'device_budget_bytes': budget,
                    'compute_headroom_bytes': compute_headroom_bytes,
-                   'export_batch_size': export_batch_size}
+                   'export_batch_size': export_batch_size, 'execution_patches': execution_patches}
         _atomic_json(root / 'latest-execution.json', {'requested_workers': nproc,
             'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases})
         started = time.monotonic()
@@ -174,6 +178,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                     in_flight[future] = (ready, task)
                     remaining.remove(ready)
                     max_in_flight = max(max_in_flight, len(in_flight))
+                progress('RUNNING')
                 if not in_flight:
                     if new_count == limit:
                         break

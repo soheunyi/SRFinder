@@ -42,7 +42,7 @@ def _task(payload):
 
 
 def run_tasks(store,tasks,context_factory,output,*,nproc=5,device='cpu',resident='auto',
-              safety_bytes=None,compute_headroom_bytes=None,export_batch_size=1024,resume=False):
+              safety_bytes=None,compute_headroom_bytes=None,export_batch_size=1024,resume=False,execution_patches=()):
     """Run bound tasks and verify completed tasks again on resume.
 
     Worker count and placement budgets are execution choices. Task/model recipes
@@ -63,6 +63,9 @@ def run_tasks(store,tasks,context_factory,output,*,nproc=5,device='cpu',resident
     manifest={'schema':1,'tasks':[{'id':key,'recipe':spec} for key,spec in zip(ids,tasks)],
               'factory':factory,'device':device,'export_batch_size':export_batch_size,
               'coordinator_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    if execution_patches:
+        from speedups.policy import descriptor
+        manifest['execution_policy']=descriptor(execution_patches)
     root=Path(output)
     with _owned_run(root,manifest,resume):
         count=min(nproc,len(tasks));budgets=[None]*count
@@ -74,7 +77,8 @@ def run_tasks(store,tasks,context_factory,output,*,nproc=5,device='cpu',resident
             budgets=worker_budgets(int(torch.cuda.mem_get_info()[0]),workers=count,safety_bytes=safety_bytes)
             if compute_headroom_bytes>budgets[0]:raise MemoryError('Worker headroom exceeds its allocation budget')
         options={'device':device,'resident':resident,'device_budget_bytes':budgets[0],
-                 'compute_headroom_bytes':compute_headroom_bytes,'export_batch_size':export_batch_size}
+                 'compute_headroom_bytes':compute_headroom_bytes,'export_batch_size':export_batch_size,
+                 'execution_patches':execution_patches}
         _atomic_json(root/'latest-execution.json',{'requested_workers':nproc,'active_worker_limit':count,
                      'worker_budget_bytes':budgets[0],'options':options})
         pool=ProcessPoolExecutor(max_workers=count,mp_context=mp.get_context('spawn'),initializer=_initialize)

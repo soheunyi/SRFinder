@@ -1,23 +1,26 @@
 #!/bin/bash
-# Run a command with a private CUDA MPS server on this job's GPU(s).
-#
-#   speedups/with_mps.sh <command> [args...]
-#
-# MPS lets the worker processes that share one GPU run kernels concurrently
-# instead of time-slicing between CUDA contexts. It changes scheduling only,
-# not results: measured 1.6x per GPU for five resident workers, all outputs
-# bit-identical. Needs the GPU in Default compute mode (n01-n03 are) and
-# node-local, per-job pipe/log directories. The server stops when the command
-# exits, whatever its status.
-#
-# Failure mode: a fatal fault in one MPS client can take down the server and
-# every other client on that GPU, so treat such a failure as recoverable for
-# all workers on the GPU (resume from their last completed epoch).
+# One private MPS server for an explicitly visible GPU and command lifetime.
 set -euo pipefail
-base=${MPS_BASE:-${TMPDIR:-/tmp}}/mps-${SLURM_JOB_ID:-$$}
-export CUDA_MPS_PIPE_DIRECTORY=$base/pipe CUDA_MPS_LOG_DIRECTORY=$base/log
+: "${CUDA_VISIBLE_DEVICES:?Run inside a one-GPU allocation}"
+if [[ "$CUDA_VISIBLE_DEVICES" == *,* ]]; then
+  echo "Expected exactly one visible GPU" >&2
+  exit 2
+fi
+task_mps_parent="${MPS_BASE:-${TMPDIR:-/tmp}}"
+mkdir -p "$task_mps_parent"
+task_mps_dir=$(mktemp -d "$task_mps_parent/srfinder-mps-${SLURM_JOB_ID:-local}-XXXXXX")
+export CUDA_MPS_PIPE_DIRECTORY="$task_mps_dir/pipe"
+export CUDA_MPS_LOG_DIRECTORY="$task_mps_dir/log"
 mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
-nvidia-cuda-mps-control -d
-stop() { echo quit | nvidia-cuda-mps-control || true; rm -rf "$base"; }
+stop() {
+  result=$?
+  trap - EXIT
+  printf 'quit\n' | timeout 10s nvidia-cuda-mps-control >/dev/null 2>&1 || true
+  rm -rf -- "$task_mps_dir"
+  exit "$result"
+}
 trap stop EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+nvidia-cuda-mps-control -d
 "$@"

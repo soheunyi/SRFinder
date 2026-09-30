@@ -90,7 +90,8 @@ def main() -> None:
         hparams = {k: cr[k] for k in ("depth", "dim_dijet_features", "dim_quadjet_features", "repr_norm",
                                       "optimizer", "lr_scheduler", "dataloader", "model", "max_epochs",
                                       "val_ratio", "fit_batch_size")}
-        hparams.update(model_seed=seed, train_seed=seed, data_seed=seed,
+        hparams.update(step=3, experiment_name="speedups_execution_proxy", dataset=want,
+                       ensemble_member=seed, model_seed=seed, train_seed=seed, data_seed=seed,
                        benchmark_source={"mother_sample": hashes[0], "dataset": want,
                                          "x1_ratio": X1_RATIO, "cr_fraction": CR_FRACTION})
         record = {"hparams": hparams, "train": tensors(df, train_rows), "val": tensors(df, val_rows)}

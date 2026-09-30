@@ -17,9 +17,9 @@ Install with install([...]) before the training modules build anything.
                 eager. FvTClassifier's NaN check becomes a device flag read at
                 epoch end: a NaN stops training at the epoch end, not the step.
 
-Measured on one L40, five members per worker, 100-epoch schedule: five workers
-with MPS and all four patches train 2.6x the members per GPU-hour of five
-workers without them (MPS alone: 1.6x).
+Fixed-batch measurements on one L40 project about 2.6x full-schedule throughput
+for five workers with MPS/all patches (MPS alone: 1.6x). Full-schedule artifact
+and recovery validation is required before treating this as a production gain.
 
 These are monkeypatches over the PR #7 sources. The guards below refuse to run
 if the transcribed source they replace has changed.
@@ -34,6 +34,7 @@ import torch
 def install_nosync() -> None:
     import independent_training as it
     import stacked_fvt
+    import stacked_attention_classifier
 
     original_epoch_losses = it.epoch_losses
 
@@ -79,7 +80,9 @@ def install_nosync() -> None:
     it.record = record
     it.epoch_losses = epoch_losses
     stacked_fvt.epoch_losses = epoch_losses  # imported by name there
+    stacked_attention_classifier.epoch_losses = epoch_losses
     stacked_fvt.StackedFvTClassifier.nan_check = nan_check
+    stacked_attention_classifier.StackedAttentionClassifier.nan_check = nan_check
 
 
 # ------------------------------------------------------------------- fast_gbn
@@ -173,17 +176,22 @@ def check_fast_gbn_forward_matches_source() -> None:
 # ------------------------------------------------------------- fast_reinforce
 
 def install_fast_reinforce() -> None:
-    import sys
-    import fvt_classifier  # noqa: F401  resolve from this worktree first
+    # Portable versions of the already verified slice_rewrite functions.
+    # Importing that benchmark script changes cwd to a machine-specific checkout.
     import network_blocks as nb
-    saved = list(sys.path)
-    try:
-        # slice_rewrite prepends ~/SRFinder/soheun to sys.path on import.
-        from phase5.slice_rewrite import patch
-    finally:
-        sys.path[:] = saved
-    patch()
-    assert nb.DijetReinforceLayer.forward.__module__.endswith('slice_rewrite')
+
+    def dijet(self, j, d):
+        n = j.shape[0]
+        d = torch.cat((j.reshape(n, self.dim_d, 6, 2), d.unsqueeze(-1)), dim=3)
+        return self.conv(d.reshape(n, self.dim_d, 18))
+
+    def quadjet(self, d, q):
+        n = d.shape[0]
+        q = torch.stack((self.sym(d), torch.abs(self.antisym(d)), q), dim=3)
+        return self.conv(q.reshape(n, self.dim_q, 9))
+
+    nb.DijetReinforceLayer.forward = dijet
+    nb.QuadjetReinforceLayer.forward = quadjet
 
 
 # --------------------------------------------------------------------- graphs
@@ -326,6 +334,10 @@ def check_step_matches_source() -> None:
 
 
 def install(names: list[str]) -> None:
+    allowed = ('nosync', 'fast_gbn', 'fast_reinforce', 'graphs')
+    if len(set(names)) != len(names) or any(name not in allowed for name in names):
+        raise ValueError('Unknown or duplicate execution patch')
+    names = [name for name in allowed if name in names]
     if 'graphs' in names and 'fast_gbn' not in names:
         raise ValueError('graphs requires fast_gbn')
     for name in names:

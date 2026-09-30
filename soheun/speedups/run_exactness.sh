@@ -13,9 +13,13 @@ mkdir -p "$OUT"
 declare -A V=([baseline]="" [nosync]="nosync" [fast_gbn]="fast_gbn" [fast_reinforce]="fast_reinforce"
               [all3]="nosync,fast_gbn,fast_reinforce" [graphs]="fast_gbn,graphs"
               [all4]="nosync,fast_gbn,fast_reinforce,graphs")
+pids=()
 for name in "${!V[@]}"; do
   "$PYTHON" speedups/bench.py --data "$DATA" --members "$members" --epochs "$epochs" \
     --out "$OUT/$name" --patches "${V[$name]}" > "$OUT/$name.log" 2>&1 &
+  pids+=("$!")
 done
-wait
+failed=0
+for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+[ "$failed" = 0 ] || exit 1
 "$PYTHON" speedups/compare.py "$OUT"/{baseline,nosync,fast_gbn,fast_reinforce,all3,graphs,all4}

@@ -6,7 +6,7 @@
 # node-local directory for the local-checkpoint arm (default /tmp).
 #
 #   PYTHON=... DATA=... OUT=... speedups/run_timing_matrix.sh
-set -uo pipefail
+set -euo pipefail
 : "${PYTHON:?}" "${DATA:?}" "${OUT:?}"
 LOCAL=${LOCAL:-/tmp}/spd-${SLURM_JOB_ID:-$$}
 cd "$(dirname "$0")/.."
@@ -20,14 +20,17 @@ workers() {
   local name=$1 P=$2 ckpt=$3 patches=$4
   for phase in "1024 1" "32768 8"; do
     set -- $phase; local bs=$1 ep=$2
+    local pids=() failed=0
     for w in $(seq 0 $((P-1))); do
       local g=$(( (w % 5) * 5 )) out=$OUT/$name/bs$bs/w$w
       local croot=$out/ckpt; [ "$ckpt" = local ] && croot=$LOCAL/$name/bs$bs/w$w
       mkdir -p "$(dirname "$out")"
       "$PYTHON" speedups/bench.py --data "$DATA" --members $g,$((g+1)),$((g+2)),$((g+3)),$((g+4)) \
         --epochs $ep --fixed-batch $bs --out "$out" --ckpt-root "$croot" --patches "$patches" > "$out.log" 2>&1 &
+      pids+=("$!")
     done
-    wait
+    for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+    [ "$failed" = 0 ] || return 1
   done
 }
 export -f workers; export OUT LOCAL PYTHON DATA
