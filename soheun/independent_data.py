@@ -8,8 +8,9 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 def stream_identity(hparams):
     fields = {key: hparams.get(key) for key in
-              ('dataset', 'data_seed', 'train_seed', 'model_seed', 'encoder_hash', 'signal_region')}
-    return hashlib.blake2b(json.dumps(fields, sort_keys=True, default=str).encode(), digest_size=16).hexdigest()
+              ('experiment_name', 'step', 'dataset', 'source_dataset_id', 'data_seed', 'train_seed',
+               'model_seed', 'val_ratio', 'encoder_hash', 'encoder_mode', 'repr_norm', 'smearing', 'signal_region')}
+    return hashlib.blake2b(json.dumps({'identity_version': 2, 'fields': fields}, sort_keys=True, default=str).encode(), digest_size=16).hexdigest()
 
 
 def epoch_seed(seed, epoch):

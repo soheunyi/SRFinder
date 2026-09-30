@@ -7,7 +7,7 @@ import numpy as np
 
 
 def export_member_scores(store, model_id, split_id, reconstructed_indices,
-                         feature_batches, model_factory, device='cpu', *, reuse_existing=True, inference_recipe=None):
+                         feature_batches, model_factory=None, device='cpu', *, reuse_existing=True, inference_recipe=None):
     import torch
     record = store.read(model_id, 'model')
     indices = np.asarray(reconstructed_indices)
@@ -23,6 +23,9 @@ def export_member_scores(store, model_id, split_id, reconstructed_indices,
         existing = store.find_scores(model_id, split_id, 'log_density_ratio', inference_recipe)
         if existing is not None:
             return existing
+    if model_factory is None:
+        from .model_loading import model_from_record
+        model_factory = model_from_record
     model = model_factory(record)
     state = torch.load(weights_path, map_location='cpu', weights_only=True)
     model.load_state_dict(state, strict=True)

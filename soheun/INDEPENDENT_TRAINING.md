@@ -69,3 +69,21 @@ Relevant tests live in phase5/test_independent_streams.py,
 phase5/test_training_alignment.py, phase5/test_checkpoint_selection.py,
 phase5/test_member_initialization.py, phase5/test_training_store.py,
 phase5/test_export_scores.py and phase5/test_weight_convention.py.
+
+## New upstream and test-input adapters
+
+Recipe-based loading supports FvT and attention model artifacts. Step-2 contexts
+can use those encoder artifacts with an explicitly validated source context,
+without looking up a legacy encoder record or writing a legacy TrainingInfo
+pickle. Source dataset/version verification remains the caller's responsibility.
+
+Stream fingerprints include the feature recipe (including smearing and encoder
+mode). The expanded fingerprint is versioned; older running checkpoints should
+continue with their original source snapshot, rather than silently accepting a
+changed feature dataset.
+
+The in-memory affine-input adapter preserves signed 4b weights, canonical event
+ordering and the frozen X1-defined threshold. It uses a common log-domain scale
+for 3b weights and checks both endpoint normalizers. Synthetic agreement with
+the existing signed bootstrap reference is an interface check, not a claim of
+real-data calibration.
