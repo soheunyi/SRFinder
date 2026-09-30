@@ -210,7 +210,11 @@ class _Wrap(torch.nn.Module):
 def install_graphs() -> None:
     """CUDA-graph each member's forward+backward for full-size training batches.
 
-    Adam, the loss and all partial (tail) batches stay eager. Validation stays
+    Applies to both stacked models: FvTClassifier (Steps 1 and 3) and
+    AttentionClassifier (Step 2). The attention forward has no host syncs, NaN
+    checks, dropout or data-dependent branches; its GhostBatchNorm layers are
+    covered by fast_gbn. Adam, the loss and all partial (tail) batches stay
+    eager. Validation stays
     eager. Needs fast_gbn (no .item() inside capture) and switches it to
     in-place running-stat updates. make_graphed_callables' warm-up passes
     update GhostBatchNorm running stats, so those buffers are restored after
@@ -220,6 +224,7 @@ def install_graphs() -> None:
     """
     import fvt_classifier
     import independent_training as it
+    import stacked_attention_classifier
     import stacked_fvt
 
     GBN_INPLACE['on'] = True
@@ -318,7 +323,8 @@ def install_graphs() -> None:
             module.datamodule.note_training_batch()
 
     it.step = step
-    stacked_fvt.independent_step = step
+    stacked_fvt.independent_step = step  # both modules import step by name
+    stacked_attention_classifier.independent_step = step
 
 
 def check_step_matches_source() -> None:

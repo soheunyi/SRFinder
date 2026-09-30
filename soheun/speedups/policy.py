@@ -18,7 +18,7 @@ def descriptor(names):
     root=Path(__file__).parent
     return {'patches':names,'source_sha256':{name:hashlib.sha256((root/name).read_bytes()).hexdigest()
             for name in ('patches.py','scope.py','policy.py')},
-            'graph_architecture':'FvT only; attention stays eager',
+            'graph_architecture':'FvT and AttentionClassifier',
             'nan_failure_timing':'epoch_boundary' if 'graphs' in names else 'original'}
 
 def using_execution_patches(function):

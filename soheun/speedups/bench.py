@@ -72,6 +72,10 @@ def main() -> None:
     ap.add_argument('--stop-after', type=int, default=None,
                     help='stop after this many completed epochs (then rerun with --resume)')
     ap.add_argument('--resume', action='store_true', help='resume from <ckpt-root>/last.ckpt')
+    ap.add_argument('--step2', action='store_true',
+                    help='Step-2 AttentionClassifier on prepared transformed members '
+                         '(member-<i>.pt with train/val/hparams), trained as train_stage does for '
+                         'transformed data: GPU-resident TensorDatasets, no raw banks')
     ap.add_argument('--fixed-batch', type=int, default=None,
                     help='timing only: one batch size for every epoch (no milestones)')
     args = ap.parse_args()
@@ -87,6 +91,8 @@ def main() -> None:
     from independent_data import IndependentStackedDataModule, stream_identity
     from member_initialization import initialize_members
     from stacked_fvt import StackedFvTClassifier
+    from stacked_attention_classifier import StackedAttentionClassifier
+    from torch.utils.data import TensorDataset
     import phase3.resumable as resumable
     from phase3.resumable import AtomicCheckpointIO, ResumableIndividualSaver, RngStateCallback, StopAfterEpoch
     from artifacts.train_stage import _IndexedSplit, _TrainingHistory
@@ -112,11 +118,14 @@ def main() -> None:
     resumable.atomic_torch_save = timed_save
 
     idx = [int(i) for i in args.members.split(',')]
-    records = [torch.load(pathlib.Path(args.data) / f'member_{i:03d}.pt', weights_only=False) for i in idx]
+    pattern = 'member-{}.pt' if args.step2 else 'member_{:03d}.pt'
+    records = [torch.load(pathlib.Path(args.data) / pattern.format(i), weights_only=False) for i in idx]
     hps = [r['hparams'] for r in records]
     hp = hps[0]
-    if any(h.get('step') != 3 for h in hps):
+    if not args.step2 and any(h.get('step') != 3 for h in hps):
         raise ValueError('Old proxy records lack Step-3 identity; extract into a new directory')
+    if args.step2 and hp.get('model') != 'AttentionClassifier':
+        raise ValueError('--step2 expects AttentionClassifier members')
 
     class EpochClock(pl.Callback):
         def __init__(self):
@@ -144,18 +153,28 @@ def main() -> None:
 
     with runtime_policy('cuda'):
         banks, pairs = [], []
-        for r in records:
-            (xt, yt, wt), (xv, yv, wv) = r['train'], r['val']
-            bank = tuple(torch.cat((a, b), 0).to('cuda') for a, b in ((xt, xv), (yt, yv), (wt, wv)))
-            nt, nv = len(yt), len(yv)
-            banks.append(bank)
-            pairs.append((_IndexedSplit(bank, torch.arange(nt)), _IndexedSplit(bank, torch.arange(nt, nt + nv))))
+        if args.step2:
+            # train_stage, transformed path: each member keeps its own encoded and
+            # smeared tensors; the data module places them on the GPU.
+            for r in records:
+                pairs.append((TensorDataset(*r['train']), TensorDataset(*r['val'])))
+        else:
+            for r in records:
+                (xt, yt, wt), (xv, yv, wv) = r['train'], r['val']
+                bank = tuple(torch.cat((a, b), 0).to('cuda') for a, b in ((xt, xv), (yt, yv), (wt, wv)))
+                nt, nv = len(yt), len(yv)
+                banks.append(bank)
+                pairs.append((_IndexedSplit(bank, torch.arange(nt)), _IndexedSplit(bank, torch.arange(nt, nt + nv))))
         run_names = [f'member_{i:03d}' for i in idx]
         kwargs = dict(num_stacks=len(records), num_classes=2, dim_quadjet_features=hp['dim_quadjet_features'],
                       run_names=run_names, stacked_run_name='artifact-stage', device='cpu', depth=hp['depth'])
-        model = StackedFvTClassifier(**kwargs, dim_input_jet_features=4,
-                                     dim_dijet_features=hp['dim_dijet_features'], repr_norm=hp.get('repr_norm', False))
-        members = model.fvt_classifiers
+        if args.step2:
+            model = StackedAttentionClassifier(**kwargs)
+            members = model.attention_classifiers
+        else:
+            model = StackedFvTClassifier(**kwargs, dim_input_jet_features=4,
+                                         dim_dijet_features=hp['dim_dijet_features'], repr_norm=hp.get('repr_norm', False))
+            members = model.fvt_classifiers
         initialize_members(members, hps)
         model.optimizer_config = hp['optimizer']
         model.lr_scheduler_config = hp['lr_scheduler']
@@ -168,7 +187,7 @@ def main() -> None:
                                           estimator_ids=[stream_identity(h) for h in hps],
                                           batch_size_milestones=dc.get('batch_size_milestones', []),
                                           batch_size_multiplier=dc.get('batch_size_multiplier', 2),
-                                          num_workers=0, storage_device=None)
+                                          num_workers=0, storage_device='cuda' if args.step2 else None)
         model.datamodule = dm
         saver = ResumableIndividualSaver(save_dir=root / 'models', run_names=run_names,
                                          monitor_metrics=[f'val_loss_stack_{i}' for i in range(len(run_names))],
@@ -219,7 +238,10 @@ def main() -> None:
         fp = {'members': []}
         for i, (name, member) in enumerate(zip(run_names, members)):
             best = torch.load(root / 'models' / f'{name}_best.pt', map_location='cpu', weights_only=False)
-            probe = pairs[i][1].gather(torch.arange(min(args.probe, len(pairs[i][1])), device='cuda'))[0]
+            vd = dm.val_datasets[i]  # as the data module placed it (GPU-resident)
+            n_probe = min(args.probe, len(vd))
+            probe = (vd.gather(torch.arange(n_probe, device='cuda'))[0] if hasattr(vd, 'gather')
+                     else vd.tensors[0][:n_probe].to('cuda'))
             with torch.no_grad():
                 pred = member(probe)
             fp['members'].append({
