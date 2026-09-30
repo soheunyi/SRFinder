@@ -5,26 +5,30 @@ import numpy as np
 import torch
 from constants import FEATURES
 from .training_store import canonical,sha
+from .runtime_policy import validated_gpu_runtime,numerical_state
 from .model_loading import load_model
 from .export_scores import export_member_scores
 
 
 def _profile(model_hp,device,batch_size):
     root=Path(__file__).resolve().parents[1]
-    files=('artifacts/export_stage.py','artifacts/export_scores.py','artifacts/model_loading.py',
+    files=('artifacts/runtime_policy.py','artifacts/export_stage.py','artifacts/export_scores.py','artifacts/model_loading.py',
            'artifacts/source_context.py','constants.py','fvt_classifier.py','fvt_encoder.py',
            'attention_classifier.py','network_blocks.py')
     return {'version':1,'mode':'eval','dtype':'float32','device_type':device,
             'torch_version':str(torch.__version__),'batch_size':batch_size,
-            'cpu_threads':torch.get_num_threads(),
+            'cpu_threads':torch.get_num_threads(),'interop_threads':torch.get_num_interop_threads(),
+            'runtime_policy':'validated_gpu_medium_v1' if device=='cuda' else 'caller_cpu',
+            **numerical_state(),
             'matmul_precision':torch.get_float32_matmul_precision(),
             'cuda_matmul_tf32':torch.backends.cuda.matmul.allow_tf32,
             'cudnn_tf32':torch.backends.cudnn.allow_tf32,
-            'feature_layout':'contiguous_row_major','features':list(FEATURES),'transform':'base_encoder' if model_hp['step']==2 else 'raw',
-            'encoder_id':model_hp.get('encoder_hash') if model_hp['step']==2 else None,
+            'feature_layout':'contiguous_row_major','features':list(FEATURES),'transform':'base_encoder' if model_hp['model']=='AttentionClassifier' else 'raw',
+            'encoder_id':model_hp.get('encoder_hash') if model_hp['model']=='AttentionClassifier' else None,
             'source_sha256':{name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in files}}
 
 
+@validated_gpu_runtime
 def export_stage(store,model_ids,source,*,device='cpu',batch_size=1024,reuse_existing=True):
     """Export all X1/X2 for Steps 1/2 or all X2 for Step 3, never aggregate.
 
@@ -42,10 +46,12 @@ def export_stage(store,model_ids,source,*,device='cpu',batch_size=1024,reuse_exi
     stage=next(iter(stages));domains=('X1','X2') if stage in (1,2) else ('X2',)
     for key,hp in zip(model_ids,hps):
         store.payload_path(key)
-        if hp.get('model')!=('AttentionClassifier' if stage==2 else 'FvTClassifier'):
-            raise ValueError('Unsupported stage architecture or representation diagnostic')
+        if ((stage==1 and hp['model']!='FvTClassifier') or (stage==2 and hp['model']!='AttentionClassifier')
+                or (stage==3 and hp['model']=='AttentionClassifier' and hp.get('input_space')!='base_encoder')
+                or hp['model'] not in ('FvTClassifier','AttentionClassifier')):
+            raise ValueError('Unsupported stage architecture')
         if hp.get('source_dataset_id')!=source.dataset_id:raise ValueError('Model source differs')
-        if stage==2:
+        if hp['model']=='AttentionClassifier':
             encoder=hp.get('encoder_hash','')
             if not encoder.startswith('artifact:'):raise ValueError('Step 2 requires an artifact encoder')
             encoder_id=encoder.removeprefix('artifact:')
@@ -95,7 +101,7 @@ def export_stage(store,model_ids,source,*,device='cpu',batch_size=1024,reuse_exi
         for domain in domains:
             if cached[domain][member] is not None:
                 scores[domain].append(cached[domain][member]);continue
-            if stage==2 and encoder is None:
+            if hp['model']=='AttentionClassifier' and encoder is None:
                 encoder=load_model(store,hp['encoder_hash'].removeprefix('artifact:'),device=device)
             def batches():
                 with torch.inference_mode():

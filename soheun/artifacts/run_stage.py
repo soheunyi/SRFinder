@@ -9,10 +9,12 @@ import json
 import gc
 import torch
 from .train_stage import train_stage,_owned_run,_atomic_json
+from .runtime_policy import validated_gpu_runtime,numerical_state
 from .export_stage import export_stage,_profile
 from .stage_completion import complete_stage,verify_stage_completion
 
 
+@validated_gpu_runtime
 def run_stage(store,contexts,source,output,*,device='cpu',resident=False,resume=False,
               export_batch_size=1024,stop_after_completed_epochs=None,
               device_budget_bytes=None,compute_headroom_bytes=None):

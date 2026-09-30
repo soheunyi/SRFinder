@@ -8,6 +8,7 @@ from .regions import classify_X2
 
 
 class ArtifactStep3Context(TrainingInfo):
+    model_types=('FvTClassifier',)
     def __init__(self,store,region_id,source_info,base_X2_scores,smeared_X2_scores,hparams):
         region=store.read(region_id,'region')
         definition=region['identity']['definition']
@@ -22,7 +23,7 @@ class ArtifactStep3Context(TrainingInfo):
         mask[x2[result['CR']]]=True
         if not mask.any():raise ValueError('No CR training rows')
         hp=deepcopy(hparams)
-        if hp.get('model')!='FvTClassifier':
+        if hp.get('model') not in self.model_types:
             raise ValueError('This context is for original-feature CR FvT; representation diagnostics need their own binding')
         hp.update(step=3,dataset=source_info.hparams['dataset'],source_dataset_id=source_info.dataset_id,
             signal_region={'region_artifact_id':region_id,

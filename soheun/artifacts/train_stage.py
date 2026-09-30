@@ -25,6 +25,7 @@ from stacked_attention_classifier import StackedAttentionClassifier
 from phase3.resumable import (AtomicCheckpointIO, ResumableIndividualSaver,
                               RngStateCallback, StopAfterEpoch)
 from .training_store import canonical
+from .runtime_policy import validated_gpu_runtime,numerical_state
 from .member_splits import publish_member_splits, verify_member_splits
 from .stage_completion import put_member_history,verify_member_history
 from .memory_policy import choose_placement
@@ -66,9 +67,9 @@ def _implementation():
            'stacked_fvt.py','stacked_attention_classifier.py','fvt_classifier.py',
            'fvt_encoder.py','attention_classifier.py','network_blocks.py',
            'pl_callbacks.py','data_modules.py','phase3/resumable.py','phase2/identity.py',
-           'artifacts/memory_policy.py','artifacts/stage_completion.py','artifacts/train_stage.py','artifacts/member_splits.py','artifacts/model_loading.py',
+           'artifacts/runtime_policy.py','artifacts/memory_policy.py','artifacts/stage_completion.py','artifacts/train_stage.py','artifacts/member_splits.py','artifacts/model_loading.py',
            'artifacts/source_context.py','artifacts/step1_context.py',
-           'artifacts/step2_context.py','artifacts/step3_context.py','artifacts/regions.py')
+           'artifacts/step2_context.py','artifacts/step3_context.py','artifacts/step3_representation.py','artifacts/regions.py')
     return {name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in names}
 
 
@@ -131,6 +132,7 @@ def _data_fingerprint(data,bank_hashes=None):
     return result
 
 
+@validated_gpu_runtime
 def train_stage(store, contexts, output, *, device='cpu', resident=False,
                 resume=False, stop_after_completed_epochs=None,
                 device_budget_bytes=None,compute_headroom_bytes=None):
@@ -153,15 +155,20 @@ def train_stage(store, contexts, output, *, device='cpu', resident=False,
     hp=hps[0];stage=hp['step'];epochs=int(hp['max_epochs'])
     if stage not in (1,2,3) or epochs<1:raise ValueError('Unsupported stage or epoch count')
     shared=('step','model','max_epochs','depth','dim_quadjet_features','dim_dijet_features',
-            'repr_norm','optimizer','lr_scheduler','dataloader')
+            'dim_q','input_space','repr_norm','optimizer','lr_scheduler','dataloader')
     for other in hps[1:]:
         if any(other.get(key)!=hp.get(key) for key in shared):
             raise ValueError('One group requires matching architecture and training schedules')
-    if hp['model']!=('AttentionClassifier' if stage==2 else 'FvTClassifier'):
+    transformed=hp['model']=='AttentionClassifier'
+    if ((stage==1 and hp['model']!='FvTClassifier') or (stage==2 and not transformed)
+            or (stage==3 and transformed and hp.get('input_space')!='base_encoder')
+            or hp['model'] not in ('FvTClassifier','AttentionClassifier')):
         raise ValueError('Unsupported stage architecture')
     if stop_after_completed_epochs is not None and not 0<stop_after_completed_epochs<epochs:
         raise ValueError('Test stop must precede the configured final epoch')
-    numerics={'device':device,'cpu_threads':torch.get_num_threads(),
+    numerics={'device':device,'cpu_threads':torch.get_num_threads(),'interop_threads':torch.get_num_interop_threads(),
+              'runtime_policy':'validated_gpu_medium_v1' if device=='cuda' else 'caller_cpu',
+              **numerical_state(),
               'matmul_precision':torch.get_float32_matmul_precision(),
               'cuda_matmul_tf32':torch.backends.cuda.matmul.allow_tf32,
               'cudnn_tf32':torch.backends.cudnn.allow_tf32,
@@ -202,6 +209,9 @@ def train_stage(store, contexts, output, *, device='cpu', resident=False,
             if stage==2:
                 pair=context.fetch_train_val_smeared_features(FEATURES,'fourTag','weight',
                     device=device,training_alignment=32,retain_validation=True)
+            elif transformed:
+                pair=context.fetch_train_val_representation_datasets(FEATURES,'fourTag','weight',
+                    device=device,training_alignment=32,retain_validation=True)
             else:
                 selected=np.flatnonzero(context.ms_idx).astype(np.int64)
                 bank_key=(context.hparams['source_dataset_id'],hashlib.sha256(selected.tobytes()).hexdigest())
@@ -226,7 +236,7 @@ def train_stage(store, contexts, output, *, device='cpu', resident=False,
         fingerprint=[[_data_fingerprint(data,bank_hashes) for data in pair] for pair in pairs]
         bank_bytes=sum(t.numel()*t.element_size() for bank in banks.values() for t in bank)
         data_bytes=(bank_bytes+sum(d.indices.numel()*d.indices.element_size() for pair in pairs for d in pair)
-                    if stage!=2 else sum(t.numel()*t.element_size() for pair in pairs for d in pair for t in d.tensors))
+                    if not transformed else sum(t.numel()*t.element_size() for pair in pairs for d in pair for t in d.tensors))
         available=None
         if device=='cuda':
             gc.collect();torch.cuda.empty_cache()
@@ -235,7 +245,7 @@ def train_stage(store, contexts, output, *, device='cpu', resident=False,
                                 headroom_bytes=compute_headroom_bytes,available_bytes=available)
         _atomic_json(root/'memory-decision.json',memory)
         resident=memory['placement']=='resident'
-        if resident and stage!=2:
+        if resident and not transformed:
             placed={id(bank):tuple(t.to('cuda') for t in bank) for bank in banks.values()}
             pairs=[tuple(_IndexedSplit(placed[id(data.bank)],data.indices) for data in pair) for pair in pairs]
         receipt=root/'training-inputs.json'
@@ -244,7 +254,7 @@ def train_stage(store, contexts, output, *, device='cpu', resident=False,
         else:_atomic_json(receipt,fingerprint)
         kwargs=dict(num_stacks=len(contexts),num_classes=2,dim_quadjet_features=hp['dim_quadjet_features'],
                     run_names=names,stacked_run_name='artifact-stage',device='cpu',depth=hp['depth'])
-        if stage==2:
+        if transformed:
             model=StackedAttentionClassifier(**kwargs);members=model.attention_classifiers
         else:
             model=StackedFvTClassifier(**kwargs,dim_input_jet_features=4,
@@ -258,7 +268,7 @@ def train_stage(store, contexts, output, *, device='cpu', resident=False,
             shuffle_seeds=[h['train_seed'] for h in hps],estimator_ids=[stream_identity(h) for h in hps],
             batch_size_milestones=dc.get('batch_size_milestones',[]),
             batch_size_multiplier=dc.get('batch_size_multiplier',2),num_workers=0,
-            storage_device='cuda' if resident and stage==2 else None)
+            storage_device='cuda' if resident and transformed else None)
         model.datamodule=dm
         saver=ResumableIndividualSaver(save_dir=root/'models',run_names=names,
             monitor_metrics=[f'val_loss_stack_{i}' for i in range(len(names))],model=hp['model'])

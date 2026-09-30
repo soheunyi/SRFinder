@@ -33,9 +33,10 @@ after the configured schedule finishes; its marker explicitly leaves export
 pending. Per-member validation/LR histories must agree with best-epoch selection.
 
 The stage APIs do not choose scientific configurations, submit Slurm jobs, run
-bootstrap inference or delete checkpoints. Process-pool scheduling and the full
-campaign dependency graph remain integration work. Representation-based CR
-diagnostics also require a separate data binding.
+bootstrap inference or delete checkpoints. The spawn-process coordinator accepts explicit JSON task recipes with five
+workers by default, supports a lower worker count on resume, and stops its own
+workers on failure without writing false completion. Full manuscript-source and
+result-registry binding remains integration work.
 
 ## Data placement
 
@@ -66,7 +67,9 @@ X1/X2. Member reconstruction preserves each stage's native shuffle/split order,
 pins code/library versions and excludes auxiliary score arrays from recipes.
 Region definitions pair base/smeared models and freeze thresholds on X1; X2
 classification checks model identities, score ordering and inference profiles.
-Original-feature Step-3 contexts select only the frozen CR rows.
+Step-3 contexts select only frozen CR rows. The representation diagnostic uses
+one frozen upstream encoder, splits raw CR rows before encoding, and applies no
+smearing to those training features.
 
 ## Export and completion
 
@@ -107,6 +110,35 @@ about 2.98x at batch 1,024 and 1.33x at batch 32,768, with exact checked outputs
 These are scoped results; raw experimental history is excluded from this review.
 
 Full-schedule GPU comparisons, representative Step-2/CR measurements, GPU tests of
-the new stage APIs, measured headroom, real-data end-to-end export, campaign
-scheduling and scientific acceptance gates remain open in #4 and #6. Passing the
+the new stage APIs, measured headroom, real-data end-to-end export, full campaign
+binding and scientific acceptance gates remain open in #4 and #6. Passing the
 CPU suite or merging this patch does not establish full-campaign readiness.
+
+
+## Binding tasks and numerical settings
+
+`bound_tasks` registers trusted local mother-selection records with fingerprints
+and reconstructs worker contexts from JSON recipes. These shared source records
+remain required inputs; no per-member index arrays or legacy cache writes are
+introduced. `materialize_task` checks a declared node's dataset, member seeds,
+count, epoch schedule and optional architecture/depth against supplied recipes,
+then verifies completed parents and selects their models by seed. Wrong-eta or
+missing-member upstreams are rejected. It defines X1 regions but never trains or
+submits work. The caller must supply frozen dataset/member recipes and populate
+the full campaign's source/result registry.
+
+CUDA stage calls use the validated driver's medium matmul setting, permit cuDNN
+TF32 and disable cuDNN benchmarking. Parameters and cached scores stay float32;
+internal matmul precision can be reduced on supported hardware. Settings are
+recorded and scoped, restored after normal return or failure, and CPU settings
+are preserved. Stage calls serialize within a process because these flags are
+global; training concurrency uses separate processes.
+
+The CPU tests additionally cover materialized tasks, the representation CR path,
+reordered parent completions, missing members, wrong eta/depth, failed-worker
+recovery and exact restoration of runtime settings. The representative Step-2
+15-member/30-epoch residency test passed exact checked states, histories and
+prediction probes, with about 2.11x fit/checkpoint speedup excluding shared feature
+preparation. The full five-process Step-1 arm completed 150 NNs for 100 epochs in
+about four hours; its full serial comparison remains pending. K100 and current
+stage-API GPU checks remain open. No campaign or statistical pilot is launched.
