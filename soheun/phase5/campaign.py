@@ -51,7 +51,18 @@ def main():
     status = sub.add_parser('status')
     status.add_argument('--output', type=Path, required=True)
     status.add_argument('--verify', action='store_true', help='Fully verify registered case results and source inputs')
+    cleanup = sub.add_parser('cleanup')
+    cleanup.add_argument('--output',type=Path,required=True)
+    cleanup.add_argument('--case',dest='case_ids',action='append',required=True)
+    cleanup.add_argument('--apply',action='store_true',help='Prune verified completed working files; default is preview')
     args = ap.parse_args()
+    if args.operation == 'cleanup':
+        from artifacts.cleanup_completed import prune_completed_case
+        manifest=json.loads((args.output/'training-plan.json').read_text())
+        store=TrainingStore(manifest['store'])
+        results=[prune_completed_case(store,args.output,key,apply=args.apply) for key in args.case_ids]
+        print(json.dumps(results,indent=2),flush=True)
+        return
     if args.operation == 'status':
         manifest = json.loads((args.output / 'training-plan.json').read_text())
         plan = json.loads((args.output / 'frozen-plan.json').read_text())

@@ -29,6 +29,8 @@ execution/
       training-completion.json
       last.ckpt
       models/<context_identity>_best.pt
+      models/<context_identity>_last.pt
+  cleanup/<case_completion_hash>.json
   progress.json
   completion.json
 ```
@@ -68,9 +70,21 @@ these are different estimators and the scientific choice remains undecided.
 
 Permanent model artifacts hold best weights. One rolling completed-epoch
 `last.ckpt` stores optimizer/scheduler/RNG/callback recovery state.
-Working checkpoints and best-file copies currently remain after export until
-verified cleanup is implemented. Do not delete them before validating permanent
-weights, required exports and receipts. No legacy cache cleanup is performed.
+After a case is registered complete, preview redundant working files with:
+
+```bash
+python phase5/campaign.py cleanup --output EXECUTION --case CASE_ID
+```
+
+Repeat with `--apply` to remove that case's rolling checkpoint and working
+`*_best.pt` / `*_last.pt` copies. Permanent best-weight blobs, full score arrays,
+histories, receipts and execution metadata remain. Cleanup verifies the frozen
+plan, permanent artifacts and registered completion, acquires coordinator/task
+locks, checks duplicate best-weight hashes, and writes a per-case cleanup journal.
+It refuses active outputs, missing/corrupt permanent artifacts, changed best files
+and symlinked working paths. It never scans or deletes legacy caches. Completed
+cases can reopen without a working checkpoint; unfinished cases retain theirs.
+Cleanup is explicit, not automatically run when training finishes.
 
 ## Events, split reconstruction and dtype
 
@@ -136,6 +150,6 @@ passed training/export/registry/reader checks, including raw/representation CR.
 
 A receipt proves artifact completion, not statistical calibration or full-campaign
 readiness. Five simultaneous attention/CR ensembles, all draft figure consumers,
-final cleanup policy and scientific acceptance remain open. BF16 adoption needs
+scientific acceptance and full-scale operational validation remain open. BF16 adoption needs
 an explicit format/version decision and prediction/region/reweighting checks.
 Prototype uint16 bit files must never be interpreted as ordinary float16 arrays.
