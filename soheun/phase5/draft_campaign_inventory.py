@@ -104,6 +104,11 @@ def build(draft):
         'generator_sha256': {task['script']: hashlib.sha256((ROOT/task['script']).read_bytes()).hexdigest()
                              for task in tasks.values()}, 'hand_authored': sorted(hand_authored),
         'live_tables': tables,
+        'static_artifacts': {
+            'smear_toy_updated.pdf': {'sha256':'199723b79bbd15165a09cd6866062e1a14a64c847a0ced9ed241e9fc4c87d28e','kind':'unchanged toy illustration'},
+            'contribution_diagram.pdf': {'sha256':'b5b9f8eb8255b13ef511b8d75ef2c65fd395ed6bfd086c973ead3144e1a5981e','kind':'hand authored'},
+            'workflow.png': {'sha256':'416bf867c4fc0b8a3c2eea1553074f412dcdf963ef79d411550377415d37c9da','kind':'hand authored'}},
+        'inline_figures': ['fig:abcd','fig:classifier_architecture'],
         'evaluation_spec': json.loads((ROOT/'phase5/evaluation_spec.json').read_text()),
         'pilot_scope': {'signal':'HH4b','epsilon':['0','0.005','0.0075','0.01','0.02'],
                         'eta':['2.0','inf'],'sr_fraction':'0.20',

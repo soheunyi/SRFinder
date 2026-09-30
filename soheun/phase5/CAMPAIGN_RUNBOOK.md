@@ -65,8 +65,9 @@ reused; changing the scheduling subset does not change model identities.
 
 Use `all` for campaign sweeps/arrays. Standalone engineering tests may use
 `--partition=statds --account=statds --qos=statds_priority`; do not assume those
-settings are interchangeable with campaign-account QoS. Verify the applicable
-`all` account/QoS before submission. These commands intentionally do not guess it.
+settings are interchangeable with campaign-account QoS. Verified on 2026-09-30: use `--partition=all --account=statds --qos=normal`.
+The association's default QoS can be `statds_priority`, while `all` allows only
+`normal`, so specify `--qos=normal` explicitly. Recheck if cluster policy changes.
 
 Request one GPU, sufficient time and eight CPU cores. The current replacement
 benchmark requests 24 GB host RAM for five workers. Treat 1–2 GB per worker as a
@@ -200,7 +201,43 @@ power PDFs have a pilot prefix. These tools never write into the legacy figure
 or cache directories. Use `--tex` to enable the manuscript's external TeX fonts
 when that environment is available.
 
-The signal-concentration, pull and remaining illustration adapters and final
-measured resource settings are still
-needed before this runbook is complete. Do not substitute the legacy master
-figure runner, whose paths target historical outputs.
+## Pilot and full-draft figures
+
+After evaluation summaries and null diagnostics complete, use the new figure
+entry point. It reads the recorded user decision and checks the frozen consumer
+hashes before producing a complete output set:
+
+```bash
+"$PYTHON_BIN" phase5/render_campaign_figures.py \
+  --execution "$CAMPAIGN_OUTPUT" --scope pilot-A \
+  --decision /absolute/path/to/recorded-user-decision.json \
+  --summary /absolute/new/summaries/pilot-A \
+  --diagnostics /absolute/new/null-development/tier-A \
+  --output /absolute/new/figures/pilot-A
+```
+
+For the full draft use `--scope draft`, the full evaluation summary, null
+diagnostics covering seeds 0–99 and `--assets /absolute/path/to/pinned/figures`.
+The three static assets (toy, contribution diagram, workflow) are copied only
+when their checksums match the frozen plan. The two inline TikZ figures remain
+in the pinned manuscript. All 19 generated figure names are checked at the end.
+Use `--device cuda` for frozen-encoder t-SNE feature extraction; its two 20,000-
+event embeddings retain perplexity 20, 500 iterations and random state 42.
+Sampling now has fixed seed 42 and canonical order for reproducibility.
+
+Individual tools remain available: `render_draft_efficiency.py` covers the eight
+100-mother efficiency figures; `render_campaign_pulls.py` enforces the draft's
+64 bins and null seeds 0–49; `render_campaign_illustrations.py` covers classifier,
+overlap, calibration, tails and original/representation comparisons. Classifier
+members are selected by seeds 5/13 and receive neutral seed labels. Calibration
+uses the caption's 50 equal-count quantile bins and physical-weighted means.
+Ratio error bars use squared event weights. These display corrections are
+recorded in the per-figure JSON; bootstrap and training recipes are unchanged.
+
+The native single-ensemble benchmark measured Step 1: 1,306.26 s including export
+(15 members, 100 epochs); Step 2: 342.74 s (15 members, 30 epochs). Both matched
+reference states and full X1/X2 arrays. This does not establish five concurrent
+15-member ensembles. The full CR comparison measured 103 members/GPU-hour with
+five workers and restart, and about 11.3 GB sampled aggregate host RSS. Keep
+24 GB host reservations until the pilot provides additional workload peaks.
+Final aggregation/member count and full-campaign launch remain user decisions.

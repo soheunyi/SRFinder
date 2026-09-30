@@ -61,6 +61,7 @@ def prepare(inventory,graph,bindings,source_store):
           'pilot_scope':inventory['pilot_scope'],
           'evaluation_bindings':bind_outputs(inventory,nodes,graph['diagnostic_bindings']),
           'figure_generators':inventory['figure_generators'],
+          'static_artifacts':inventory['static_artifacts'],'inline_figures':inventory['inline_figures'],
           'generator_sha256':{**inventory['generator_sha256'],**inventory['evaluation_generator_sha256']},'default_worker_processes_per_gpu':5,
           'step3_members_initial':5,'step3_members_optional_extension':15,
           'aggregation':inventory['step3_aggregation'],'resume_boundary':'completed_epoch',
@@ -72,6 +73,11 @@ def prepare(inventory,graph,bindings,source_store):
                    'Scientific pilot and data/checkpoint-policy comparison receive explicit disposition.',
                    'Result registry and plotting/inference readers are integrated.',
                    'User explicitly starts training; preparation does not submit jobs.']}
+    consumer_files=('artifacts/figure_data.py','artifacts/illustration_data.py',
+                    'phase5/render_campaign_figures.py','phase5/render_campaign_power.py',
+                    'phase5/render_campaign_efficiency.py','phase5/render_draft_efficiency.py',
+                    'phase5/render_campaign_pulls.py','phase5/render_campaign_illustrations.py')
+    plan['figure_consumer_sha256']={name:digest(ROOT/name) for name in consumer_files}
     for node in nodes:
         hps=recipes(plan,node)
         if len(hps)!=node['member_count']:raise ValueError('Member recipe count differs')
