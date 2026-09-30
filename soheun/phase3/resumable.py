@@ -217,19 +217,18 @@ class ResumableIndividualSaver(SaveIndividualClassifierCallback):
     * the ``*_best.pt`` / ``*_last.pt`` writes go through a temporary file and
       a rename.
 
-    The selection *rule* is deliberately unchanged, including the fact that it
-    compares against ``callback_metrics`` from a callback hook and therefore
-    reads the previous epoch's loss. That off-by-one is real and documented in
-    Phase 1, but fixing it changes which weights get selected, which is a
-    training-behaviour change and belongs to a later phase. Phase 3 only has to
-    make an interrupted run match an uninterrupted one.
+    Selection uses current-epoch metrics from on_validation_end, after the
+    module has logged them. Historical Phase 1-3 artifacts used a stale metric;
+    those artifacts are not rewritten by this correction.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.best_epochs: dict[str, int] = {m: -1 for m in self.monitor_metrics}
 
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module) -> None:
+    def on_validation_end(self, trainer: pl.Trainer, pl_module) -> None:
+        if trainer.sanity_checking:
+            return
         for i, (run_name, metric) in enumerate(
             zip(self.run_names, self.monitor_metrics)
         ):

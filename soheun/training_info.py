@@ -146,6 +146,8 @@ class TrainingInfo:
         weight: str,
         label_dtype: str = torch.long,
         device=torch.device("cuda"),
+        training_alignment: int | None = None,
+        retain_validation: bool | None = None,
     ) -> tuple[TensorDataset, TensorDataset]:
         require_keys(self.hparams, ["smearing", "encoder_hash", "encoder_mode"])
         require_keys(
@@ -193,18 +195,19 @@ class TrainingInfo:
         w_train = torch.tensor(w_train, dtype=torch.float32)
         w_val = torch.tensor(w_val, dtype=torch.float32)
 
-        fit_batch_size = self.hparams.get("fit_batch_size", 0)
-        if fit_batch_size > 0:
-            q_repr_smear_train = q_repr_smear_train[
-                : (len(q_repr_smear_train) // fit_batch_size) * fit_batch_size
-            ]
-            q_repr_smear_val = q_repr_smear_val[
-                : (len(q_repr_smear_val) // fit_batch_size) * fit_batch_size
-            ]
-            y_train = y_train[: (len(y_train) // fit_batch_size) * fit_batch_size]
-            y_val = y_val[: (len(y_val) // fit_batch_size) * fit_batch_size]
-            w_train = w_train[: (len(w_train) // fit_batch_size) * fit_batch_size]
-            w_val = w_val[: (len(w_val) // fit_batch_size) * fit_batch_size]
+        policy = getattr(self, 'aux_info', {}).get('data_batching_policy', {})
+        if training_alignment is None:
+            training_alignment = policy.get('training_alignment', self.hparams.get('fit_batch_size', 0))
+        if retain_validation is None:
+            retain_validation = policy.get('retain_validation', False)
+        alignment = training_alignment
+        if alignment < 0:
+            raise ValueError('training_alignment must be nonnegative')
+        n_train = len(y_train) // alignment * alignment if alignment else len(y_train)
+        legacy_alignment = self.hparams.get("fit_batch_size", 0)
+        n_val = len(y_val) if retain_validation or not legacy_alignment else len(y_val) // legacy_alignment * legacy_alignment
+        q_repr_smear_train, y_train, w_train = q_repr_smear_train[:n_train], y_train[:n_train], w_train[:n_train]
+        q_repr_smear_val, y_val, w_val = q_repr_smear_val[:n_val], y_val[:n_val], w_val[:n_val]
 
         return (
             TensorDataset(q_repr_smear_train, y_train, w_train),
@@ -268,7 +271,7 @@ class TrainingInfo:
         )
         return scdinfo_train, scdinfo_val
 
-    def fetch_train_val_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def fetch_train_val_data(self, training_alignment=None, retain_validation=None) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Return the training and validation data.
         """
@@ -285,12 +288,19 @@ class TrainingInfo:
             drop=True
         )
 
-        fit_batch_size = self.hparams.get("fit_batch_size", 0)
-        if fit_batch_size > 0:
-            df_train = df_train.iloc[
-                : (len(df_train) // fit_batch_size) * fit_batch_size
-            ]
-            df_val = df_val.iloc[: (len(df_val) // fit_batch_size) * fit_batch_size]
+        policy = getattr(self, 'aux_info', {}).get('data_batching_policy', {})
+        if training_alignment is None:
+            training_alignment = policy.get('training_alignment', self.hparams.get('fit_batch_size', 0))
+        if retain_validation is None:
+            retain_validation = policy.get('retain_validation', False)
+        alignment = training_alignment
+        if alignment < 0:
+            raise ValueError('training_alignment must be nonnegative')
+        if alignment:
+            df_train = df_train.iloc[:len(df_train) // alignment * alignment]
+        legacy_alignment = self.hparams.get("fit_batch_size", 0)
+        if not retain_validation and legacy_alignment:
+            df_val = df_val.iloc[:len(df_val) // legacy_alignment * legacy_alignment]
 
         return df_train, df_val
 
@@ -301,11 +311,13 @@ class TrainingInfo:
         weight: str,
         label_dtype: torch.dtype = torch.long,
         reweighting_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        training_alignment: int | None = None,
+        retain_validation: bool | None = None,
     ) -> tuple[TensorDataset, TensorDataset]:
         """
         fetch train and val dataloader
         """
-        df_train, df_val = self.fetch_train_val_data()
+        df_train, df_val = self.fetch_train_val_data(training_alignment, retain_validation)
 
         X_train = torch.tensor(df_train[features].values, dtype=torch.float32)
         y_train = torch.tensor(df_train[label].values, dtype=label_dtype)

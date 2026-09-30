@@ -1,3 +1,5 @@
+from member_initialization import initialize_members
+from independent_data import stream_identity
 from copy import deepcopy
 import logging
 import torch
@@ -31,9 +33,6 @@ def train_stacked_fvt(
         "depth.encoder",
         "depth.decoder",
         "fit_batch_size",
-        "model_seed",
-        "train_seed",
-        "data_seed",
         "max_epochs",
         "val_ratio",
         "early_stop_patience",
@@ -54,7 +53,7 @@ def train_stacked_fvt(
 
     num_stacks = len(tinfos)
 
-    # model_seed, train_seed, data_seed should be the same for all tinfos
+    # Architecture and schedule must match; member seeds remain independent.
     consistent, mismatches = validate_consistent_hparams(
         [tinfo.hparams for tinfo in tinfos], critical_hparams
     )
@@ -87,8 +86,13 @@ def train_stacked_fvt(
     val_lengths = []
     for tinfo in tinfos:
         train_dset, val_dset = tinfo.fetch_train_val_tensor_datasets(
-            FEATURES, "fourTag", "weight"
+            FEATURES, "fourTag", "weight", training_alignment=32, retain_validation=True
         )
+        tinfo.update_aux_info(data_batching_policy={
+            'version': 1, 'training_alignment': 32, 'retain_validation': True,
+            'train_rows': len(train_dset), 'val_rows': len(val_dset),
+            'shuffle_seed': int(tinfo.hparams['train_seed']),
+        })
         train_datasets.append(train_dset)
         train_lengths.append(len(train_dset))
         val_datasets.append(val_dset)
@@ -96,36 +100,8 @@ def train_stacked_fvt(
 
     print(train_lengths, flush=True)
     print(val_lengths, flush=True)
-    # assert their length is not so different
-    min_train_length = min(train_lengths)
-    min_val_length = min(val_lengths)
-    max_train_length = max(train_lengths)
-    max_val_length = max(val_lengths)
-    assert (
-        min_train_length / max_train_length > 0.9
-        and min_val_length / max_val_length > 0.9
-    ), " ".join(
-        [
-            "Train and val lengths are too different",
-            f"min_train_length: {min_train_length}",
-            f"max_train_length: {max_train_length}",
-            f"min_val_length: {min_val_length}",
-            f"max_val_length: {max_val_length}",
-        ]
-    )
-    # truncate the train and val datasets to the minimum length
-    print(f"Truncating train and val datasets to the minimum length", flush=True)
-    for i in range(num_stacks):
-        train_datasets[i] = TensorDataset(
-            train_datasets[i].tensors[0][:min_train_length],
-            train_datasets[i].tensors[1][:min_train_length],
-            train_datasets[i].tensors[2][:min_train_length],
-        )
-        val_datasets[i] = TensorDataset(
-            val_datasets[i].tensors[0][:min_val_length],
-            val_datasets[i].tensors[1][:min_val_length],
-            val_datasets[i].tensors[2][:min_val_length],
-        )
+    # Align training rows to GBN groups (32), retain all validation rows, and
+    # never trim further according to another estimator's dataset length.
 
     max_epochs = tinfos[0].hparams["max_epochs"]
     train_seed = tinfos[0].hparams["train_seed"]
@@ -133,10 +109,14 @@ def train_stacked_fvt(
     optimizer_config = tinfos[0].hparams["optimizer"]
     lr_scheduler_config = tinfos[0].hparams["lr_scheduler"]
     early_stop_patience = tinfos[0].hparams["early_stop_patience"]
-    dataloader_config = tinfos[0].hparams["dataloader"]
-    dataloader_config["num_workers"] = 8
+    dataloader_config = deepcopy(tinfos[0].hparams["dataloader"])
+    dataloader_config.setdefault("num_workers", 8)
 
     fit_args = {
+        "independent_batches": True,
+        "estimator_train_seeds": [int(t.hparams['train_seed']) for t in tinfos],
+        "estimator_ids": [stream_identity(t.hparams) for t in tinfos],
+        "execution_chunk_size": dataloader_config.get('execution_chunk_size', 0),
         "train_datasets": train_datasets,
         "val_datasets": val_datasets,
         "max_epochs": max_epochs,
@@ -153,6 +133,9 @@ def train_stacked_fvt(
 
     pl.seed_everything(model_seed)
     stacked_model = StackedFvTClassifier(**stacked_hparams)
+    initialization = initialize_members(stacked_model.fvt_classifiers, [t.hparams for t in tinfos])
+    for tinfo, record in zip(tinfos, initialization):
+        tinfo.update_aux_info(initialization_policy=record)
     stacked_model.fit(**fit_args)
 
     stacked_model.eval()
