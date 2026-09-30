@@ -13,6 +13,10 @@ import numpy as np
 from dataset import MotherSamples
 from .training_store import canonical,sha
 from .source_context import verify_source_context,_file_sha
+from .source_fingerprints import SourceFingerprints
+
+# Only digests/file stamps persist; no MotherSamples masks or feature arrays.
+_SOURCE_FINGERPRINTS = SourceFingerprints()
 from .step1_context import ArtifactStep1Context
 from .step2_context import ArtifactStep2Context
 from .step3_context import ArtifactStep3Context
@@ -35,18 +39,18 @@ def _check_source_recipe(mother,hparams):
         raise ValueError('Mother record parameters differ from source recipe')
 
 
-def register_source_pointer(store,mother_record,source_hparams,*,source_root):
+def register_source_pointer(store,mother_record,source_hparams,*,source_root,fingerprints=None):
     """Register existing raw pools/selection once; return a JSON worker pointer."""
     path=Path(mother_record).resolve();source_root=Path(source_root).resolve()
     mother,fingerprint=_load_mother(path);_check_source_recipe(mother,source_hparams)
     raw=mother.scdinfo
     paths=[(Path(p) if Path(p).is_absolute() else source_root/p).resolve() for p in raw.files]
     if any(np.asarray(mask).dtype!=np.bool_ for mask in raw.inner_idxs):raise ValueError('Mother masks must be boolean')
-    descriptor={'pools':[{'name':p.name,'sha256':_file_sha(p)} for p in paths],
+    descriptor={'pools':[{'name':p.name,'sha256':fingerprints.sha256(p) if fingerprints is not None else _file_sha(p)} for p in paths],
         'mother_parameters':deepcopy(source_hparams['dataset']),
         'mother_selection_sha256':[hashlib.sha256(np.asarray(mask).tobytes()).hexdigest() for mask in raw.inner_idxs]}
     dataset_id=store.put_dataset(sha(canonical(descriptor)),len(raw),descriptor)
-    verify_source_context(store,dataset_id,source_hparams,raw,source_root=source_root)
+    verify_source_context(store,dataset_id,source_hparams,raw,source_root=source_root,fingerprints=fingerprints)
     return {'dataset_id':dataset_id,'mother_record':str(path),'mother_record_sha256':fingerprint,
             'source_root':str(source_root),'hparams':deepcopy(source_hparams)}
 
@@ -60,11 +64,12 @@ def make_stage_task(source_pointer,member_hparams,*,upstream=None):
         'source':source_pointer,'members':member_hparams,'upstream':upstream or {}}))
 
 
-def resolve_source_pointer(store,pointer):
+def resolve_source_pointer(store,pointer,*,fingerprints=None):
+    if fingerprints is None: fingerprints = _SOURCE_FINGERPRINTS
     mother,_=_load_mother(pointer['mother_record'],pointer['mother_record_sha256'])
     _check_source_recipe(mother,pointer['hparams'])
     return verify_source_context(store,pointer['dataset_id'],pointer['hparams'],mother.scdinfo,
-                                 source_root=pointer['source_root'])
+                                 source_root=pointer['source_root'],fingerprints=fingerprints)
 
 
 def build_stage_contexts(store,task):

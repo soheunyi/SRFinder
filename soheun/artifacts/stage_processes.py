@@ -8,6 +8,7 @@ import gc
 import hashlib
 import inspect
 import multiprocessing as mp
+import time
 from pathlib import Path
 import torch
 from .training_store import TrainingStore,canonical,sha
@@ -24,11 +25,15 @@ def _initialize():
 
 def _task(payload):
     store_root,spec,factory,output,options=payload
+    started=time.perf_counter()
     store=TrainingStore(store_root)
     contexts,source=factory(store,spec)
+    prepared=time.perf_counter()
     try:
         result=run_stage(store,contexts,source,output,resume=Path(output).exists(),**options)
         if result['status']!='STAGE_ARTIFACTS_COMPLETE':raise RuntimeError('Worker did not finish its declared stage')
+        _atomic_json(Path(output)/'worker-metrics.json',{'context_preparation_s':prepared-started,
+            'worker_total_s':time.perf_counter()-started})
         return result
     finally:
         del contexts,source

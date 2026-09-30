@@ -48,7 +48,7 @@ class VerifiedSourceContext:
         return np.flatnonzero(self.ms_idx if domain=='X1' else ~self.ms_idx).astype(np.int64)
 
 
-def verify_source_context(store,dataset_id,hparams,mother_scdinfo,*,source_root):
+def verify_source_context(store,dataset_id,hparams,mother_scdinfo,*,source_root,fingerprints=None):
     """mother_scdinfo may come from a shared cache or seed-based reconstruction.
 
     Verify content before using it. Source paths are resolved independently of
@@ -65,7 +65,7 @@ def verify_source_context(store,dataset_id,hparams,mother_scdinfo,*,source_root)
     masks=[np.asarray(mask) for mask in mother_scdinfo.inner_idxs]
     if any(mask.dtype!=np.bool_ or mask.ndim!=1 for mask in masks):
         raise ValueError('Mother selections must be one-dimensional boolean masks')
-    actual={'pools':[{'name':p.name,'sha256':_file_sha(p)} for p in paths],
+    actual={'pools':[{'name':p.name,'sha256':fingerprints.sha256(p) if fingerprints is not None else _file_sha(p)} for p in paths],
             'mother_parameters':deepcopy(hparams['dataset']),
             'mother_selection_sha256':[hashlib.sha256(mask.tobytes()).hexdigest() for mask in masks]}
     if actual!=expected or hashlib.sha256(canonical(actual)).hexdigest()!=record['identity']['source_fingerprint']:

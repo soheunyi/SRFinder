@@ -35,8 +35,8 @@ pending. Per-member validation/LR histories must agree with best-epoch selection
 The stage APIs do not choose scientific configurations, submit Slurm jobs, run
 bootstrap inference or delete checkpoints. The spawn-process coordinator accepts explicit JSON task recipes with five
 workers by default, supports a lower worker count on resume, and stops its own
-workers on failure without writing false completion. Full manuscript-source and
-result-registry binding remains integration work.
+workers on failure without writing false completion. The bounded dependency runner and case registry consume a caller-supplied frozen
+plan; draft-specific inventory and deployment remain separate integration work.
 
 ## Data placement
 
@@ -109,9 +109,12 @@ a multi-pool sample. A three-estimator, 20-epoch residency comparison measured
 about 2.98x at batch 1,024 and 1.33x at batch 32,768, with exact checked outputs.
 These are scoped results; raw experimental history is excluded from this review.
 
-The full serial/parallel comparison, representative-scale CR measurements, GPU
-tests of the new stage APIs, measured headroom, real-data end-to-end export, full campaign
-binding and scientific acceptance gates remain open in #4 and #6. Passing the
+The full Step-1 serial/five-process comparison passed exact checked states and
+predictions across 150 NNs and 100 epochs: 8.19 versus 4.01 hours, a 2.04x speedup
+across separate L40 allocations. Synthetic GPU stage and dependency/recovery
+checks passed. Representative K100 CR, production headroom, real-data end-to-end
+acceptance, draft plotting integration and scientific gates remain open in #4
+and #6. Passing the
 CPU suite or merging this patch does not establish full-campaign readiness.
 
 
@@ -124,8 +127,9 @@ introduced. `materialize_task` checks a declared node's dataset, member seeds,
 count, epoch schedule and optional architecture/depth against supplied recipes,
 then verifies completed parents and selects their models by seed. Wrong-eta or
 missing-member upstreams are rejected. It defines X1 regions but never trains or
-submits work. The caller must supply frozen dataset/member recipes and populate
-the full campaign's source/result registry.
+submits work. The caller supplies a frozen plan with dataset/member templates and source
+bindings. The registry checks completed tasks against that plan and their
+registered parents before exposing results.
 
 CUDA stage calls use the validated driver's medium matmul setting, permit cuDNN
 TF32 and disable cuDNN benchmarking. Parameters and cached scores stay float32;
@@ -140,5 +144,47 @@ recovery and exact restoration of runtime settings. The representative Step-2
 15-member/30-epoch residency test passed exact checked states, histories and
 prediction probes, with about 2.11x fit/checkpoint speedup excluding shared feature
 preparation. The full five-process Step-1 arm completed 150 NNs for 100 epochs in
-about four hours; its full serial comparison remains pending. K100 and current
-stage-API GPU checks remain open. No campaign or statistical pilot is launched.
+about four hours; its full serial comparison passed. Current stage-API and
+dependency GPU smoke checks passed. K100 and the native real-data chain remain
+open. No campaign or statistical pilot is launched.
+
+
+## Frozen plans, bounded execution and analysis readers
+
+`campaign_recipes.recipes` expands frozen native templates into explicit member
+recipes. `CaseRegistry` rejects wrong sources, parents, seeds, schedules or
+optimizer recipes and conflicting results. Completed-result reuse first verifies
+all content/source inputs; a bounded process-local metadata cache checks referenced
+file stamps and raises on changes. Raw-pool digests are reused only while their
+file stamps match. No event tensors are kept in this cache.
+
+`campaign_runtime.run_campaign` admits at most the requested worker count, waits
+for verified dependencies, and keeps stable per-case output roots. The default
+is five processes; resume can use fewer without changing scientific identities.
+A prefix limit stops after complete case transactions. A failed worker terminates
+only this coordinator's workers; completed-epoch checkpoints remain recoverable.
+Execution timing and memory telemetry live separately from immutable receipts.
+
+From `soheun/`, the CLI is `python phase5/campaign.py`. `prepare --dry-run` inspects
+a supplied plan without writing files or submitting jobs. `prepare` imports source
+descriptors and freezes plan/runtime/scope ownership. `status --verify` rechecks
+registered outputs. Explicit run/resume requires either a small declared
+`--validation --case ID` scope or `--start-campaign`. The latter is an execution
+interface and does not replace scientific acceptance or the user's launch
+instruction. CUDA execution requires explicit safety and per-worker compute
+headroom; output/store paths and inference batch size are fixed for recovery.
+
+`CampaignReader` selects scores by declared member seed, checks common ordering,
+and requires a named aggregation. It derives held-out regions and signed-weight
+affine-test inputs from the recorded X1 thresholds and X2 scores without saving
+derived arrays. This supplies analysis primitives; migration of every draft
+figure reader remains separate work. No aggregation choice or statistical pilot
+is made by these APIs.
+
+`phase5/test_campaign_runtime.py` runs two synthetic sources/eight logical cases
+through actual recipes, materialization, spawned training/export, registry and
+readers. CPU and GPU checks cover exact serial/spawn receipts, bounded dispatch,
+completed-prefix and interrupted-epoch recovery, completed reuse without workers,
+frozen optimizer rejection, changed artifact/source rejection, seed-based score
+selection, explicit aggregation, and CLI dry-run/status behavior. These checks
+are implementation acceptance, not calibration results or campaign launch.

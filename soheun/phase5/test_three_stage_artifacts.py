@@ -42,6 +42,7 @@ from artifacts.stage_completion import complete_stage,verify_stage_completion
 from artifacts.run_stage import run_stage
 from artifacts.bound_tasks import register_source_pointer,make_stage_task,build_stage_contexts
 from artifacts.materialize_task import materialize_task
+from artifacts.case_registry import CaseRegistry
 
 N=2048
 TEST_DEVICE="cpu"
@@ -214,7 +215,7 @@ def main():
     mother_path.write_bytes(pickle.dumps(MotherSamples(raw,'fixture',params)))
     pointer=register_source_pointer(store,mother_path,source_hp,source_root=args.out)
     assert pointer['dataset_id']==dataset
-    case_receipts={}
+    case_receipts={};case_tasks={}
     def logical_node(stage,*,seeds=None,sr=.2,model=None):
         seeds=[0,1] if seeds is None else seeds
         return {'id':f'fixture-step{stage}','stage':stage,'member_count':len(seeds),'member_seeds':seeds,
@@ -227,10 +228,14 @@ def main():
         task=materialize_task(store,node,pointer,[hparams(stage,m) for m in range(2)],
             {key:case_receipts[key] for key in node['requires']},expected_dataset=params)
         assert task['upstream']==(upstream or {})
+        case_tasks[node['id']]=task
         contexts,reconstructed=build_stage_contexts(store,task)
         np.testing.assert_array_equal(reconstructed.ms_idx,source.ms_idx)
         assert all(c.hparams['source_dataset_id']==dataset for c in contexts)
         return contexts
+    registry_plan={'schema':1,'nodes':[logical_node(stage) for stage in (1,2,3)]}
+    registry=CaseRegistry(store,registry_plan,args.out/'case-registry')
+    assert registry.parents('fixture-step2') is None
     changed={**pointer,'mother_record_sha256':'0'*64}
     try:build_stage_contexts(store,make_stage_task(changed,[hparams(1,0)]))
     except ValueError:pass
@@ -294,7 +299,21 @@ def main():
         finally:path.write_bytes(original)
         assert verify_stage_completion(store,key,source)
         completions.append(key)
-        if name is None:case_receipts[f'fixture-step{stage}']=key
+        if name is None:
+            case_id=f'fixture-step{stage}';case_receipts[case_id]=key
+            result_id=registry.publish(case_id,case_tasks[case_id],key)
+            assert registry.publish(case_id,case_tasks[case_id],key)==result_id
+            assert registry.get(case_id)['completion_id']==key
+            if stage==1:
+                assert registry.parents('fixture-step2')=={case_id:key}
+                wrong=copy.deepcopy(case_tasks[case_id]);wrong['members'][0]['data_seed']+=1
+                try:registry.publish(case_id,wrong,key)
+                except ValueError:pass
+                else:raise AssertionError('Wrong training recipe registered')
+                bad_plan=copy.deepcopy(registry_plan);bad_plan['nodes'][0]['max_epochs']=99
+                try:CaseRegistry(store,bad_plan,args.out/'case-registry',resume=True)
+                except ValueError:pass
+                else:raise AssertionError('Registry adopted another plan')
     base=train(store,source,bound(1),args.out/'step1')
     base_scores=export(base,('X1','X2'))
     finish(1,base_scores)
