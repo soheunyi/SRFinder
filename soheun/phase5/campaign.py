@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from artifacts.training_store import TrainingStore, canonical, sha
 from artifacts.campaign_runtime import (execution_manifest, prepare_execution,
-                                        run_campaign, selected_nodes, runtime_snapshot)
+                                        run_campaign, selected_nodes, runtime_snapshot,
+                                        adopt_completed_cases)
 from artifacts.case_registry import CaseRegistry
 
 
@@ -22,6 +23,16 @@ def gib(value):
     if not math.isfinite(amount) or amount <= 0:
         raise argparse.ArgumentTypeError('A positive finite GiB amount is required')
     return int(amount * 1024**3)
+
+
+def shard_arg(value):
+    try:
+        k, n = (int(part) for part in value.split('/'))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError('Shard must be K/N, e.g. 0/8') from exc
+    if n < 2 or not 0 <= k < n:
+        raise argparse.ArgumentTypeError('Shard must satisfy 0 <= K < N and N >= 2')
+    return (k, n)
 
 
 def main():
@@ -51,9 +62,14 @@ def main():
             parser.add_argument('--max-new-cases', type=int)
             parser.add_argument('--through-stage',type=int,choices=[1,2,3],default=3,
                                 help='Run only through this stage, preserving the full prepared scope')
+            parser.add_argument('--shard', type=shard_arg,
+                                help='K/N: run shard K of N concurrent coordinators (one GPU each) on this execution')
     status = sub.add_parser('status')
     status.add_argument('--output', type=Path, required=True)
     status.add_argument('--verify', action='store_true', help='Fully verify registered case results and source inputs')
+    adopt = sub.add_parser('adopt', help='Register verified completions from an earlier execution of the same plan; trains nothing')
+    adopt.add_argument('--output', type=Path, required=True)
+    adopt.add_argument('--from', dest='source_execution', type=Path, required=True)
     cleanup = sub.add_parser('cleanup')
     cleanup.add_argument('--output',type=Path,required=True)
     cleanup.add_argument('--case',dest='case_ids',action='append',required=True)
@@ -66,6 +82,12 @@ def main():
         results=[prune_completed_case(store,args.output,key,apply=args.apply) for key in args.case_ids]
         print(json.dumps(results,indent=2),flush=True)
         return
+    if args.operation == 'adopt':
+        manifest = json.loads((args.output / 'training-plan.json').read_text())
+        plan = json.loads((args.output / 'frozen-plan.json').read_text())
+        result = adopt_completed_cases(TrainingStore(manifest['store']), plan, args.output, args.source_execution)
+        print(json.dumps({**result, 'adopted_cases': len(result['adopted_case_ids'])}, indent=2), flush=True)
+        return
     if args.operation == 'status':
         manifest = json.loads((args.output / 'training-plan.json').read_text())
         plan = json.loads((args.output / 'frozen-plan.json').read_text())
@@ -75,6 +97,9 @@ def main():
                   'runtime_matches': runtime_snapshot() == manifest['runtime_files'], 'outputs_verified': False}
         progress = args.output / 'progress.json'
         report['progress'] = json.loads(progress.read_text()) if progress.exists() else {'status': 'PREPARED_TRAINING_NOT_STARTED'}
+        shards = sorted(args.output.glob('progress-shard-*.json'))
+        if shards:
+            report['shard_progress'] = {path.stem[len('progress-'):]: json.loads(path.read_text()) for path in shards}
         if args.verify:
             store = TrainingStore(manifest['store'])
             registry_path = args.output / 'registry'
@@ -121,7 +146,8 @@ def main():
         result = run_campaign(store, plan, args.output, case_ids=args.case_ids, nproc=args.nproc,
             device=args.device, resident=resident, safety_bytes=args.safety_gib,
             compute_headroom_bytes=args.compute_headroom_gib, export_batch_size=args.export_batch_size,
-            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches, through_stage=args.through_stage, work_case_ids=work_cases)
+            resume=True, max_new_cases=args.max_new_cases, execution_patches=patches, through_stage=args.through_stage, work_case_ids=work_cases,
+            shard=args.shard)
     print(json.dumps(result, indent=2), flush=True)
 
 

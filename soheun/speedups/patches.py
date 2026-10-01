@@ -258,7 +258,7 @@ def install_graphs() -> None:
     stats = {'captures': 0, 'capture_s': 0.0, 'replays': 0, 'eager': 0}
     it.GRAPH_STATS = stats
 
-    def capture(member, x):
+    def capture(member, x, pool):
         import time
         for mod in member.modules():
             if isinstance(mod, torch.nn.Dropout) and mod.p > 0:
@@ -268,7 +268,8 @@ def install_graphs() -> None:
         flag = member.__dict__.get('_nan_flag')
         flag_before = flag.clone() if flag is not None else None
         torch.cuda.synchronize()
-        graphed = torch.cuda.make_graphed_callables(_Wrap(member), (x.detach().clone(),), allow_unused_input=True)
+        graphed = torch.cuda.make_graphed_callables(_Wrap(member), (x.detach().clone(),),
+                                                    allow_unused_input=True, pool=pool)
         torch.cuda.synchronize()
         with torch.no_grad():
             for b, saved in snapshot:
@@ -292,7 +293,19 @@ def install_graphs() -> None:
                 return member(x)
             for k in [k for k in cache if k[1][0] != batch_size]:
                 del cache[k]  # an earlier milestone's shape never recurs
-            g = cache[key] = capture(member, x)
+            # One memory pool per batch size, shared by all members: step()
+            # runs each member's forward, backward and Adam step before the
+            # next member, on one stream, so a member's dead workspace is
+            # reused instead of reserving one workspace per member.
+            # Tensors that outlive a replay stay referenced by their graph
+            # and are never handed to another capture.
+            shared = module.__dict__.get('_graph_pool')
+            if shared is None or shared[0] != batch_size:
+                shared = (batch_size, torch.cuda.graph_pool_handle(), torch.cuda.current_stream())
+                module.__dict__['_graph_pool'] = shared
+            g = cache[key] = capture(member, x, shared[1])
+        if torch.cuda.current_stream() != module.__dict__['_graph_pool'][2]:
+            raise RuntimeError('Members share one graph memory pool; replay on the capture stream only')
         stats['replays'] += 1
         return g(x)
 

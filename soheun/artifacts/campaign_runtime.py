@@ -5,7 +5,9 @@ rule, deletes checkpoints or declares scientific acceptance. The caller owns
 execution authorization, allocation, prepared inputs and deployment snapshot.
 """
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+from contextlib import contextmanager, ExitStack
 from copy import deepcopy
+import fcntl
 import hashlib
 import json
 import multiprocessing as mp
@@ -68,6 +70,60 @@ def selected_nodes(plan, case_ids=None):
 
 
 
+def shard_sources(nodes, shard):
+    """Deterministic, identity-free assignment of whole sources to one shard.
+
+    Every training chain is self-contained per source (Step 2 needs only Step 1
+    of its source, Step 3 only Steps 1-2), so source shards never wait on each
+    other. Sources are ordered by id; shard k of n takes indices i % n == k.
+    """
+    k, n = shard
+    if type(k) is not int or type(n) is not int or n < 2 or not 0 <= k < n:
+        raise ValueError('Shard must be (k, n) with n >= 2 and 0 <= k < n')
+    by_id = {node['id']: node for node in nodes}
+    for node in nodes:
+        for parent in node['requires']:
+            if parent in by_id and by_id[parent]['source_case_id'] != node['source_case_id']:
+                raise ValueError('Cross-source dependency; source sharding would be unsafe')
+    sources = sorted({node['source_case_id'] for node in nodes})
+    return [source for i, source in enumerate(sources) if i % n == k]
+
+
+@contextmanager
+def _shared_run(root, manifest, shard, sources):
+    """Shared ownership of a prepared execution for one shard coordinator.
+
+    Shard coordinators hold the execution lock in shared mode, so an unsharded
+    coordinator (exclusive) and shards exclude each other. Each shard also
+    holds an exclusive lock for its (k, n) and for every source it owns, so a
+    duplicate or overlapping shard specification fails before training.
+    """
+    root = Path(root)
+    if not (root / 'prepared.json').is_file():
+        raise ValueError('Sharded execution requires a prepared execution root')
+    with ExitStack() as stack:
+        lock = stack.enter_context((root / '.worker.lock').open('a+'))
+        try: fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError('Execution has an active unsharded coordinator') from exc
+        path = root / 'training-plan.json'
+        if not path.is_file() or json.loads(path.read_text()) != manifest:
+            raise ValueError('Training output has a different recipe or source version')
+        claims = root / 'claims'
+        claims.mkdir(exist_ok=True)
+        k, n = shard
+        mine = stack.enter_context((claims / f'shard-{k}-of-{n}.lock').open('a+'))
+        try: fcntl.flock(mine, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(f'Shard {k}/{n} already has an active coordinator') from exc
+        for source in sources:
+            held = stack.enter_context((claims / f'source-{source}.lock').open('a+'))
+            try: fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError(f'Source {source} is claimed by another coordinator') from exc
+        yield
+
+
 def execution_manifest(store, plan, *, case_ids=None, device='cpu', export_batch_size=1024, execution_patches=()):
     settings=plan.get('fixed_settings',{})
     expected_version=settings.get('torch_version')
@@ -108,7 +164,8 @@ def prepare_execution(store, plan, output, *, case_ids=None, device='cpu',
 
 def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                  resident='auto', safety_bytes=None, compute_headroom_bytes=None,
-                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=(), through_stage=3, work_case_ids=None):
+                 export_batch_size=1024, resume=False, max_new_cases=None, execution_patches=(), through_stage=3, work_case_ids=None,
+                 shard=None):
     """Execute only a declared plan/closure with at most nproc tasks in flight.
 
     A max_new_cases prefix stops cleanly after complete training/export/registry
@@ -116,6 +173,9 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
     placement may change on resume; plan, scope, code and export profile may not.
     through_stage and work_case_ids bound scheduling without changing the full
     declared scope, so pilot results can be reused by the later full campaign.
+    shard=(k, n) runs one of n concurrent coordinators (one GPU each) on the
+    same prepared execution and registry; it schedules only its own sources and
+    never changes a case, task or model identity.
     """
     if type(through_stage) is not int or through_stage not in (1,2,3):
         raise ValueError('through_stage must be 1, 2 or 3')
@@ -130,12 +190,23 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
     manifest = execution_manifest(store, plan, case_ids=case_ids, device=device,
                                   export_batch_size=export_batch_size, execution_patches=execution_patches)
     snapshot = manifest['runtime_files']
-    with _owned_run(root, manifest, resume), origin_guard(store,plan) as origin:
+    if shard is not None:
+        if plan.get('member_extension'):
+            raise ValueError('Sharding is not supported for member-extension plans')
+        assigned = shard_sources(nodes, shard)
+        ownership = _shared_run(root, manifest, shard, assigned)
+        suffix = f'-shard-{shard[0]}-of-{shard[1]}'
+    else:
+        assigned = None
+        ownership = _owned_run(root, manifest, resume)
+        suffix = ''
+    with ownership, origin_guard(store,plan) as origin:
         if (root / 'frozen-plan.json').is_file():
             if json.loads((root / 'frozen-plan.json').read_text()) != plan:
                 raise ValueError('Frozen input plan changed')
         else: store._publish(root / 'frozen-plan.json', canonical(plan))
-        registry = CaseRegistry(store, plan, root / 'registry', resume=(root / 'registry').exists())
+        registry = CaseRegistry(store, plan, root / 'registry',
+                                resume=shard is not None or (root / 'registry').exists())
         (root / 'tasks').mkdir(exist_ok=True)
         imported=[] if origin is None else import_unchanged_cases(registry,origin,nodes)
         done = {}
@@ -147,6 +218,9 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
         if {n['id'] for n in active_nodes}-{n['id'] for n in nodes}:
             raise ValueError('Work selection lies outside the prepared execution scope')
         active_nodes=[n for n in active_nodes if n['stage']<=through_stage]
+        if assigned is not None:
+            mine=set(assigned)
+            active_nodes=[n for n in active_nodes if n['source_case_id'] in mine]
         remaining = [node for node in active_nodes if node['id'] not in done]
         limit = len(remaining) if max_new_cases is None else min(max_new_cases, len(remaining))
         workers = min(nproc, max(1, limit))
@@ -163,17 +237,18 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
         options = {'device': device, 'resident': resident, 'device_budget_bytes': budget,
                    'compute_headroom_bytes': compute_headroom_bytes,
                    'export_batch_size': export_batch_size, 'execution_patches': execution_patches}
-        _atomic_json(root / 'latest-execution.json', {'requested_workers': nproc,
+        _atomic_json(root / f'latest-execution{suffix}.json', {'requested_workers': nproc,
             'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases, 'through_stage': through_stage,
             'work_case_ids':None if work_case_ids is None else sorted(work_case_ids),
-            'scheduled_case_count':len(active_nodes),'imported_original_case_ids':imported})
+            'scheduled_case_count':len(active_nodes),'imported_original_case_ids':imported,
+            'shard':None if shard is None else list(shard),'assigned_source_count':None if assigned is None else len(assigned)})
         started = time.monotonic()
         new_count = 0
         in_flight = {}
         max_in_flight = 0
         pool = None
         def progress(status, **extra):
-            _atomic_json(root / 'progress.json', {'status': status, 'total_cases': len(nodes),
+            _atomic_json(root / f'progress{suffix}.json', {'status': status, 'total_cases': len(nodes),
                 'completed_cases': len(done), 'newly_completed_cases': new_count,
                 'running_case_ids': sorted(node['id'] for node, _ in in_flight.values()),
                 'max_in_flight': max_in_flight, 'elapsed_s': time.monotonic() - started, **extra})
@@ -228,16 +303,74 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                 'completion_ids': done, 'max_in_flight': max_in_flight,
                 'selected_scope_complete':all(n['id'] in done for n in active_nodes),
                 'scheduled_case_count':len(active_nodes)}
-            _atomic_json(root / 'completion.json', result)
+            if shard is not None:
+                result['shard']=list(shard)
+                result['assigned_source_count']=len(assigned)
+            _atomic_json(root / f'completion{suffix}.json', result)
             progress(status)
             return result
         except BaseException as exc:
             progress('FAILED', error_type=type(exc).__name__, error=str(exc))
             if pool is not None:
-                for process in tuple((pool._processes or {}).values()):
+                # Lightning's SIGTERM handler keeps a worker alive; escalate so
+                # the coordinator exits and releases its GPU allocation.
+                processes = [p for p in tuple((pool._processes or {}).values()) if p.is_alive()]
+                for process in processes:
+                    process.terminate()
+                for process in processes:
+                    process.join(10)
                     if process.is_alive():
-                        process.terminate()
+                        process.kill()
+                        process.join(10)
+                pool.shutdown(wait=False, cancel_futures=True)
+                pool = None
             raise
         finally:
             if pool is not None:
                 pool.shutdown(wait=True, cancel_futures=True)
+
+
+def adopt_completed_cases(store, plan, output, source_execution):
+    """Register verified completions from an earlier execution of the same plan.
+
+    For moving to a new deployment snapshot (for example a sharded launcher)
+    without retraining: both executions must share the plan and store. Each
+    adopted case is re-verified through the source registry and re-published,
+    with its parents first, in the target registry. Nothing is trained, and the
+    source execution is only read; it must not have an active coordinator.
+    """
+    root, old = Path(output), Path(source_execution)
+    mine = json.loads((root / 'training-plan.json').read_text())
+    theirs = json.loads((old / 'training-plan.json').read_text())
+    plan_id = sha(canonical(plan))
+    if not (mine['plan_sha256'] == theirs['plan_sha256'] == plan_id):
+        raise ValueError('Adoption requires the same frozen plan')
+    if mine['store'] != theirs['store'] or Path(mine['store']) != store.root.resolve():
+        raise ValueError('Adoption requires the same artifact store')
+    manifest = execution_manifest(store, plan, case_ids=mine['case_ids'], device=mine['device'],
+        export_batch_size=mine['export_batch_size'],
+        execution_patches=tuple(mine.get('execution_policy', {}).get('patches', ())))
+    with (old / '.worker.lock').open('a+') as lock:
+        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError('Source execution has an active coordinator') from exc
+        with _owned_run(root, manifest, True):
+            source = CaseRegistry(store, plan, old / 'registry', resume=True)
+            target = CaseRegistry(store, plan, root / 'registry', resume=True)
+            adopted, present = [], 0
+            for node in sorted(selected_nodes(plan, mine['case_ids']), key=lambda n: n['stage']):
+                if target.get(node['id']) is not None:
+                    present += 1
+                    continue
+                value = source.get(node['id'])
+                if value is None:
+                    continue
+                target.publish(node['id'], value['task'], value['completion_id'])
+                if target.get(node['id'])['completion_id'] != value['completion_id']:
+                    raise ValueError('Adopted completion differs from its source')
+                adopted.append(node['id'])
+            report = {'status': 'ADOPTED_VERIFIED_COMPLETIONS', 'source_execution': str(old.resolve()),
+                      'plan_sha256': plan_id, 'adopted_case_ids': adopted,
+                      'already_present_cases': present}
+            _atomic_json(root / f'adoption-{sha(canonical(sorted(adopted)))[:16]}.json', report)
+            return report

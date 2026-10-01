@@ -7,10 +7,33 @@ from pathlib import Path
 from .training_store import canonical,sha
 from .bound_tasks import build_stage_contexts,resolve_source_pointer
 from .stage_completion import verify_stage_completion
-from .train_stage import _owned_run
+from contextlib import contextmanager
+import fcntl
+from .train_stage import _atomic_json
 from .materialize_task import materialize_task
 from .campaign_recipes import recipes
 from .verification_snapshot import VerificationSnapshot
+
+
+@contextmanager
+def _registry_lock(root,manifest,resume):
+    """Exclusive registry access that waits instead of failing.
+
+    Same files and manifest check as the training-output ownership lock, but
+    several coordinators (one per GPU) may share one registry: creation and
+    publication serialize on a blocking lock rather than raising on contention.
+    """
+    root=Path(root)
+    if root.exists() and not resume:raise ValueError('Output exists; explicit resume is required')
+    root.mkdir(parents=True,exist_ok=True)
+    with (root/'.worker.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        path=root/'training-plan.json'
+        if path.is_file():
+            if json.loads(path.read_text())!=manifest:
+                raise ValueError('Training output has a different recipe or source version')
+        else:_atomic_json(path,manifest)
+        yield
 
 
 class CaseRegistry:
@@ -23,7 +46,7 @@ class CaseRegistry:
                for node in self.nodes.values() for parent in node['requires']):
             raise ValueError('Registry plan has invalid or cyclic dependencies')
         self.manifest={'schema':1,'plan_sha256':self.plan_id}
-        with _owned_run(self.root,self.manifest,resume):
+        with _registry_lock(self.root,self.manifest,resume):
             (self.root/'cases').mkdir(exist_ok=True)
 
     def _path(self,case_id):
@@ -81,7 +104,7 @@ class CaseRegistry:
 
     def publish(self,case_id,task,completion_id):
         path=self._path(case_id)
-        with _owned_run(self.root,self.manifest,True):
+        with _registry_lock(self.root,self.manifest,True):
             self._verify(case_id,task,completion_id)
             task_id=self.store._record('stage_task',{'task':task})
             result_id=self.store._record('case_result',{'plan_sha256':self.plan_id,'case_id':case_id,
