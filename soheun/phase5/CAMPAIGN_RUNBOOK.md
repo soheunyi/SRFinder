@@ -93,6 +93,59 @@ ensembles. All use the same prepared full scope and stable case directories.
 Already verified results are reused. Do not start two coordinators on the same
 execution root. Stage boundaries do not imply statistical acceptance.
 
+## Multi-GPU execution: source shards as a Slurm array
+
+One coordinator drives one GPU with five workers. To use several GPUs, run
+several **shard coordinators** on the same prepared execution. Every training
+chain is self-contained per source (Step 2 needs only Step 1 of its source,
+Step 3 only Steps 1-2), so shard `k` of `n` takes the sources with index
+`i % n == k` (sources sorted by id) and never waits for another shard.
+Sharding changes scheduling only: case, task and model identities, and
+therefore completion IDs, are identical to a single-coordinator run.
+
+```bash
+# n shards, at most K running at once; each array task gets one GPU.
+SHARD_COUNT=16 PILOT_LAUNCH_AUTHORIZED=yes \
+  sbatch --array=0-15%8 "$READY_ROOT/ready-stage.sbatch" 1 pilot-B
+```
+
+`campaign_allocated.sh` turns `SHARD_COUNT` plus `SLURM_ARRAY_TASK_ID` (or an
+explicit `SHARD_INDEX`) into `campaign.py resume ... --shard K/N`. Keep `N`
+fixed for a given execution. Each array task is a separate job with its own
+MPS directory.
+
+Ownership:
+- Shards hold the execution lock in shared mode; an unsharded coordinator
+  needs it exclusively, so the two modes cannot run together.
+- Each shard holds `claims/shard-K-of-N.lock` and `claims/source-<id>.lock` for
+  its sources. A duplicate shard, or an overlapping specification with a
+  different `N`, fails before training.
+- Registry creation and publication wait on a blocking lock, so shards that
+  finish cases at the same moment serialize instead of failing.
+- Progress, latest-execution and completion records are per shard
+  (`progress-shard-K-of-N.json`, ...); `campaign.py status` aggregates them.
+
+Recovery: resubmit the same array (or single index). Each shard resumes its
+own sources from their last completed epochs; completed cases are reused.
+
+### Moving to a new deployment snapshot
+
+The execution manifest pins every source file, so a new source snapshot (for
+example one that adds sharding) needs a new prepared execution. Adopt the
+verified completions of the earlier execution of the same plan and store
+instead of retraining them:
+
+```bash
+"$PYTHON_BIN" phase5/campaign.py prepare --plan "$PLAN" --store "$STORE" --output "$NEW_EXECUTION" \
+  --device cuda --export-batch-size 32768 --execution-patches nosync,fast_gbn,fast_reinforce,graphs
+"$PYTHON_BIN" phase5/campaign.py adopt --output "$NEW_EXECUTION" --from "$OLD_EXECUTION"
+```
+
+Adoption re-verifies each case through the old registry and publishes it,
+parents first, in the new one; it trains nothing and refuses an old execution
+with an active coordinator. Model identities do not depend on the scheduling
+code, so adopted and newly trained cases are interchangeable.
+
 ## Interruption and failed-task retry
 
 A nonzero Slurm exit is an interrupted execution, not a rejection or an accepted

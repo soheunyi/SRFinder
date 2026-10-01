@@ -23,11 +23,17 @@ else
 fi
 : "${SLURM_JOB_ID:?Run inside the requested Slurm allocation}"
 : "${CUDA_VISIBLE_DEVICES:?Allocate exactly one visible GPU}"
+shard=()
+if [[ -n "${SHARD_COUNT:-}" ]]; then
+  # One array task per shard: sbatch --array=0-$((SHARD_COUNT-1))%K ...
+  index="${SHARD_INDEX:-${SLURM_ARRAY_TASK_ID:?Sharded runs need SHARD_INDEX or a Slurm array task}}"
+  shard=(--shard "$index/$SHARD_COUNT")
+fi
 cd "$(dirname "$0")/.."
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 exec bash speedups/with_mps.sh "$PYTHON_BIN" phase5/campaign.py resume \
   --plan "$CAMPAIGN_PLAN" --store "$CAMPAIGN_STORE" --output "$CAMPAIGN_OUTPUT" \
-  --device cuda "${scope[@]}" --through-stage "$stage" \
+  --device cuda "${scope[@]}" ${shard[@]+"${shard[@]}"} --through-stage "$stage" \
   --nproc "${NPROC:-5}" --resident "${RESIDENT:-auto}" \
   --safety-gib "${SAFETY_GIB:-3}" --compute-headroom-gib "${COMPUTE_HEADROOM_GIB:-5}" \
   --export-batch-size "${EXPORT_BATCH_SIZE:-32768}" \
