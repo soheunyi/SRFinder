@@ -20,6 +20,7 @@ from .bound_tasks import build_stage_contexts
 from .materialize_task import materialize_task
 from .stage_processes import _initialize, _task
 from .memory_policy import worker_budgets
+from .member_extension import origin_guard,import_unchanged_cases
 
 
 def runtime_snapshot():
@@ -129,13 +130,14 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
     manifest = execution_manifest(store, plan, case_ids=case_ids, device=device,
                                   export_batch_size=export_batch_size, execution_patches=execution_patches)
     snapshot = manifest['runtime_files']
-    with _owned_run(root, manifest, resume):
+    with _owned_run(root, manifest, resume), origin_guard(store,plan) as origin:
         if (root / 'frozen-plan.json').is_file():
             if json.loads((root / 'frozen-plan.json').read_text()) != plan:
                 raise ValueError('Frozen input plan changed')
         else: store._publish(root / 'frozen-plan.json', canonical(plan))
         registry = CaseRegistry(store, plan, root / 'registry', resume=(root / 'registry').exists())
         (root / 'tasks').mkdir(exist_ok=True)
+        imported=[] if origin is None else import_unchanged_cases(registry,origin,nodes)
         done = {}
         for node in nodes:
             value = registry.get(node['id'])
@@ -164,7 +166,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
         _atomic_json(root / 'latest-execution.json', {'requested_workers': nproc,
             'active_worker_limit': workers, 'options': options, 'max_new_cases': max_new_cases, 'through_stage': through_stage,
             'work_case_ids':None if work_case_ids is None else sorted(work_case_ids),
-            'scheduled_case_count':len(active_nodes)})
+            'scheduled_case_count':len(active_nodes),'imported_original_case_ids':imported})
         started = time.monotonic()
         new_count = 0
         in_flight = {}
@@ -191,8 +193,15 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                         raise RuntimeError('Dependency result is not registered')
                     task = materialize_task(store, ready, pointer, recipes(plan, ready), parents,
                                             expected_dataset=pointer['hparams']['dataset'])
+                    task_options=options
+                    if origin is not None and ready['id'] in plan['member_extension']['extended_case_ids']:
+                        previous=origin.get(ready['id'])
+                        if previous is not None:
+                            task_options={**options,'original_completion_id':previous['completion_id']}
+                        elif (Path(plan['member_extension']['origin_execution'])/'tasks'/ready['id']).exists():
+                            raise ValueError('Resolve the original incomplete case before extending its members')
                     future = pool.submit(_task, (str(store.root.resolve()), task, build_stage_contexts,
-                        str((root / 'tasks' / ready['id']).resolve()), options))
+                        str((root / 'tasks' / ready['id']).resolve()), task_options))
                     in_flight[future] = (ready, task)
                     remaining.remove(ready)
                     max_in_flight = max(max_in_flight, len(in_flight))

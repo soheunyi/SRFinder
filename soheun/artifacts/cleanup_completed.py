@@ -4,6 +4,7 @@ import hashlib,json
 from .training_store import canonical,sha
 from .case_registry import CaseRegistry
 from .train_stage import _owned_run,_atomic_json
+from .bound_tasks import resolve_source_pointer
 
 
 def _digest(path):
@@ -30,13 +31,24 @@ def prune_completed_case(store, execution, case_id, *, apply=False):
             marker=json.loads((task/'stage-completion.json').read_text())
             if marker['completion_id']!=value['completion_id']:
                 raise ValueError('Working output and registered receipt differ')
-            training=task/'training'
+            working_receipt=value['completion']
+            if stage_plan.get('kind')=='append_members':
+                from .member_extension import verify_extension_record
+                source=resolve_source_pointer(store,value['task']['source'])
+                working_receipt=verify_extension_record(store,marker['extension_record_id'],source,value['completion_id'])
+                component=task/'added'
+                if component.is_symlink():raise ValueError('Extension component must not be a symlink')
+                added=json.loads((component/'stage-completion.json').read_text())
+                if added['model_ids']!=working_receipt['model_ids']:
+                    raise ValueError('Extension working component differs from permanent receipt')
+                training=component/'training'
+            else:training=task/'training'
             if training.is_symlink() or (training/'models').is_symlink():
                 raise ValueError('Working directories must not be symlinks')
             training_plan=json.loads((training/'training-plan.json').read_text())
             with _owned_run(training,training_plan,True):
                 complete=json.loads((training/'training-completion.json').read_text())
-                receipt=value['completion']
+                receipt=working_receipt
                 if (complete['status']!='TRAINING_COMPLETE_EXPORT_PENDING'
                         or complete['model_ids']!=receipt['model_ids']
                         or complete['history_ids']!=receipt['history_ids']
@@ -59,7 +71,7 @@ def prune_completed_case(store, execution, case_id, *, apply=False):
                         raise ValueError('Working best weights differ from permanent model payload')
                     selected.append({'path':str(path.relative_to(root)),'bytes':path.stat().st_size,'sha256':digest})
                 report={'schema':1,'case_id':case_id,'completion_id':value['completion_id'],
-                        'permanent_model_ids':receipt['model_ids'],'files':selected,
+                        'permanent_model_ids':value['completion']['model_ids'],'files':selected,
                         'reclaimable_bytes':sum(row['bytes'] for row in selected),'applied':False}
                 if not apply:return report
                 journal=root/'cleanup';journal.mkdir(exist_ok=True)
@@ -69,7 +81,7 @@ def prune_completed_case(store, execution, case_id, *, apply=False):
                 if previous.exists():
                     saved=json.loads(previous.read_text())
                     if (saved['case_id']!=case_id or saved['completion_id']!=value['completion_id']
-                            or saved['permanent_model_ids']!=receipt['model_ids']):
+                            or saved['permanent_model_ids']!=value['completion']['model_ids']):
                         raise ValueError('Cleanup journal identity differs')
                     known={row['path']:row for row in saved['files']}
                     if any(known.get(row['path'])!=row for row in selected):

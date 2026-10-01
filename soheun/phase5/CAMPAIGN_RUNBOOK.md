@@ -270,3 +270,42 @@ as partial and never supplies an ensemble-selection recommendation.
 Production plans pin torch `2.3.1.post300` and Adam ε=1e-8. Runtime mismatches
 refuse execution before any task starts. Tier-A ensemble-selection diagnostics
 are descriptive only; guidance requires all seeds 0–99 at both η values.
+
+
+## Optional five-to-fifteen extension
+
+The initial plan remains five CR members. Only after the user's count decision,
+write a separate JSON record with `status: USER_DECISION_RECORDED`,
+`step3_member_count: 15`, and the actual `decision_reference`. The optional
+extension uses a new plan and execution directory sharing the original immutable
+store. It leaves the original plan, registry, models, scores and histories intact.
+
+From the updated source snapshot, prepare without training:
+
+```bash
+"$PYTHON_BIN" phase5/extend_campaign_members.py \
+  --origin "$CAMPAIGN_OUTPUT" --members 15 \
+  --decision /absolute/path/to/recorded-count-decision.json \
+  --plan-out /absolute/new/extension-15-plan.json \
+  --output /absolute/new/extension-15-execution \
+  --scope pilot-all --device cuda --export-batch-size 32768
+```
+
+Repeat inside a one-GPU allocation, under the private MPS wrapper, adding
+`--resume --execute` to train only missing members. Five worker processes remain
+the default; `--nproc` may decrease on resume. The original coordinator must be
+stopped: its ownership lock is held throughout extension. Resolve any incomplete
+original case before extending its member count. Existing completed upstreams
+are registered under the new plan without refitting. Completed CR cases preserve
+seeds 0–4 and fit/export only seeds 5–14; originally unstarted CR cases train all
+15. Frozen regions, source/split recipes, numerical settings and export profiles
+must match. Original-feature/representation methodological single-member cases
+remain unchanged.
+
+The extended completion references all 15 best models, per-member histories and
+scores. Completed extension cleanup removes only the added members' redundant
+working files after the full receipt verifies. It does not remove the original
+members or their artifacts. Use the extended execution for fifteen-member
+analysis and keep the original execution available for five-member comparisons.
+The source used for an original in-progress run must remain unchanged; a new
+extension executable cannot be used to resume that original run.

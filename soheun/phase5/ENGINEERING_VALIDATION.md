@@ -60,3 +60,15 @@ interrupted cleanup, staged pilot-to-full reuse, figure consumers, the internal
 background diagnostic CLI/resume, and full inventory/source-plan checks.
 The regenerated scope stays at 146,537 networks and 19,105 training nodes;
 internal diagnostics reuse existing training cases.
+
+
+The optional five-to-fifteen member workflow is implemented separately from
+the initial five-member plan. Jobs 210846 (CPU) and 210847 (GPU/MPS) checked
+five original CR members plus ten added members against a fresh fifteen-member
+fit on a synthetic source, including a real epoch-boundary interruption of the
+added group. Receipts match exactly; original models, scores, histories and
+execution files stay unchanged. Job 210848 checked CLI preparation/resume
+without model creation and full-model cleanup accounting. These are two-epoch
+correctness checks, not a measured production extension throughput or an
+ensemble-size decision. The optional workflow requires a recorded user count
+decision and a separate frozen execution using the shared immutable store.

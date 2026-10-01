@@ -30,7 +30,13 @@ def _task(payload):
     contexts,source=factory(store,spec)
     prepared=time.perf_counter()
     try:
-        result=run_stage(store,contexts,source,output,resume=Path(output).exists(),**options)
+        options=dict(options);original=options.pop('original_completion_id',None)
+        if original is None:
+            result=run_stage(store,contexts,source,output,resume=Path(output).exists(),**options)
+        else:
+            from .member_extension import append_stage_members
+            result=append_stage_members(store,contexts,source,output,
+                original_completion_id=original,resume=Path(output).exists(),**options)
         if result['status']!='STAGE_ARTIFACTS_COMPLETE':raise RuntimeError('Worker did not finish its declared stage')
         _atomic_json(Path(output)/'worker-metrics.json',{'context_preparation_s':prepared-started,
             'worker_total_s':time.perf_counter()-started})
