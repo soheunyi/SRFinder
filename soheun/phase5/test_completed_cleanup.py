@@ -61,7 +61,18 @@ def main():
         except ValueError:pass
         else:raise AssertionError('Cleanup accepted a symlinked working directory')
     finally:models.unlink();moved.rename(models)
+    unlink=pathlib.Path.unlink
+    def interrupted_unlink(path,*args,**kwargs):
+        if path==best:raise RuntimeError('Synthetic interruption after first deletion')
+        return unlink(path,*args,**kwargs)
+    with patch.object(pathlib.Path,'unlink',new=interrupted_unlink):
+        try:prune_completed_case(store,root,case,apply=True)
+        except RuntimeError:pass
+        else:raise AssertionError('Expected cleanup interruption')
+    journal=json.loads(next((root/'cleanup').glob('*.json')).read_text())
+    assert len(journal['files'])==5 and len(journal['deleted_paths'])==1 and not journal['applied']
     done=prune_completed_case(store,root,case,apply=True)
+    assert len(done['files'])==5 and len(done['deleted_paths'])==5
     assert done['applied'] and all(not (root/r['path']).exists() for r in done['files'])
     assert prune_completed_case(store,root,case,apply=True)==done
     assert store.storage_stats()==before

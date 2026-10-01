@@ -14,6 +14,10 @@ def main():
     if hashlib.sha256(path.read_bytes()).hexdigest()!=audit['outputs'][path.name]:raise ValueError('Summary checksum differs')
     data=pd.read_csv(path);plt.rcParams['text.usetex']=args.tex
     null=data[(data.signal=='HH4b')&(data.epsilon==0)].copy()
+    required={.05,.1,.15,.2} if audit['scope']=='full' else {.2}
+    if (len(null)!=len(required) or set(null.sr_fraction)!=required
+            or null.duplicated(['sr_fraction']).any()):
+        raise ValueError('Power figure requires complete, unique shared-null SR rows')
     args.output.mkdir(parents=True,exist_ok=False);files=[]
     for family in sorted(data.signal.unique()):
         selected=data[data.signal==family].copy()

@@ -68,6 +68,14 @@ def selected_nodes(plan, case_ids=None):
 
 
 def execution_manifest(store, plan, *, case_ids=None, device='cpu', export_batch_size=1024, execution_patches=()):
+    settings=plan.get('fixed_settings',{})
+    expected_version=settings.get('torch_version')
+    if 'sources' in plan and expected_version is None:
+        raise ValueError('Production plan must pin the torch version')
+    if expected_version is not None and str(torch.__version__)!=expected_version:
+        raise ValueError('Torch runtime differs from the frozen production plan')
+    if settings.get('adam_epsilon',1e-8)!=1e-8:
+        raise ValueError('Campaign Adam epsilon differs from explicit optimizer construction')
     nodes = selected_nodes(plan, case_ids)
     snapshot = runtime_snapshot()
     result = {'schema': 1, 'plan_sha256': sha(canonical(plan)),

@@ -151,7 +151,8 @@ exchangeable linear-averaging variance model; the nonlinear aggregation rules
 make that approximation, not a measured guarantee.
 Do not inspect power to choose the primary aggregation rule.
 
-After the user chooses, record `primary_rule` and a `decision_reference` in a
+After the user chooses, record `status: USER_DECISION_RECORDED`, `primary_rule`
+and a `decision_reference` in a
 JSON file. The reference identifies the actual recorded decision; do not invent
 one. Choose from `single`, `mean_probability`, `mean_log_density_ratio`, or
 `mean_density_ratio`. Evaluation runs all four as primary/secondary comparisons
@@ -241,3 +242,31 @@ reference states and full X1/X2 arrays. This does not establish five concurrent
 five workers and restart, and about 11.3 GB sampled aggregate host RSS. Keep
 24 GB host reservations until the pilot provides additional workload peaks.
 Final aggregation/member count and full-campaign launch remain user decisions.
+
+
+Internal η=infinity power remains in `HH4b_eta_inf_power_internal.csv`.
+It is excluded from manuscript tables and power figures. The manuscript table
+uses `supplementary_noise_scale_table_rows.tex`, pivoted by η/SR and ε.
+
+Derive the internal background-extrapolation comparison after the matching
+training cases complete; this does not require an aggregation decision:
+
+```bash
+"$PYTHON_BIN" phase5/diagnose_extrapolation_bias.py \
+  --execution "$CAMPAIGN_OUTPUT" --scope pilot-all \
+  --output /absolute/new/internal/extrapolation-pilot --device cuda
+```
+
+Use `--scope full` in a separate new output root after the full campaign to
+include all four SR sizes. `--resume` verifies existing case records and figures.
+The CSV reports count-error mean and sample SD over mother seeds; the JSON also
+keeps every 64-bin pull profile for member 0 and all three aggregation rules.
+Null figures compare η=2 and infinity, with one panel per available SR size.
+Signal-cell count errors use background 4b only. Their pull numerator excludes
+signal while the variance includes all 4b, matching legacy `pull_bg4b`.
+Undefined pulls remain explicit missing values. Partial seed coverage is marked
+as partial and never supplies an ensemble-selection recommendation.
+
+Production plans pin torch `2.3.1.post300` and Adam ε=1e-8. Runtime mismatches
+refuse execution before any task starts. Tier-A ensemble-selection diagnostics
+are descriptive only; guidance requires all seeds 0–99 at both η values.

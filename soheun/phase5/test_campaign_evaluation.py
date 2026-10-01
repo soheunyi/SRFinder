@@ -38,11 +38,15 @@ def main():
     plan['pilot_scope']={'signal':'HH4b','epsilon':['0'],'eta':['2.0','inf'],'sr_fraction':'.2','tier_A_seeds':[7,8],'tier_B_seeds':[]}
     execution=args.out/'training'
     run_campaign(store,plan,execution,case_ids=[case],nproc=1,device='cpu',export_batch_size=128)
-    decision={'primary_rule':'mean_probability','decision_reference':'synthetic test fixture; not a scientific choice'}
+    decision={'status':'USER_DECISION_RECORDED','primary_rule':'mean_probability','decision_reference':'synthetic test fixture; not a scientific choice'}
     before=store.storage_stats()
     result=run_evaluation(execution,args.out/'evaluation',[case],decision=decision)
     assert result['status']=='EVALUATION_COMPLETE' and len(result['result_ids'])==4
     reader,_=open_reader(execution)
+    raw,audit_single=reader.aggregate(case,'X2',aggregation='single',member_seeds=[0])
+    np.testing.assert_array_equal(raw,store.load_array(audit_single['score_ids'][0],'scores'))
+    assert raw.dtype==np.float32 and audit_single['aggregation']=='single'
+    rejects(lambda:reader.aggregate(case,'X2',aggregation='single'))
     diagnostic=diagnose_case(reader,case,device='cpu',batch_size=128,nbins=8)
     assert diagnostic['member_seeds']==[0,1] and set(diagnostic['rule_metrics'])==set(RULES)
     one=summarize_diagnostics([diagnostic]);assert len(one['rows'])==4
@@ -59,7 +63,7 @@ def main():
     assert store.storage_stats()==before
     for p in (args.out/'evaluation/results').glob('*.json'):
         record=json.loads(p.read_text())['value'];rule=record['rule']
-        arrays,audit=reader.affine_inputs(case,aggregation='mean_probability' if rule=='single' else rule,
+        arrays,audit=reader.affine_inputs(case,aggregation=rule,
             member_seeds=[0] if rule=='single' else None)
         expected=reference(*arrays,L=audit['lower'],U=10.,B=1000,alpha=.05,seed=1729,numerical_tol=1e-12)
         equal(record['result'],asdict(expected))
@@ -68,6 +72,8 @@ def main():
         assert run_evaluation(execution,args.out/'evaluation',[case],decision=decision,resume=True)==result
     rejects(lambda:run_evaluation(execution,args.out/'evaluation',[case],decision={**decision,'primary_rule':'single'},resume=True))
     rejects(lambda:run_evaluation(execution,args.out/'missing-decision',[case],decision={}))
+    rejects(lambda:run_evaluation(execution,args.out/'undecided',[case],decision={**decision,'status':'UNDECIDED'}))
+    assert not (args.out/'undecided').exists()
     path=next((args.out/'evaluation/results').glob('*.json'));saved=path.read_bytes()
     value=json.loads(saved);value['value']['result']['p_value']=.123;path.write_text(json.dumps(value))
     try:rejects(lambda:run_evaluation(execution,args.out/'evaluation',[case],decision=decision,resume=True))
@@ -85,7 +91,7 @@ def main():
     resumed=run_evaluation(execution,args.out/'interrupted',[case],decision=decision,resume=True)
     assert len(resumed['result_ids'])==4
     assert store.storage_stats()==before
-    summary=summarize([args.out/'evaluation'],args.out/'summary',scope='full')
+    summary=summarize([args.out/'evaluation'],args.out/'summary',scope='pilot-A')
     assert summary['case_count']==1 and summary['cells']==4
     rejects(lambda:load_results([args.out/'evaluation',args.out/'evaluation']))
     rejects(lambda:summarize([args.out/'evaluation'],args.out/'wrong-rules',scope='full',rules=['single']))
@@ -95,7 +101,7 @@ def main():
     finally:complete.write_bytes(raw_complete)
     subprocess.run([sys.executable,str(ROOT/'phase5/render_campaign_power.py'),
         '--summary',str(args.out/'summary'),'--output',str(args.out/'figures')],check=True)
-    assert (args.out/'figures/power_plot_HH4b_noise_scale=2.0.pdf').stat().st_size>0
+    assert (args.out/'figures/pilot-A_power_plot_HH4b_noise_scale=2.0.pdf').stat().st_size>0
     assert not (args.out/'wrong-rules').exists()
     subprocess.run([sys.executable,str(ROOT/'phase5/diagnose_campaign_ensemble.py'),
         '--execution',str(execution),'--output',str(args.out/'development'),

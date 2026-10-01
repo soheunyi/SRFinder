@@ -4,7 +4,8 @@ import csv,json
 from pathlib import Path
 from scipy.stats import beta
 from .training_store import canonical,sha
-from .evaluation import RULES
+from .evaluation import RULES,validate_decision
+from .output_files import atomic_csv,atomic_text
 
 
 from .campaign_scope import expected_cases
@@ -18,7 +19,14 @@ def load_results(roots):
         if (complete['status']!='EVALUATION_COMPLETE'
                 or complete['evaluation_manifest_sha256']!=sha(canonical(manifest))):
             raise ValueError('Evaluation completion and manifest disagree')
-        shared={key:manifest[key] for key in ('plan_sha256','spec','decision','numpy_version','kernel_binary_sha256','evaluation_source_sha256')}
+        decision_hash=validate_decision(manifest['decision'])
+        resolved=manifest['spec']['aggregation']
+        if (manifest.get('decision_sha256')!=decision_hash
+                or resolved.get('status')!='USER_DECISION_RECORDED'
+                or resolved.get('primary_rule')!=manifest['decision']['primary_rule']
+                or resolved.get('decision_sha256')!=decision_hash):
+            raise ValueError('Primary summary requires a resolved, hashed user decision')
+        shared={key:manifest[key] for key in ('plan_sha256','spec','decision','decision_sha256','numpy_version','kernel_binary_sha256','evaluation_source_sha256')}
         if common is not None and common!=shared:raise ValueError('Cannot combine different evaluation recipes or decisions')
         common=shared
         current=json.loads((Path(manifest['training_execution'])/'frozen-plan.json').read_text())
@@ -50,6 +58,23 @@ def load_results(roots):
     return plan,common,list(values.values()),sources
 
 
+def manuscript_table_rows(rows):
+    """Pivot eta/SR rows by epsilon, matching the live manuscript table."""
+    if not rows:return ''
+    cells={(float(r['eta']),float(r['sr_fraction']),float(r['epsilon'])):r for r in rows}
+    if len(cells)!=len(rows):raise ValueError('Duplicate manuscript table cell')
+    etas=sorted({k[0] for k in cells});eps=sorted({k[2] for k in cells});lines=[]
+    for eindex,eta in enumerate(etas):
+        sizes=sorted({k[1] for k in cells if k[0]==eta})
+        for index,size in enumerate(sizes):
+            if any((eta,size,e) not in cells for e in eps):raise ValueError('Incomplete manuscript table row')
+            values=' & '.join(f"${cells[eta,size,e]['rejection_rate']:.2f}$" for e in eps)
+            lead=f"\\multirow{{{len(sizes)}}}{{*}}{{{eta}}} " if index==0 else '        '
+            lines.append(f"{lead}& ${size:g}$ & {values} \\\\")
+        if eindex<len(etas)-1:lines.append('        \\midrule')
+    return '\n'.join(lines)+'\n'
+
+
 def summarize(roots,output,*,scope,rules=RULES):
     plan,recipe,values,sources=load_results(roots);expected=expected_cases(plan,scope)
     actual={(v['case_id'],v['rule']) for v in values}
@@ -69,30 +94,25 @@ def summarize(roots,output,*,scope,rules=RULES):
             mean_p_value=sum(v['result']['p_value'] for v in group)/n,
             mean_bootstrap_s=sum(v['bootstrap_s'] for v in group)/n))
     rows.sort(key=lambda r:(r['signal'],float(r['eta']),float(r['epsilon']),float(r['sr_fraction']),r['rule']))
-    root=Path(output);root.mkdir(parents=True,exist_ok=False)
-    def write_csv(name,selected):
-        if not selected:return
-        with (root/name).open('x',newline='') as handle:
-            writer=csv.DictWriter(handle,fieldnames=list(selected[0]));writer.writeheader();writer.writerows(selected)
-    write_csv('all_rules_summary.csv',rows)
+    validate_decision(recipe['decision'])
     primary=[r for r in rows if r['rule']==recipe['decision']['primary_rule']]
     if not primary:raise ValueError('Primary rule was not evaluated')
     power=[r for r in primary if float(r['eta'])==2.]
     table=[r for r in primary if r['signal']=='HH4b' and float(r['eta'])!=float('inf')]
     infinite=[r for r in primary if r['signal']=='HH4b' and r['eta']=='inf']
-    write_csv('power_figure_summary.csv',power)
-    write_csv('supplementary_noise_scale_summary.csv',table)
-    write_csv('HH4b_eta_inf_power_summary.csv',infinite)
-    # Separate infinity cells until the user decides manuscript placement.
-    for name,selected in [('supplementary_noise_scale_cells.tex',table),('HH4b_eta_inf_table_cells.tex',infinite)]:
-        with (root/name).open('x') as handle:
-            handle.write('% Generated from verified new-store evaluation; scope: '+scope+'\n')
-            for row in selected:
-                handle.write(f"% eta={row['eta']}, epsilon={row['epsilon']}, SR={row['sr_fraction']}, n={row['n']}\n")
-                handle.write(f"{row['rejection_rate']:.2f}\\\\\n")
+    table_text=manuscript_table_rows(table)
+    root=Path(output);root.mkdir(parents=True,exist_ok=False)
+    for name,selected in [('all_rules_summary.csv',rows),('power_figure_summary.csv',power),
+                          ('supplementary_noise_scale_summary.csv',table),
+                          ('HH4b_eta_inf_power_internal.csv',infinite)]:
+        atomic_csv(root/name,selected)
+    atomic_text(root/'supplementary_noise_scale_table_rows.tex',
+        '% Generated from verified new-store evaluation; scope: '+scope+'\n'+table_text)
+    # Eta=infinity is an internal power output, never a manuscript table block.
     audit={'schema':1,'scope':scope,'plan_sha256':recipe['plan_sha256'],'case_count':len(expected),
            'rules':list(rules),'recipe':recipe,'sources':sources,'cells':len(rows),
            'outputs':{p.name:sha(p.read_bytes()) for p in root.iterdir() if p.is_file()},
+           'eta_infinity_power_placement':'internal; excluded from manuscript figures and tables',
            'scientific_acceptance':'User decision; a completed evaluation is not a calibration pass'}
-    (root/'audit.json').write_text(json.dumps(audit,indent=2)+'\n')
+    atomic_text(root/'audit.json',json.dumps(audit,indent=2)+'\n')
     return audit

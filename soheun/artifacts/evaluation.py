@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from dataclasses import asdict
 import hashlib,importlib,json,time
+from copy import deepcopy
 from pathlib import Path
 import numpy as np
 from .training_store import TrainingStore,canonical,sha
@@ -83,7 +84,7 @@ def evaluate_one(reader,case_id,rule,spec):
     seed=spec['aggregation']['fixed_single_member_seed']
     if rule=='single' and type(seed) is not int:raise ValueError('Fixed single-member seed is undecided')
     started=time.perf_counter()
-    arrays,audit=reader.affine_inputs(case_id,aggregation='mean_probability' if rule=='single' else rule,
+    arrays,audit=reader.affine_inputs(case_id,aggregation=rule,
         member_seeds=[seed] if rule=='single' else None,upper=spec['clipping']['upper'])
     signed=bool(audit['negative_4b_count'])
     module='run_files.affine_weighted_ks_signed_compiled' if signed else 'run_files.affine_weighted_ks_compiled'
@@ -112,6 +113,23 @@ def validate_record(record,identity,reader):
     return value
 
 
+def validate_decision(decision):
+    if (not isinstance(decision,dict) or decision.get('status')!='USER_DECISION_RECORDED'
+            or decision.get('primary_rule') not in RULES
+            or not isinstance(decision.get('decision_reference'),str)
+            or not decision['decision_reference'].strip()):
+        raise ValueError('A recorded user decision, reference and primary rule are required')
+    return sha(canonical(decision))
+
+
+def resolve_decision(spec,decision):
+    value=deepcopy(spec);key=validate_decision(decision)
+    value['aggregation'].update(status='USER_DECISION_RECORDED',
+        primary_rule=decision['primary_rule'],decision_reference=decision['decision_reference'],
+        decision_sha256=key)
+    return value
+
+
 def run_evaluation(execution,output,case_ids,*,decision,rules=RULES,resume=False):
     reader,training_manifest=open_reader(execution);plan=reader.registry.plan;spec=checked_spec(plan)
     ids=sorted(case_ids);rules=list(rules)
@@ -119,15 +137,16 @@ def run_evaluation(execution,output,case_ids,*,decision,rules=RULES,resume=False
         raise ValueError('Evaluation needs distinct cases from the prepared execution scope')
     if any(reader.registry.nodes[key]['stage']!=3 for key in ids):raise ValueError('Only completed CR cases can be tested')
     if not rules or len(set(rules))!=len(rules) or set(rules)-set(RULES):raise ValueError('Invalid comparison rules')
-    if decision.get('primary_rule') not in RULES or not decision.get('decision_reference'):
-        raise ValueError('Record the user decision and primary rule before power evaluation')
+    decision_hash=validate_decision(decision)
+    if decision['primary_rule'] not in rules:raise ValueError('Primary rule must be evaluated')
+    spec=resolve_decision(spec,decision)
     binary=ROOT/'run_files/affine_envelope_kernel.so'
     binary_hash=hashlib.sha256(binary.read_bytes()).hexdigest()
     source_hash=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     manifest={'schema':1,'kind':'continuous_affine_evaluation','training_execution':str(Path(execution).resolve()),
               'training_manifest_sha256':sha(canonical(training_manifest)),
               'plan_sha256':training_manifest['plan_sha256'],'spec':spec,'case_ids':ids,'rules':rules,
-              'decision':decision,'numpy_version':np.__version__,'kernel_binary_sha256':binary_hash,
+              'decision':decision,'decision_sha256':decision_hash,'numpy_version':np.__version__,'kernel_binary_sha256':binary_hash,
               'evaluation_source_sha256':source_hash}
     root=Path(output);finished=[]
     with _owned_run(root,manifest,resume):

@@ -2,7 +2,7 @@
 import argparse,hashlib,json,shutil,subprocess,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from artifacts.evaluation import open_reader,RULES
+from artifacts.evaluation import validate_decision, open_reader,RULES
 from artifacts.training_store import canonical,sha
 
 
@@ -24,7 +24,7 @@ def main():
     ap.add_argument('--device',choices=['cpu','cuda'],default='cpu');args=ap.parse_args()
     reader,manifest=open_reader(args.execution);plan=reader.registry.plan
     decision=json.loads(args.decision.read_text());rule=decision.get('primary_rule')
-    if rule not in RULES or not decision.get('decision_reference'):raise ValueError('Recorded user decision required')
+    validate_decision(decision)
     summary=json.loads((args.summary/'audit.json').read_text())
     expected_scope='full' if args.scope=='draft' else args.scope
     if summary['scope']!=expected_scope or summary['recipe']['decision']!=decision:raise ValueError('Summary scope or decision differs')

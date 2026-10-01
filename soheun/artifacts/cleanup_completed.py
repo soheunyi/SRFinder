@@ -65,18 +65,34 @@ def prune_completed_case(store, execution, case_id, *, apply=False):
                 journal=root/'cleanup';journal.mkdir(exist_ok=True)
                 name=sha(canonical({'case':case_id,'completion':value['completion_id']}))+'.json'
                 previous=journal/name
-                if previous.exists() and not selected:
+                report['deleted_paths']=[]
+                if previous.exists():
                     saved=json.loads(previous.read_text())
-                    if saved.get('applied') and saved['completion_id']==value['completion_id']:return saved
+                    if (saved['case_id']!=case_id or saved['completion_id']!=value['completion_id']
+                            or saved['permanent_model_ids']!=receipt['model_ids']):
+                        raise ValueError('Cleanup journal identity differs')
+                    known={row['path']:row for row in saved['files']}
+                    if any(known.get(row['path'])!=row for row in selected):
+                        raise ValueError('Cleanup candidates changed since journal creation')
+                    report=saved
+                    if report.get('applied') and not selected:return report
+                    report['applied']=False
+                    report.setdefault('deleted_paths',[])
                 _atomic_json(previous,report)
-                for row in selected:
+                for row in report['files']:
                     path=root/row['path']
-                    if _digest(path)!=row['sha256']:
-                        raise ValueError('Working artifact changed during cleanup')
-                    path.unlink()
+                    if path.is_symlink():raise ValueError('Cleanup path became a symlink')
+                    if path.exists():
+                        if _digest(path)!=row['sha256']:
+                            raise ValueError('Working artifact changed during cleanup')
+                        path.unlink()
+                    # Also recover a crash between unlink and journal publication.
+                    if row['path'] not in report['deleted_paths']:
+                        report['deleted_paths'].append(row['path'])
+                        _atomic_json(previous,report)
                 # Use a fresh verifier: no cached verification can mask missing payloads.
                 checked=CaseRegistry(store,plan,root/'registry',resume=True).get(case_id)
-                if checked['completion_id']!=value['completion_id']:
+                if checked is None or checked['completion_id']!=value['completion_id']:
                     raise ValueError('Permanent receipt changed')
                 report['applied']=True
                 _atomic_json(previous,report)

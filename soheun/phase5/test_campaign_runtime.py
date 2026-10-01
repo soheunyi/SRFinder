@@ -43,7 +43,8 @@ def fixture(output):
     frame.to_hdf(pool, key='df')
     origin = TrainingStore(output / 'source-store')
     plan = {'schema': 1, 'sources': {}, 'source_store': str(origin.root.resolve()), 'nodes': [],
-            'templates': {}, 'status': 'SYNTHETIC_ENGINEERING_VALIDATION'}
+            'templates': {}, 'status': 'SYNTHETIC_ENGINEERING_VALIDATION',
+            'fixed_settings':{'torch_version':str(torch.__version__),'adam_epsilon':1e-8}}
     for role, stage in [('base', 1), ('smear', 2), ('raw_cr', 3), ('repr_cr', 2)]:
         hp = hparams(stage, 0)
         hp.pop('smearing')

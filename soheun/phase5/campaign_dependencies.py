@@ -65,7 +65,7 @@ def dependency_plan(inventory):
               'score_domains':['X2'],
               'region_member_seeds':list(range(15)),
               'region_binding':('X1 maximum over 15 base members' if eta=='inf' else
-                                'X1-derived thresholds using the 15 paired Step-1/2 members'),
+                                'X1 maximum over 15 paired base/smeared members'),
               'aggregation':'deferred; retain all member log ratios'}
         nodes.append(node)
     diagnostic=inventory['diagnostic_scope']['original_vs_representation']

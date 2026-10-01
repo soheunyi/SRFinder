@@ -65,7 +65,7 @@ def prepare(inventory,graph,bindings,source_store):
           'generator_sha256':{**inventory['generator_sha256'],**inventory['evaluation_generator_sha256']},'default_worker_processes_per_gpu':5,
           'step3_members_initial':5,'step3_members_optional_extension':15,
           'aggregation':inventory['step3_aggregation'],'resume_boundary':'completed_epoch',
-          'fixed_settings':{'dtype':'float32','learning_rate':.01,'adam_epsilon':1e-8,
+          'fixed_settings':{'torch_version':'2.3.1.post300','dtype':'float32','learning_rate':.01,'adam_epsilon':1e-8,
                             'train_alignment':32,'retain_validation':True,'gpu_runtime':'validated_gpu_medium_v1'},
           'gates':['Native five-worker execution comparison passes; retired K100 remains an incomplete historical comparison.',
                    'Current stage APIs pass GPU and real-data end-to-end acceptance.',

@@ -43,7 +43,13 @@ class CampaignReader:
         splits = {self.store.read(key, 'scores')['identity']['split_id'] for key in scores}
         if len(splits) != 1:
             raise ValueError('Member scores do not share event ordering')
-        values = aggregate_log_ratios((self.store.load_array(key, 'scores') for key in scores), aggregation)
+        if aggregation=='single':
+            if len(scores)!=1:raise ValueError('Single aggregation requires exactly one member')
+            values=self.store.load_array(scores[0],'scores')
+            if values.dtype!=np.float32 or not np.isfinite(values).all():
+                raise ValueError('Single member must contain finite float32 log ratios')
+        else:
+            values = aggregate_log_ratios((self.store.load_array(key, 'scores') for key in scores), aggregation)
         return values, {'aggregation': aggregation, 'model_ids': [m for m, _ in pairs],
                         'score_ids': scores, 'split_id': next(iter(splits)), 'storage': 'derived_in_memory'}
 

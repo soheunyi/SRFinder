@@ -64,7 +64,7 @@ def aggregate_cr(reader,key,rule):
     if rule!='single':return reader.aggregate(key,'X2',aggregation=rule)
     value=reader.case(key)
     seeds=[reader.store.read(m,'model')['identity']['training_recipe']['hparams']['model_seed'] for m in value['completion']['model_ids']]
-    return reader.aggregate(key,'X2',aggregation='mean_probability',member_seeds=[0] if len(seeds)>1 else seeds)
+    return reader.aggregate(key,'X2',aggregation='single',member_seeds=[0] if len(seeds)>1 else seeds)
 
 
 def calibration(reader,root,rule):

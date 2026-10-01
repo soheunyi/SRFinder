@@ -457,7 +457,7 @@ class StackedAttentionClassifier(pl.LightningModule):
             if self.optimizer_config["type"] == "Adam":
                 # Can customize lr or other parameters per attention_clf
                 opt = optim.Adam(
-                    attention_clf.parameters(), lr=self.optimizer_config["lr"]
+                    attention_clf.parameters(), lr=self.optimizer_config["lr"], eps=1e-8
                 )
             elif self.optimizer_config["type"] == "SGD":
                 opt = optim.SGD(

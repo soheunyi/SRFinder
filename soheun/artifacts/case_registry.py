@@ -30,7 +30,7 @@ class CaseRegistry:
         if case_id not in self.nodes:raise ValueError('Case is outside the declared plan')
         return self.root/'cases'/(sha(canonical(case_id))+'.json')
 
-    def _verify(self,case_id,task,completion_id):
+    def _verify(self,case_id,task,completion_id,*,legacy_read=False):
         node=self.nodes[case_id]
         if task.get('logical_case_id')!=case_id or task['stage']!=node['stage']:
             raise ValueError('Task is not bound to the declared case')
@@ -55,6 +55,13 @@ class CaseRegistry:
                 raise ValueError('Task optimizer or member recipe differs from frozen plan')
         parent_results=self.parents(case_id)
         if parent_results is None:raise ValueError('A declared parent has no verified result')
+        if node['stage']==3 and 'region_recipe' not in node and legacy_read:
+            # Read-only compatibility for completed, frozen v1 plans. New tasks
+            # and publication still require an explicit recipe in the node.
+            region=self.store.read(task['upstream']['region_id'],'region')
+            if region['identity']['quantile_recipe']!='existing_get_SR_CR_cut_v1':
+                raise ValueError('Unversioned historical plan is not a legacy v1 region')
+            node={**node,'region_recipe':'existing_get_SR_CR_cut_v1'}
         expected_task=materialize_task(self.store,node,task['source'],task['members'],parent_results,expected_dataset=dataset)
         if expected_task!=task:raise ValueError('Task upstreams differ from registered parents')
         verify_stage_completion(self.store,completion_id,source)
@@ -106,7 +113,7 @@ class CaseRegistry:
         for parent in self.nodes[case_id]['requires']:
             external.extend(self.verified[parent][1].stamps)
         snapshot=VerificationSnapshot(self.store,index['result_id'],external)
-        completion,_=self._verify(case_id,task,result['stage_completion_id'])
+        completion,_=self._verify(case_id,task,result['stage_completion_id'],legacy_read=True)
         snapshot.verify_unchanged()
         value={'result_id':index['result_id'],'task':task,
                'completion_id':result['stage_completion_id'],'completion':completion}

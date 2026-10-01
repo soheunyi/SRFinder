@@ -9,6 +9,7 @@ from artifacts.training_store import canonical,sha
 from artifacts.train_stage import _owned_run,_atomic_json
 from artifacts.development_diagnostics import diagnose_case,summarize_diagnostics,decision_guidance
 from artifacts.runtime_policy import numerical_state,runtime_policy
+from artifacts.output_files import atomic_csv
 
 
 def main():
@@ -44,8 +45,7 @@ def main():
             summary=summarize_diagnostics(values);summary['guidance']=decision_guidance(summary)
             summary['tier']=args.tier;summary['manifest_sha256']=sha(canonical(manifest))
             _atomic_json(args.output/'summary.json',summary)
-            with (args.output/'diagnostics.csv').open('w',newline='') as handle:
-                writer=csv.DictWriter(handle,fieldnames=list(summary['rows'][0]));writer.writeheader();writer.writerows(summary['rows'])
+            atomic_csv(args.output/'diagnostics.csv',summary['rows'])
             _atomic_json(args.output/'completion.json',{'status':'NULL_DIAGNOSTICS_COMPLETE_USER_DECISION_PENDING',
                 'case_count':len(values),'summary_sha256':sha(canonical(summary))})
             print(json.dumps(summary),flush=True)

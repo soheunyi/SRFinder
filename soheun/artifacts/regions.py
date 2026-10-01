@@ -65,7 +65,7 @@ def derive_region_scores(store, base_score_ids, smeared_score_ids=None, *, ensem
     return result,definition
 
 
-def define_regions(store, base_X1_scores, event_metadata_id, smeared_X1_scores=None, *, sr_fraction, cr_fraction, ensemble_mode='max', quantile_recipe='sr_quantile_cr_complement_v2'):
+def define_regions(store, base_X1_scores, event_metadata_id, smeared_X1_scores=None, *, sr_fraction, cr_fraction, ensemble_mode='max', quantile_recipe):
     from signal_region import get_SR_CR_cut
     if quantile_recipe not in ('existing_get_SR_CR_cut_v1','sr_quantile_cr_complement_v2'):
         raise ValueError('Unsupported region quantile recipe')
@@ -85,17 +85,29 @@ def define_regions(store, base_X1_scores, event_metadata_id, smeared_X1_scores=N
     labels=labels.astype(bool)
     total=float(weights[labels].sum())
     if not np.isfinite(total) or total<=0:raise ValueError('X1 signed 4b total must be positive')
-    cuts=get_SR_CR_cut(values,_WeightedEvents(weights=weights,is_4b=labels),
-                       {'4b_in_SR':sr_fraction,'4b_in_CR':cr_fraction})
-    if not np.isfinite(cuts).all():raise ValueError('Nonfinite region thresholds')
     complement=(quantile_recipe=='sr_quantile_cr_complement_v2'
                 and abs(cr_fraction-(1-sr_fraction))<=1e-12)
+    fallback=False
+    try:
+        cuts=get_SR_CR_cut(values,_WeightedEvents(weights=weights,is_4b=labels),
+                           {'4b_in_SR':sr_fraction,'4b_in_CR':cr_fraction})
+    except ValueError as exc:
+        if not complement or str(exc)!='SR and CR cuts are the same':raise
+        # Reproduce the legacy SR first-crossing rule; the unused CR cut may tie.
+        order=np.argsort(values,kind='stable')[::-1]
+        ordered=values[order];physical=weights[order]*labels[order]
+        cumulative=np.cumsum(physical)/np.sum(physical)
+        crossing=np.flatnonzero(cumulative[1:]>np.clip(sr_fraction,.001,.999))
+        upper=ordered[crossing[0]] if len(crossing) else ordered[-1]
+        cuts=(upper,upper);fallback=True
+    if not np.isfinite(cuts).all():raise ValueError('Nonfinite region thresholds')
     identity={'definition':definition,'base_score_ids':list(base_X1_scores),
               'smeared_score_ids':list(smeared_X1_scores or []),'event_metadata_id':event_metadata_id,
               'requested_sr_fraction':sr_fraction,'requested_cr_fraction':cr_fraction,
               'quantile_recipe':quantile_recipe,
               'quantile_code_sha256':hashlib.sha256(inspect.getsource(get_SR_CR_cut).encode()).hexdigest(),
               'quantile_fraction_clip':[.001,.999]}
+    if fallback:identity['SR_only_tied_cut_fallback']='legacy_first_crossing_v1'
     if quantile_recipe=='sr_quantile_cr_complement_v2':
         identity['cr_lower_bound']='none' if complement else 'finite'
     return store._record('region',identity,{'log_tau_s':float(cuts[0]),'log_tau_c':None if complement else float(cuts[1]),

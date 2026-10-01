@@ -464,7 +464,7 @@ class StackedFvTClassifier(pl.LightningModule):
             # You can customize optimizer settings per fvt if needed
             if self.optimizer_config["type"] == "Adam":
                 # Can customize lr or other parameters per fvt
-                opt = optim.Adam(fvt.parameters(), lr=self.optimizer_config["lr"])
+                opt = optim.Adam(fvt.parameters(), lr=self.optimizer_config["lr"], eps=1e-8)
             elif self.optimizer_config["type"] == "SGD":
                 opt = optim.SGD(fvt.parameters(), lr=self.optimizer_config["lr"])
             else:

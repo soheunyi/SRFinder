@@ -41,7 +41,7 @@ def main():
         x1=source.indices('X1');events=np.empty(len(x1),dtype=[('is_4b','?'),('weight','<f8')])
         events['is_4b']=frame.fourTag.values[x1];events['weight']=1.
         eid=store.put_array('event_metadata',{'dataset_id':dataset,'split_id':splits[0]},events)
-        region=define_regions(store,[bp[0]],eid,[sp[0]],sr_fraction=.2,cr_fraction=.8)
+        region=define_regions(store,[bp[0]],eid,[sp[0]],sr_fraction=.2,cr_fraction=.8,quantile_recipe='sr_quantile_cr_complement_v2')
         selected=classify_X2(store,region,[bp[1]],[sp[1]])
         allowed=set(source.indices('X2')[selected['CR']].tolist())
         contexts=[]

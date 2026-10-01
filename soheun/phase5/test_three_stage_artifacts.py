@@ -222,7 +222,8 @@ def main():
                 'max_epochs':2,'axes':{'mother_seed':7,'epsilon':'0','eta':'2.0','sr_fraction':str(sr),
                                      'model':model or ('AttentionClassifier' if stage==2 else 'FvTClassifier')},
                 'requires':[] if stage==1 else ['fixture-step1'] if stage==2 else ['fixture-step1','fixture-step2'],
-                'region_member_seeds':seeds}
+                'region_member_seeds':seeds,
+                **({'region_recipe':'sr_quantile_cr_complement_v2'} if stage==3 else {})}
     def bound(stage,upstream=None):
         node=logical_node(stage)
         task=materialize_task(store,node,pointer,[hparams(stage,m) for m in range(2)],
@@ -337,7 +338,7 @@ def main():
     smooth=train(store,source,bound(2,{'encoder_ids':base}),args.out/'step2')
     smooth_scores=export(smooth,('X1','X2'),encoders=base)
     finish(2,smooth_scores)
-    region=define_regions(store,base_scores['X1'],event_ids['X1'],smooth_scores['X1'],sr_fraction=.2,cr_fraction=.8)
+    region=define_regions(store,base_scores['X1'],event_ids['X1'],smooth_scores['X1'],sr_fraction=.2,cr_fraction=.8,quantile_recipe='sr_quantile_cr_complement_v2')
     bad_node=logical_node(3);bad_node['axes']['eta']='3.0'
     try:materialize_task(store,bad_node,pointer,[hparams(3,m) for m in range(2)],case_receipts,expected_dataset=params)
     except ValueError:pass
@@ -346,11 +347,15 @@ def main():
     try:materialize_task(store,missing_node,pointer,[hparams(2,2)],{'fixture-step1':case_receipts['fixture-step1']},expected_dataset=params)
     except ValueError:pass
     else:raise AssertionError('Missing encoder seed accepted')
+    unversioned=logical_node(3);unversioned.pop('region_recipe')
+    try:materialize_task(store,unversioned,pointer,[hparams(3,m) for m in range(2)],case_receipts,expected_dataset=params)
+    except ValueError as exc:assert 'region_recipe' in str(exc)
+    else:raise AssertionError('Unversioned Stage-3 task was accepted')
     cr=train(store,source,bound(3,{'region_id':region,'base_X2_scores':base_scores['X2'],'smeared_X2_scores':smooth_scores['X2']}),args.out/'step3')
     cr_scores=export(cr,('X2',))
     finish(3,cr_scores)
     # Existing draft diagnostic: one upstream member, unsmeared representations.
-    repr_region=define_regions(store,[base_scores['X1'][1]],event_ids['X1'],[smooth_scores['X1'][1]],sr_fraction=.05,cr_fraction=.95)
+    repr_region=define_regions(store,[base_scores['X1'][1]],event_ids['X1'],[smooth_scores['X1'][1]],sr_fraction=.05,cr_fraction=.95,quantile_recipe='sr_quantile_cr_complement_v2')
     repr_hp={**hparams(2,1),'step':3,'dim_q':6}
     repr_hp.pop('smearing')
     repr_upstream={'region_id':repr_region,'base_X2_scores':[base_scores['X2'][1]],

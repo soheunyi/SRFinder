@@ -13,6 +13,8 @@ def materialize_task(store,node,source_pointer,members,parents,*,expected_datase
     source=resolve_source_pointer(store,source_pointer)
     if source.hparams['dataset']!=expected_dataset:raise ValueError('Source differs from the declared dataset recipe')
     axes=node['axes'];stage=node['stage']
+    if stage==3 and 'region_recipe' not in node:
+        raise ValueError('Stage-3 node must explicitly pin region_recipe')
     if (int(expected_dataset['seed'])!=int(axes['mother_seed'])
             or Decimal(str(expected_dataset['signal_ratio']))!=Decimal(str(axes['epsilon']))):
         raise ValueError('Source mother/mixture differs from logical node')
@@ -68,7 +70,7 @@ def materialize_task(store,node,source_pointer,members,parents,*,expected_datase
         region=define_regions(store,[m['scores']['X1'] for m in base],by_stage[1]['receipt']['event_metadata_ids']['X1'],
             [m['scores']['X1'] for m in smooth] if smooth else None,
             sr_fraction=float(fraction),cr_fraction=float(1-fraction),
-            quantile_recipe=node.get('region_recipe','existing_get_SR_CR_cut_v1'))
+            quantile_recipe=node['region_recipe'])
         upstream={'region_id':region,'base_X2_scores':[m['scores']['X2'] for m in base]}
         if smooth:upstream['smeared_X2_scores']=[m['scores']['X2'] for m in smooth]
         if members[0]['model']=='AttentionClassifier':

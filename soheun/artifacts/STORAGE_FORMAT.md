@@ -52,7 +52,7 @@ Never infer IDs from legacy filenames or overwrite existing records.
 | training_history | Model-bound validation loss, LR and batch size for each epoch, checked against best selection. |
 | scores | One member's unclipped float32 `logit_4b - logit_3b`, represented as `log_density_ratio`; shape [events], with owner/split/inference profile. |
 | event_metadata | Shared ordered pool/row IDs, class, signed physical weight and simulation truth for one source/domain. |
-| region | Paired upstream members, X1 score references, quantile/aggregation recipe and frozen log_tau_s/log_tau_c. |
+| region | Paired upstream members, X1 score references, quantile/aggregation recipe and frozen log_tau_s/log_tau_c. log_tau_c is null for the complement-CR recipe (no lower cut). |
 | stage_completion | Verified model/history/required-domain score IDs, event metadata and payload checksums. |
 | stage_task / case_result | Frozen source/member/upstream task and its verified result for one logical case under a plan. |
 | ensemble | Optional ordered member IDs plus an explicit aggregation rule; individual members remain authoritative. |

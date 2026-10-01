@@ -12,7 +12,7 @@ def main():
     choice=ap.add_mutually_exclusive_group(required=True)
     choice.add_argument('--case',action='append',dest='cases')
     choice.add_argument('--case-file',type=Path,help='JSON list of declared case IDs')
-    ap.add_argument('--decision',type=Path,required=True,help='JSON primary_rule and user decision_reference')
+    ap.add_argument('--decision',type=Path,required=True,help='JSON status=USER_DECISION_RECORDED, primary_rule and user decision_reference')
     ap.add_argument('--rules',nargs='+',choices=RULES,default=list(RULES))
     ap.add_argument('--resume',action='store_true')
     args=ap.parse_args()
