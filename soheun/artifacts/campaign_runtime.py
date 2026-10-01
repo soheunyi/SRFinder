@@ -312,9 +312,18 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
         except BaseException as exc:
             progress('FAILED', error_type=type(exc).__name__, error=str(exc))
             if pool is not None:
-                for process in tuple((pool._processes or {}).values()):
+                # Lightning's SIGTERM handler keeps a worker alive; escalate so
+                # the coordinator exits and releases its GPU allocation.
+                processes = [p for p in tuple((pool._processes or {}).values()) if p.is_alive()]
+                for process in processes:
+                    process.terminate()
+                for process in processes:
+                    process.join(10)
                     if process.is_alive():
-                        process.terminate()
+                        process.kill()
+                        process.join(10)
+                pool.shutdown(wait=False, cancel_futures=True)
+                pool = None
             raise
         finally:
             if pool is not None:
