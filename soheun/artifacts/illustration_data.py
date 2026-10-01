@@ -33,9 +33,12 @@ def upstream_view(reader,case_ids,*,sr_fraction=.2,member_seeds=None):
     smooth_ids={domain:[s for _,s in reader.member_score_ids(smooth[0],domain,member_seeds=seeds)] if smooth else None for domain in ('X1','X2')}
     value=reader.case(base[0]);events={d:value['completion']['event_metadata_ids'][d] for d in ('X1','X2')}
     overlay=RegionOverlay(reader.store)
+    recipe=reader.registry.plan.get('region_recipe')
+    if not recipe or not recipe.get('version'):
+        # Same rule as materialize_task: no silent fallback to the legacy recipe.
+        raise ValueError('Illustrations require the plan to pin region_recipe')
     key=define_regions(overlay,[s for _,s in pairs['X1']],events['X1'],smooth_ids['X1'],
-        sr_fraction=sr_fraction,cr_fraction=1-sr_fraction,
-        quantile_recipe=reader.registry.plan.get('region_recipe',{'version':'existing_get_SR_CR_cut_v1'})['version'])
+        sr_fraction=sr_fraction,cr_fraction=1-sr_fraction,quantile_recipe=recipe['version'])
     record=overlay.read(key);masks=classify_X2(overlay,key,[s for _,s in pairs['X2']],smooth_ids['X2'])
     x1,_=derive_region_scores(reader.store,[s for _,s in pairs['X1']],smooth_ids['X1'])
     scores=[reader.store.load_array(s,'scores') for _,s in pairs['X2']]

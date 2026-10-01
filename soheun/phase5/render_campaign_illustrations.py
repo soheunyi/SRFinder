@@ -50,13 +50,15 @@ def overlap(reader,root):
     groups=reader.registry.plan['diagnostic_bindings']['null_overlap']['upstream_nodes_by_eta']
     fig,axes=plt.subplots(2,3,figsize=(15,8));refs=[]
     for i,eta in enumerate(('inf','2.0','0.1')):
-        view=upstream_view(reader,groups[eta]);events=view['events'];x=finite_ratio(view['base_first_log_ratio']);y=finite_ratio(view['masks']['log_psi'])
+        view=upstream_view(reader,groups[eta]);events=view['events'];y=finite_ratio(view['masks']['log_psi'])
+        # Stand-in for the true ratio: mean density ratio over all base members (user decision), not one member.
+        x=view['base_mean_ratio']
         xb=np.linspace(*np.quantile(x,[.005,.999]),30);yb=np.linspace(*np.quantile(y,[.005,.999]),30);labels=events['is_4b']
         axes[0,i].hist2d(x[labels],y[labels],bins=(xb,yb),weights=events['weight'][labels]);axes[0,i].axhline(np.exp(view['region']['payload']['log_tau_s']),color='red',linestyle='--')
         for region in ('SR','CR'):
             mask=view['masks'][region]&labels;axes[1,i].hist(x[mask],bins=xb,weights=events['weight'][mask],histtype='step',label=region)
-        axes[0,i].set(title=f'eta={eta}',ylabel='Learned SR score');axes[1,i].set(xlabel='Base density ratio',ylabel='4b weighted counts');axes[1,i].legend()
-        refs.append({'eta':eta,'view':reference(view),'base_axis_member_seed':view['member_seeds'][0]})
+        axes[0,i].set(title=f'eta={eta}',ylabel='Learned SR score');axes[1,i].set(xlabel='Base density ratio (member mean)',ylabel='4b weighted counts');axes[1,i].legend()
+        refs.append({'eta':eta,'view':reference(view),'base_axis':'mean_density_ratio over base members','base_axis_member_seeds':view['member_seeds']})
     save(fig,root,NAMES['overlap'],{'sources':refs,'region_rule':'Current pinned complement-CR recipe'})
 
 
@@ -75,15 +77,19 @@ def calibration(reader,root,rule):
         key=cases[eta];value=reader.case(key);up=value['task']['upstream']
         parent=reader.registry.nodes[key]['requires'];view=upstream_view(reader,parent)
         if view['region']['id']!=up['region_id']:raise ValueError('Calibration region differs from trained CR')
-        log_ratio,reduction=aggregate_cr(reader,key,rule);gamma=finite_ratio(log_ratio);base=view['base_mean_ratio'];events=view['events']
+        log_ratio,reduction=aggregate_cr(reader,key,rule);gamma=finite_ratio(log_ratio);events=view['events']
+        # Same stand-in as the overlap panel: mean density ratio over all base members (user decision).
+        base=view['base_mean_ratio']
         edges=np.linspace(base.min(),base.max(),80)
         for row,region in enumerate(('CR','SR')):
             mask=view['masks'][region];ax=axes[row,col]
             ax.hist2d(base[mask],gamma[mask],bins=(edges,edges));line=weighted_calibration(base[mask],gamma[mask],events['weight'][mask])
             valid=np.array([x is not None for x in line['base_mean']]);ax.plot(np.asarray(line['base_mean'],dtype=float)[valid],np.asarray(line['ratio_mean'],dtype=float)[valid],color='red')
-            ax.plot([edges[0],edges[-1]],[edges[0],edges[-1]],'k--');ax.set(title=f'eta={eta}, {region}',xlabel='Mean base density ratio',ylabel='CR estimate')
-            rows.append({'case_id':key,'region':region,'calibration':line,'reduction':reduction,'view':reference(view)})
-    save(fig,root,NAMES['calibration'],{'rule':rule,'rows':rows,'legacy_display_difference':'Caption-matching equal-count bins and physical-weighted means; older display used uniform bins/unweighted means'})
+            ax.plot([edges[0],edges[-1]],[edges[0],edges[-1]],'k--');ax.set(title=f'eta={eta}, {region}',xlabel='Base density ratio (member mean)',ylabel='CR estimate')
+            rows.append({'case_id':key,'region':region,'calibration':line,'reduction':reduction,'view':reference(view),
+                         'base_axis_member_seeds':view['member_seeds']})
+    save(fig,root,NAMES['calibration'],{'rule':rule,'rows':rows,'x_axis':'mean_density_ratio over base members, same as the overlap panel (user decision; the older figure used one member)',
+        'legacy_display_difference':'Caption-matching equal-count bins and physical-weighted means; older display used uniform bins/unweighted means'})
 
 
 def tail(reader,root):
