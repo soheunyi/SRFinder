@@ -151,9 +151,13 @@ class SaveIndividualClassifierCallback(pl.Callback):
         self.best_scores = {metric: float("inf") for metric in monitor_metrics}
         self.model = model
 
-    def on_validation_epoch_end(
+    def on_validation_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
+        # Module.on_validation_epoch_end has now logged this epoch's metrics.
+        # The sanity pass must not select untrained weights as the best model.
+        if trainer.sanity_checking:
+            return
         for i, (run_name, metric) in enumerate(
             zip(self.run_names, self.monitor_metrics)
         ):

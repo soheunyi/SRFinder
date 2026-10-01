@@ -78,11 +78,11 @@ class GpuSampler(threading.Thread):
         self.interval = interval
         self.util: list[float] = []
         self.mem: list[float] = []
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self.index = (os.environ.get("CUDA_VISIBLE_DEVICES") or "0").split(",")[0]
 
     def run(self):
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 out = subprocess.run(
                     ["nvidia-smi", "-i", self.index, "--query-gpu="
@@ -95,10 +95,10 @@ class GpuSampler(threading.Thread):
                 self.mem.append(float(m))
             except Exception:  # noqa: BLE001
                 pass
-            self._stop.wait(self.interval)
+            self._stop_event.wait(self.interval)
 
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
 
 
 class EpochTimer(pl.Callback):
@@ -297,7 +297,10 @@ def main() -> None:
 
     # ------------------------------------------------- prediction export
     dm = model.datamodule
-    x_val = dm.stacked_val_dataset.tensors[0]
+    from independent_data import validation_probe, row_counts
+    probe_dataset = validation_probe(dm, args.probe_size)
+    train_counts, val_counts = row_counts(dm, True), row_counts(dm, False)
+    x_val = probe_dataset.tensors[0]
     n_probe = min(args.probe_size, x_val.shape[0])
     probe_x = x_val[:n_probe].contiguous()
     model.eval()
@@ -319,6 +322,9 @@ def main() -> None:
     per_gpu_hour = K / (projected_100 / 3600.0)
 
     record = {
+        "data_stream_policy": "independent_v1" if hasattr(dm, 'train_datasets') else "legacy_rectangular",
+        "data_storage_device": str(dm.train_datasets[0].tensors[0].device) if hasattr(dm, 'train_datasets') else "cpu",
+        "dataloader_workers": dm.num_workers,
         "K": K,
         "anomaly_detection": not args.no_anomaly,
         "fast_reinforce": bool(args.fast_reinforce),
@@ -327,8 +333,10 @@ def main() -> None:
         "max_epochs": args.max_epochs,
         "env": env_record(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
-        "train_rows": int(dm.stacked_train_dataset.tensors[0].shape[0]),
-        "val_rows": int(x_val.shape[0]),
+        "train_rows": train_counts[0] if len(set(train_counts)) == 1 else None,
+        "train_rows_per_estimator": train_counts,
+        "val_rows_per_estimator": val_counts,
+        "val_rows": val_counts[0] if len(set(val_counts)) == 1 else None,
         "preprocess_s": preprocess_s,
         "train_s": train_s,
         "epochs": eps,

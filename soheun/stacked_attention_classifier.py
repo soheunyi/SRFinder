@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from data_modules import StackedFvTDataModule
+from independent_data import IndependentStackedDataModule
+from independent_training import step as independent_step, epoch_losses
 from attention_classifier import AttentionClassifier
 from utils import require_keys
 import torch.optim as optim
@@ -165,6 +167,9 @@ class StackedAttentionClassifier(pl.LightningModule):
         return torch.stack(losses_per_stack)
 
     def training_step(self, batch, batch_idx):
+        if isinstance(batch, dict) and 'members' in batch:
+            return independent_step(self, batch, self.attention_classifiers, training=True,
+                                    chunk_size=getattr(self, 'execution_chunk_size', 0))
         optimizers: list[torch.optim.Optimizer] = self.optimizers()
         q, y, w = batch  # Assumes standard batch structure
         q, y, w = (
@@ -223,6 +228,9 @@ class StackedAttentionClassifier(pl.LightningModule):
         )
 
     def validation_step(self, batch, batch_idx):
+        if isinstance(batch, dict) and 'members' in batch:
+            return independent_step(self, batch, self.attention_classifiers, training=False,
+                                    chunk_size=getattr(self, 'execution_chunk_size', 0))
         q, y, w = batch
         q, y, w = q.to(self.device), y.to(self.device), w.to(self.device)
         self.val_batch_sizes = torch.cat(
@@ -269,9 +277,7 @@ class StackedAttentionClassifier(pl.LightningModule):
         )  # [number of batches, num_stacks]
 
     def on_train_epoch_end(self):
-        avg_losses = torch.sum(
-            self.train_losses_per_stack * self.train_batch_sizes.view(-1, 1), dim=0
-        ) / torch.sum(self.train_weights_per_stack, dim=0)
+        avg_losses = epoch_losses(self, "train")
         avg_loss = torch.mean(avg_losses)
         avg_loss_first_digits = (
             int(avg_loss.item() * 1000) if not torch.isnan(avg_loss) else 0
@@ -321,9 +327,7 @@ class StackedAttentionClassifier(pl.LightningModule):
         self.train_batch_sizes = torch.tensor([])
 
     def on_validation_epoch_end(self):
-        avg_losses = torch.sum(
-            self.val_losses_per_stack * self.val_batch_sizes.view(-1, 1), dim=0
-        ) / torch.sum(self.val_weights_per_stack, dim=0)
+        avg_losses = epoch_losses(self, "val")
         avg_loss = torch.mean(avg_losses)
         avg_loss_first_digits = (
             int(avg_loss.item() * 1000) if not torch.isnan(avg_loss) else 0
@@ -453,7 +457,7 @@ class StackedAttentionClassifier(pl.LightningModule):
             if self.optimizer_config["type"] == "Adam":
                 # Can customize lr or other parameters per attention_clf
                 opt = optim.Adam(
-                    attention_clf.parameters(), lr=self.optimizer_config["lr"]
+                    attention_clf.parameters(), lr=self.optimizer_config["lr"], eps=1e-8
                 )
             elif self.optimizer_config["type"] == "SGD":
                 opt = optim.SGD(
@@ -502,6 +506,10 @@ class StackedAttentionClassifier(pl.LightningModule):
         dataloader_config: dict = {},
         file_handler: logging.FileHandler | None = None,
         progress_bar_epochs: int = None,
+        independent_batches: bool = False,
+        estimator_train_seeds: list[int] | None = None,
+        estimator_ids: list[str] | None = None,
+        execution_chunk_size: int = 0,
     ):
         assert "batch_size" in dataloader_config
 
@@ -509,6 +517,11 @@ class StackedAttentionClassifier(pl.LightningModule):
         self.lr_scheduler_config = lr_scheduler_config
         self.early_stop_patience = early_stop_patience
 
+        if execution_chunk_size < 0 or (execution_chunk_size and not independent_batches):
+            raise ValueError('Vectorized execution requires independent_batches=True')
+        if execution_chunk_size:
+            raise NotImplementedError('Attention vectorization is not validated; use sequential independent batches')
+        self.execution_chunk_size = execution_chunk_size
         self.train_datasets = train_datasets
         self.val_datasets = val_datasets
 
@@ -569,7 +582,17 @@ class StackedAttentionClassifier(pl.LightningModule):
         num_workers = dataloader_config.get("num_workers", 0)
         pin_mem = dataloader_config.get("pin_memory", False)
         persist = dataloader_config.get("persistent_workers", False)
-        self.datamodule = StackedFvTDataModule(
+        if dataloader_config.get('preload_to_gpu', False):
+            if not independent_batches or self.device.type != 'cuda':
+                raise ValueError('GPU preload requires independent batching on CUDA')
+            num_workers, pin_mem, persist = 0, False, False
+        data_class = IndependentStackedDataModule if independent_batches else StackedFvTDataModule
+        stream_args = {} if not independent_batches else {
+            'shuffle_seeds': estimator_train_seeds if estimator_train_seeds is not None else [train_seed or 0] * self.num_stacks,
+            'estimator_ids': estimator_ids,
+            'storage_device': self.device if dataloader_config.get('preload_to_gpu', False) else None,
+        }
+        self.datamodule = data_class(
             train_datasets,
             val_datasets,
             dataloader_config["batch_size"],
@@ -578,6 +601,7 @@ class StackedAttentionClassifier(pl.LightningModule):
             batch_size_multiplier=dataloader_config.get("batch_size_multiplier", 2),
             pin_memory=pin_mem,
             persistent_workers=persist,
+            **stream_args,
         )
         # Launch training
         trainer.fit(self, datamodule=self.datamodule)
