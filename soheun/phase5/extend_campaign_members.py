@@ -42,7 +42,8 @@ def main():
         export_batch_size=args.export_batch_size,resume=args.resume,execution_patches=patches)
     if not args.execute:
         print(json.dumps(prepared),flush=True);return
-    work=sorted(expected_cases(plan,args.scope))
+    # Full extension must cover methodological/efficiency dependencies too.
+    work=None if args.scope=='full' else sorted(expected_cases(plan,args.scope))
     result=run_campaign(store,plan,args.output,case_ids=manifest['case_ids'],work_case_ids=work,
         nproc=args.nproc,device=args.device,resident='auto',export_batch_size=args.export_batch_size,
         safety_bytes=int(args.safety_gib*1024**3),compute_headroom_bytes=int(args.compute_headroom_gib*1024**3),
