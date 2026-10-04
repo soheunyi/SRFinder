@@ -87,17 +87,21 @@ def evaluate_one(reader,case_id,rule,spec):
     arrays,audit=reader.affine_inputs(case_id,aggregation=rule,
         member_seeds=[seed] if rule=='single' else None,upper=spec['clipping']['upper'])
     signed=bool(audit['negative_4b_count'])
-    module='run_files.affine_weighted_ks_signed_compiled' if signed else 'run_files.affine_weighted_ks_compiled'
+    # Nonnegative weights: C++ bootstrap fed the pinned NumPy multiplier stream, so the
+    # result is bitwise identical to the reference (run_files/test_affine_ks_fast.py).
+    module='run_files.affine_weighted_ks_signed_compiled' if signed else 'run_files.affine_weighted_ks_fast'
     engine=importlib.import_module(module)
+    fast={} if signed else {'multipliers':'numpy'}
     loaded=time.perf_counter()
     with capture_overlap(engine,signed) as overlap:
         result=engine.affine_ks_test(*arrays,L=audit['lower'],U=audit['upper'],
             B=spec['bootstrap_replicates'],alpha=spec['alpha'],seed=spec['rng']['seed'],
-            numerical_tol=spec['numerical_tolerance'])
+            numerical_tol=spec['numerical_tolerance'],**fast)
     finished=time.perf_counter()
     record={'case_id':case_id,'axes':reader.registry.nodes[case_id]['axes'],'rule':rule,
             'test_version':spec['test_versions']['signed_4b' if signed else 'nonnegative'],
             'implementation_variant':'signed_4b' if signed else 'nonnegative',
+            'bootstrap_engine':'python-reference' if signed else 'cpp-replicates-numpy-stream',
             'result':asdict(result),'input_audit':audit,**overlap,
             'D_at_maximizing_p_t':observed_at(arrays,audit['lower'],audit['upper'],result.maximizing_p_t),
             'load_s':loaded-started,'bootstrap_s':finished-loaded}
