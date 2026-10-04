@@ -209,11 +209,6 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                                 resume=shard is not None or (root / 'registry').exists())
         (root / 'tasks').mkdir(exist_ok=True)
         imported=[] if origin is None else import_unchanged_cases(registry,origin,nodes)
-        done = {}
-        for node in nodes:
-            value = registry.get(node['id'])
-            if value is not None:
-                done[node['id']] = value['completion_id']
         active_nodes=nodes if work_case_ids is None else selected_nodes(plan,work_case_ids)
         if {n['id'] for n in active_nodes}-{n['id'] for n in nodes}:
             raise ValueError('Work selection lies outside the prepared execution scope')
@@ -221,6 +216,23 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
         if assigned is not None:
             mine=set(assigned)
             active_nodes=[n for n in active_nodes if n['source_case_id'] in mine]
+        # Fully verify only what this coordinator schedules or depends on (transitively);
+        # every other registered case is listed from the registry index for the reports.
+        by_id={n['id']:n for n in nodes}
+        needed=set();pending=[n['id'] for n in active_nodes]
+        while pending:
+            key=pending.pop()
+            if key in needed:continue
+            needed.add(key);pending.extend(by_id[key]['requires'])
+        done = {}
+        for node in nodes:
+            if node['id'] in needed:
+                value = registry.get(node['id'])
+                completion = None if value is None else value['completion_id']
+            else:
+                completion = registry.indexed_completion(node['id'])
+            if completion is not None:
+                done[node['id']] = completion
         remaining = [node for node in active_nodes if node['id'] not in done]
         limit = len(remaining) if max_new_cases is None else min(max_new_cases, len(remaining))
         workers = min(nproc, max(1, limit))
@@ -330,7 +342,7 @@ def run_campaign(store, plan, output, *, case_ids=None, nproc=5, device='cpu',
                 pool.shutdown(wait=True, cancel_futures=True)
 
 
-def adopt_completed_cases(store, plan, output, source_execution):
+def adopt_completed_cases(store, plan, output, source_execution, *, shard=None):
     """Register verified completions from an earlier execution of the same plan.
 
     For moving to a new deployment snapshot (for example a sharded launcher)
@@ -350,16 +362,30 @@ def adopt_completed_cases(store, plan, output, source_execution):
     manifest = execution_manifest(store, plan, case_ids=mine['case_ids'], device=mine['device'],
         export_batch_size=mine['export_batch_size'],
         execution_patches=tuple(mine.get('execution_policy', {}).get('patches', ())))
+    nodes = selected_nodes(plan, mine['case_ids'])
+    assigned = None if shard is None else set(shard_sources(nodes, shard))
+    if assigned is not None:
+        nodes = [n for n in nodes if n['source_case_id'] in assigned]
     with (old / '.worker.lock').open('a+') as lock:
-        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Sharded adoption: shared source lock (excludes an unsharded coordinator) and no
+        # live source shard claims; the target is claimed like a training shard.
+        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB if shard is None else fcntl.LOCK_SH | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError('Source execution has an active coordinator') from exc
-        with _owned_run(root, manifest, True):
+        if shard is not None:
+            for claim in sorted((old / 'claims').glob('*.lock')) if (old / 'claims').is_dir() else []:
+                with claim.open('a+') as held:
+                    try: fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as exc:
+                        raise RuntimeError('Source execution has an active coordinator') from exc
+                    fcntl.flock(held, fcntl.LOCK_UN)
+        ownership = _owned_run(root, manifest, True) if shard is None else _shared_run(root, manifest, shard, sorted(assigned))
+        with ownership:
             source = CaseRegistry(store, plan, old / 'registry', resume=True)
             target = CaseRegistry(store, plan, root / 'registry', resume=True)
             source.use_receipts = target.use_receipts = False  # adoption re-verifies fully
             adopted, present = [], 0
-            for node in sorted(selected_nodes(plan, mine['case_ids']), key=lambda n: n['stage']):
+            for node in sorted(nodes, key=lambda n: n['stage']):
                 if target.get(node['id']) is not None:
                     present += 1
                     continue
@@ -371,7 +397,7 @@ def adopt_completed_cases(store, plan, output, source_execution):
                     raise ValueError('Adopted completion differs from its source')
                 adopted.append(node['id'])
             report = {'status': 'ADOPTED_VERIFIED_COMPLETIONS', 'source_execution': str(old.resolve()),
-                      'plan_sha256': plan_id, 'adopted_case_ids': adopted,
+                      'plan_sha256': plan_id, 'shard': None if shard is None else list(shard), 'adopted_case_ids': adopted,
                       'already_present_cases': present}
             _atomic_json(root / f'adoption-{sha(canonical(sorted(adopted)))[:16]}.json', report)
             return report

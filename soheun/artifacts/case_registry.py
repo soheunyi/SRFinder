@@ -180,6 +180,22 @@ class CaseRegistry:
         if len(self.verified)>64:self.verified.popitem(last=False)
         return value
 
+    def indexed_completion(self,case_id):
+        """Completion ID recorded when the case was published, without re-verifying it.
+
+        For listing only (progress and result reports). Anything a coordinator will
+        schedule, depend on or hand out still goes through get().
+        """
+        path=self._path(case_id)
+        if not path.exists():return None
+        index=json.loads(path.read_text())
+        if index.get('plan_sha256')!=self.plan_id or index.get('case_id')!=case_id:
+            raise ValueError('Case index does not belong to this plan')
+        result=self.store.read(index['result_id'],'case_result')['identity']
+        if result['plan_sha256']!=self.plan_id or result['case_id']!=case_id:
+            raise ValueError('Case result identity differs from index')
+        return result['stage_completion_id']
+
     @staticmethod
     def _read_receipt(path):
         try:

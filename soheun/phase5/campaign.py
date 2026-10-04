@@ -70,6 +70,7 @@ def main():
     adopt = sub.add_parser('adopt', help='Register verified completions from an earlier execution of the same plan; trains nothing')
     adopt.add_argument('--output', type=Path, required=True)
     adopt.add_argument('--from', dest='source_execution', type=Path, required=True)
+    adopt.add_argument('--shard', type=shard_arg, help='K/N: adopt only the cases of this source shard; shards may run concurrently')
     cleanup = sub.add_parser('cleanup')
     cleanup.add_argument('--output',type=Path,required=True)
     cleanup.add_argument('--case',dest='case_ids',action='append',required=True)
@@ -85,7 +86,7 @@ def main():
     if args.operation == 'adopt':
         manifest = json.loads((args.output / 'training-plan.json').read_text())
         plan = json.loads((args.output / 'frozen-plan.json').read_text())
-        result = adopt_completed_cases(TrainingStore(manifest['store']), plan, args.output, args.source_execution)
+        result = adopt_completed_cases(TrainingStore(manifest['store']), plan, args.output, args.source_execution, shard=args.shard)
         print(json.dumps({**result, 'adopted_cases': len(result['adopted_case_ids'])}, indent=2), flush=True)
         return
     if args.operation == 'status':
