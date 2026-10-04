@@ -375,7 +375,9 @@ def adopt_completed_cases(store, plan, output, source_execution, *, shard=None):
         if shard is not None:
             for claim in sorted((old / 'claims').glob('*.lock')) if (old / 'claims').is_dir() else []:
                 with claim.open('a+') as held:
-                    try: fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # Shared probe: a live coordinator holds its claims exclusively, while
+                    # concurrent adoption shards probing the same claim must not collide.
+                    try: fcntl.flock(held, fcntl.LOCK_SH | fcntl.LOCK_NB)
                     except BlockingIOError as exc:
                         raise RuntimeError('Source execution has an active coordinator') from exc
                     fcntl.flock(held, fcntl.LOCK_UN)
