@@ -4,6 +4,8 @@ On a completed CPU fixture campaign: a cold reader fully verifies every case and
 receipts; a warm reader performs no full verification and returns identical values;
 touching or corrupting a file forces full verification (and corruption still fails);
 use_receipts=False and a changed verifier-code hash always force full verification.
+Publication writes the receipt, so the first read after training is already warm, and
+receipts of two verifier versions coexist instead of overwriting each other.
 """
 import argparse, json, os, shutil, sys
 from pathlib import Path
@@ -35,6 +37,10 @@ def main():
         calls.clear(); reg = cr.CaseRegistry(store, plan, root / 'registry', resume=True); reg.use_receipts = use_receipts
         values = {k: reg.get(k) for k in ids}; return values, len(calls)
 
+    # publication wrote the receipts: the first read after training verifies nothing
+    published, n_published = read_all()
+    assert n_published == 0, n_published
+
     receipts = root / 'verification-receipts'
     shutil.rmtree(receipts)
     cold, n_cold = read_all()
@@ -42,6 +48,7 @@ def main():
     size = max(p.stat().st_size for p in receipts.glob('*.json'))
     warm, n_warm = read_all()
     assert n_warm == 0 and canonical(warm) == canonical(cold), n_warm
+    assert canonical(published) == canonical(cold)
 
     # touching one Step-1 output invalidates that case and everything depending on it
     step1 = next(n for n in selected_nodes(plan) if n['stage'] == 1)
@@ -56,6 +63,9 @@ def main():
     _, n_full = read_all(use_receipts=False); assert n_full == len(ids), n_full
     cr._VERIFIER_SHA = 'changed'; _, n_code = read_all(); assert n_code == len(ids), n_code
     cr._VERIFIER_SHA = None; read_all()
+    # both versions now hold receipts; switching between them verifies nothing
+    cr._VERIFIER_SHA = 'changed'; _, n_other = read_all(); cr._VERIFIER_SHA = None; _, n_back = read_all()
+    assert n_other == 0 and n_back == 0, (n_other, n_back)
 
     # corrupting content (same size) is caught by the full check the stale receipt forces
     data = bytearray(blob.read_bytes()); data[-1] ^= 0xFF; blob.write_bytes(bytes(data))
@@ -68,6 +78,7 @@ def main():
     print(json.dumps({'status': 'PASS', 'cases': len(ids), 'cold_full_verifications': n_cold, 'warm_full_verifications': n_warm,
                       'after_touch_full_verifications': n_touched, 'receipt_bytes_max': size,
                       'use_receipts_false_full_verifications': n_full, 'changed_verifier_full_verifications': n_code,
+                      'published_full_verifications': n_published, 'version_switch_full_verifications': n_other + n_back,
                       'corruption_rejected': caught[:80]}), flush=True)
 
 

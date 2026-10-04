@@ -13,6 +13,7 @@ from .train_stage import _atomic_json
 from .materialize_task import materialize_task
 from .campaign_recipes import recipes
 from .verification_snapshot import VerificationSnapshot
+import ast
 import hashlib
 
 # A receipt records that a case passed full verification, keyed by everything the
@@ -20,16 +21,58 @@ import hashlib
 # digest of the stamps (device, inode, size, mtime, ctime) of every file the check
 # read, including its parents'. A later reader that sees the same digest skips the
 # expensive re-derivation; any changed file, code or plan forces full verification.
+# publish() writes the receipt for the check it has just run, so the first reader of
+# a freshly trained case is already warm. Each verifier version keeps its own receipt
+# file, so two code versions reading one store never overwrite each other's receipts.
 RECEIPT_SCHEMA = 1
 _VERIFIER_SHA = None
+_CODE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _module_file(name):
+    base = _CODE_ROOT.joinpath(*name.split('.'))
+    for path in (base.with_suffix('.py'), base / '__init__.py'):
+        if path.is_file():
+            return path
+    return None
+
+
+def _local_imports(path):
+    """Files under the code root that `path` imports (third-party modules are skipped)."""
+    found = set()
+    package = path.parent.relative_to(_CODE_ROOT).parts
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                prefix = '.'.join(package[:len(package) - node.level + 1])
+                module = '.'.join(part for part in (prefix, node.module) if part)
+            else:
+                module = node.module
+            names = [module] + [f'{module}.{alias.name}' if module else alias.name for alias in node.names]
+        else:
+            continue
+        found.update(f for f in map(_module_file, filter(None, names)) if f is not None)
+    return found
 
 
 def _verifier_sha256():
+    """Hash of the code full verification can execute: this module's local import closure.
+
+    Analysis-only modules (evaluation, figures, the KS engine) are outside the closure, so
+    editing them leaves the receipts that training wrote valid.
+    """
     global _VERIFIER_SHA
     if _VERIFIER_SHA is None:
+        closure, pending = set(), [Path(__file__).resolve()]
+        while pending:
+            path = pending.pop()
+            if path not in closure:
+                closure.add(path); pending.extend(_local_imports(path))
         digest = hashlib.sha256()
-        for path in sorted(Path(__file__).resolve().parent.glob('*.py')):
-            digest.update(path.name.encode()); digest.update(path.read_bytes())
+        for path in sorted(closure):
+            digest.update(str(path.relative_to(_CODE_ROOT)).encode()); digest.update(path.read_bytes())
         _VERIFIER_SHA = digest.hexdigest()
     return _VERIFIER_SHA
 
@@ -138,6 +181,9 @@ class CaseRegistry:
             # A case cannot silently acquire a second result under this plan.
             self.store._publish(path,canonical({'schema':1,'plan_sha256':self.plan_id,
                                                'case_id':case_id,'result_id':result_id}))
+            # Record the check just made; artifacts are write-once and the lock is still held.
+            *_,receipt=self._indexed(case_id,path)
+            self._write_receipt(path,receipt)
         return result_id
 
     def get(self,case_id):
@@ -148,6 +194,22 @@ class CaseRegistry:
             self.verified.move_to_end(case_id)
             return deepcopy(value)
         if not path.exists():return None
+        index,result,task,snapshot,receipt=self._indexed(case_id,path)
+        if self.use_receipts and self._read_receipt(self._receipt_path(path))==receipt:
+            completion=self.store.read(result['stage_completion_id'],'stage_completion')['identity']
+        else:
+            completion,_=self._verify(case_id,task,result['stage_completion_id'],legacy_read=True)
+            snapshot.verify_unchanged()
+            self._write_receipt(path,receipt)
+        value={'result_id':index['result_id'],'task':task,
+               'completion_id':result['stage_completion_id'],'completion':completion}
+        self.verified[case_id]=(deepcopy(value),snapshot)
+        # Bound metadata memory too; no score arrays or context tensors are retained.
+        if len(self.verified)>64:self.verified.popitem(last=False)
+        return value
+
+    def _indexed(self,case_id,path):
+        """Read a published case's records and the receipt a full check of them would earn."""
         index=json.loads(path.read_text())
         if index.get('plan_sha256')!=self.plan_id or index.get('case_id')!=case_id:
             raise ValueError('Case index does not belong to this plan')
@@ -165,20 +227,14 @@ class CaseRegistry:
         receipt={'schema':RECEIPT_SCHEMA,'plan_sha256':self.plan_id,'case_id':case_id,
                  'result_id':index['result_id'],'completion_id':result['stage_completion_id'],
                  'verifier_sha256':_verifier_sha256(),'stamps_sha256':_stamps_sha256(snapshot.stamps)}
-        receipt_path=self.receipts/path.name
-        if self.use_receipts and self._read_receipt(receipt_path)==receipt:
-            completion=self.store.read(result['stage_completion_id'],'stage_completion')['identity']
-        else:
-            completion,_=self._verify(case_id,task,result['stage_completion_id'],legacy_read=True)
-            snapshot.verify_unchanged()
-            self.receipts.mkdir(exist_ok=True)
-            _atomic_json(receipt_path,receipt)
-        value={'result_id':index['result_id'],'task':task,
-               'completion_id':result['stage_completion_id'],'completion':completion}
-        self.verified[case_id]=(deepcopy(value),snapshot)
-        # Bound metadata memory too; no score arrays or context tensors are retained.
-        if len(self.verified)>64:self.verified.popitem(last=False)
-        return value
+        return index,result,task,snapshot,receipt
+
+    def _receipt_path(self,path):
+        return self.receipts/f'{_verifier_sha256()[:16]}.{path.name}'
+
+    def _write_receipt(self,path,receipt):
+        self.receipts.mkdir(exist_ok=True)
+        _atomic_json(self._receipt_path(path),receipt)
 
     def indexed_completion(self,case_id):
         """Completion ID recorded when the case was published, without re-verifying it.
