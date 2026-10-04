@@ -13,6 +13,29 @@ from .train_stage import _atomic_json
 from .materialize_task import materialize_task
 from .campaign_recipes import recipes
 from .verification_snapshot import VerificationSnapshot
+import hashlib
+
+# A receipt records that a case passed full verification, keyed by everything the
+# check depended on: plan, result, completion, the verifier's own source code and a
+# digest of the stamps (device, inode, size, mtime, ctime) of every file the check
+# read, including its parents'. A later reader that sees the same digest skips the
+# expensive re-derivation; any changed file, code or plan forces full verification.
+RECEIPT_SCHEMA = 1
+_VERIFIER_SHA = None
+
+
+def _verifier_sha256():
+    global _VERIFIER_SHA
+    if _VERIFIER_SHA is None:
+        digest = hashlib.sha256()
+        for path in sorted(Path(__file__).resolve().parent.glob('*.py')):
+            digest.update(path.name.encode()); digest.update(path.read_bytes())
+        _VERIFIER_SHA = digest.hexdigest()
+    return _VERIFIER_SHA
+
+
+def _stamps_sha256(stamps):
+    return sha(canonical(sorted([str(path), list(stamp)] for path, stamp in stamps.items())))
 
 
 @contextmanager
@@ -40,6 +63,9 @@ class CaseRegistry:
     def __init__(self,store,plan,root,*,resume=False):
         self.store=store;self.root=Path(root);self.plan=plan;self.plan_id=sha(canonical(plan))
         self.verified = OrderedDict()
+        # Readers trust valid receipts; status --verify, cleanup and adoption turn this off.
+        self.use_receipts = True
+        self.receipts = self.root.parent / 'verification-receipts'
         self.nodes={node['id']:node for node in plan['nodes']}
         if len(self.nodes)!=len(plan['nodes']):raise ValueError('Duplicate logical cases')
         if any(parent not in self.nodes or self.nodes[parent]['stage']>=node['stage']
@@ -136,14 +162,30 @@ class CaseRegistry:
         for parent in self.nodes[case_id]['requires']:
             external.extend(self.verified[parent][1].stamps)
         snapshot=VerificationSnapshot(self.store,index['result_id'],external)
-        completion,_=self._verify(case_id,task,result['stage_completion_id'],legacy_read=True)
-        snapshot.verify_unchanged()
+        receipt={'schema':RECEIPT_SCHEMA,'plan_sha256':self.plan_id,'case_id':case_id,
+                 'result_id':index['result_id'],'completion_id':result['stage_completion_id'],
+                 'verifier_sha256':_verifier_sha256(),'stamps_sha256':_stamps_sha256(snapshot.stamps)}
+        receipt_path=self.receipts/path.name
+        if self.use_receipts and self._read_receipt(receipt_path)==receipt:
+            completion=self.store.read(result['stage_completion_id'],'stage_completion')['identity']
+        else:
+            completion,_=self._verify(case_id,task,result['stage_completion_id'],legacy_read=True)
+            snapshot.verify_unchanged()
+            self.receipts.mkdir(exist_ok=True)
+            _atomic_json(receipt_path,receipt)
         value={'result_id':index['result_id'],'task':task,
                'completion_id':result['stage_completion_id'],'completion':completion}
         self.verified[case_id]=(deepcopy(value),snapshot)
         # Bound metadata memory too; no score arrays or context tensors are retained.
         if len(self.verified)>64:self.verified.popitem(last=False)
         return value
+
+    @staticmethod
+    def _read_receipt(path):
+        try:
+            return json.loads(path.read_text())
+        except (FileNotFoundError, ValueError):
+            return None
 
     def parents(self,case_id):
         self._path(case_id)

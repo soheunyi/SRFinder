@@ -357,6 +357,7 @@ def adopt_completed_cases(store, plan, output, source_execution):
         with _owned_run(root, manifest, True):
             source = CaseRegistry(store, plan, old / 'registry', resume=True)
             target = CaseRegistry(store, plan, root / 'registry', resume=True)
+            source.use_receipts = target.use_receipts = False  # adoption re-verifies fully
             adopted, present = [], 0
             for node in sorted(selected_nodes(plan, mine['case_ids']), key=lambda n: n['stage']):
                 if target.get(node['id']) is not None:

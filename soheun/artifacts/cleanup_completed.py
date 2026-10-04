@@ -22,6 +22,7 @@ def prune_completed_case(store, execution, case_id, *, apply=False):
         raise ValueError('Wrong store or undeclared execution case')
     with _owned_run(root,manifest,True):
         registry=CaseRegistry(store,plan,root/'registry',resume=True)
+        registry.use_receipts=False  # full check before deleting working files
         value=registry.get(case_id)
         if value is None:raise ValueError('Case has no verified complete result')
         task=root/'tasks'/case_id
@@ -103,7 +104,8 @@ def prune_completed_case(store, execution, case_id, *, apply=False):
                         report['deleted_paths'].append(row['path'])
                         _atomic_json(previous,report)
                 # Use a fresh verifier: no cached verification can mask missing payloads.
-                checked=CaseRegistry(store,plan,root/'registry',resume=True).get(case_id)
+                fresh=CaseRegistry(store,plan,root/'registry',resume=True);fresh.use_receipts=False
+                checked=fresh.get(case_id)
                 if checked is None or checked['completion_id']!=value['completion_id']:
                     raise ValueError('Permanent receipt changed')
                 report['applied']=True

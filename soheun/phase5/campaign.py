@@ -105,6 +105,7 @@ def main():
             registry_path = args.output / 'registry'
             if registry_path.exists():
                 registry = CaseRegistry(store, plan, registry_path, resume=True)
+                registry.use_receipts = False  # full check; refreshes receipts
                 report['verified_cases'] = sum(registry.get(key) is not None for key in manifest['case_ids'])
             else: report['verified_cases'] = 0
             report['outputs_verified'] = True
