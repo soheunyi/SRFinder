@@ -69,3 +69,19 @@ The positive shift is present before combining models. Compare the mean of five 
 Left: a counterfactual five-member selector A compared with disjoint five-member groups B and C, averaged over role rotations. Middle/right: original 15-member selection, comparing individual base and CR-trained models on identical held-out CR or SR events. The latter panels show binwise predicted 4b weight divided by observed 4b weight, minus one, not CDF residuals. Medians and 10–90% spread across 100 no-smearing mother seeds. The two selection designs differ; the first effect is not established as the cause of the second.
 
 ![Selection-error mechanism diagnostic](selection-mechanism.png)
+
+## Three eta values with matched panel scales
+
+100 null mother seeds at each eta. Left: new five-member selectors, measuring base-ratio differences after selection. Middle/right: the original 15-member regions, measuring predicted physical 4b weight divided by observed weight, minus one, on held-out CR or SR. Five matched individual base and CR models are summarized within each mother. Bands show 10–90% mother-seed spread, not confidence intervals. Corresponding panels use the same y limits across eta. For finite eta, selection uses max log(base ratio / smeared ratio).
+
+### eta = 1.0
+
+![Selection diagnostic, eta 1.0](selection-mechanism-eta-1.0.png)
+
+### eta = 2.0
+
+![Selection diagnostic, eta 2.0](selection-mechanism-eta-2.0.png)
+
+### eta = inf
+
+![Selection diagnostic, eta inf](selection-mechanism-eta-inf.png)
