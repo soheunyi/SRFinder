@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-04",
+  "scope": "Step 2 pilot evidence; production migration and Step 3 validation pending",
+  "figures": [
+    {
+      "key": "paired_loss",
+      "path": "docs/diagnostics/issue-11-deepsets/paired-loss-changes.png",
+      "title": "Paired loss and probability-calibration changes",
+      "sha256": "049fe8c408546e500a78dc84eeced2d9efff77657db550f9b9004893c00ba2b4"
+    },
+    {
+      "key": "baseline_loss",
+      "path": "docs/diagnostics/issue-11-deepsets/baseline-losses.png",
+      "title": "Simple-baseline loss and calibration comparisons",
+      "sha256": "2a720c4a083e5238c3237103751033211c6301b72754a616356ae144c8eb03a8"
+    },
+    {
+      "key": "heatmap_4b",
+      "path": "docs/diagnostics/issue-11-deepsets/psi-base-gamma-4b.png",
+      "title": "4b psi versus base gamma, matched saved heads",
+      "sha256": "414b0fab918e4247948a229b25cee2d0af2e82fcd2ad0860d285793170f6a42b"
+    },
+    {
+      "key": "heatmap_3b",
+      "path": "docs/diagnostics/issue-11-deepsets/psi-base-gamma-3b.png",
+      "title": "3b psi versus base gamma, matched saved heads",
+      "sha256": "a2634460e4bb7fce076e24abc8e0e1abe4d788a7f16541ef7db455e775129ed7"
+    },
+    {
+      "key": "agreement",
+      "path": "docs/diagnostics/issue-11-deepsets/sr-member-agreement.png",
+      "title": "SR member and leave-one-member-out agreement",
+      "sha256": "f2c9f2920c1ab8aa1af6c8b97b33b30c83808980d623e86d88740a18c406293b"
+    },
+    {
+      "key": "full_4b",
+      "path": "docs/diagnostics/issue-11-deepsets/psi-base-gamma-4b-full.png",
+      "title": "4b heatmaps, full observed ranges",
+      "sha256": "838c3c64cd76c6df99a459ea7af048d74547e3553836dbac2ceaf6b4bd9d4499"
+    },
+    {
+      "key": "full_3b",
+      "path": "docs/diagnostics/issue-11-deepsets/psi-base-gamma-3b-full.png",
+      "title": "3b heatmaps, full observed ranges",
+      "sha256": "1b66b3658c414c9f58bb7630f188b92e76fb38a82bb5df68b69ad77b2d4fb564"
+    }
+  ]
+}
