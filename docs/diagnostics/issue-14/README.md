@@ -63,3 +63,9 @@ Each CR member is compared with its matching base member on identical events. Av
 The positive shift is present before combining models. Compare the mean of five individually normalized CDF residuals with the CDF produced by the five-model mean-probability ensemble on the same events. These are different operations, but their observed curves are close.
 
 ![Individual-model residuals versus ensemble residual](individual-versus-ensemble.png)
+
+## Selection-error mechanism diagnostic
+
+Left: a counterfactual five-member selector A compared with disjoint five-member groups B and C, averaged over role rotations. Middle/right: original 15-member selection, comparing individual base and CR-trained models on identical held-out CR or SR events. The latter panels show binwise predicted 4b weight divided by observed 4b weight, minus one, not CDF residuals. Medians and 10–90% spread across 100 no-smearing mother seeds. The two selection designs differ; the first effect is not established as the cause of the second.
+
+![Selection-error mechanism diagnostic](selection-mechanism.png)
