@@ -51,3 +51,15 @@ One mother seed and one CR member per eta, fixed 20-step fine-tuning. Both penal
 Separate pointwise median CDFs over 100 seeds. Their difference need not equal the median paired residual shown in the primary diagnostics. The horizontal coordinate is the observed 4b score quantile within each region.
 
 ![Normalized CDF overlays](cdf-overlays.png)
+
+## Individual models: training CR, held-out CR, and SR
+
+Each CR member is compared with its matching base member on identical events. Average five individual-model residuals within each mother seed, then plot the median and 10–90% range across 100 mother seeds. CR validation is excluded from training updates but was used for original checkpoint selection. The larger positive CR-model residual persists on these held-out CR events.
+
+![Individual models: training CR, held-out CR, and SR](member-train-validation-sr.png)
+
+## Individual-model residuals versus ensemble residual
+
+The positive shift is present before combining models. Compare the mean of five individually normalized CDF residuals with the CDF produced by the five-model mean-probability ensemble on the same events. These are different operations, but their observed curves are close.
+
+![Individual-model residuals versus ensemble residual](individual-versus-ensemble.png)
